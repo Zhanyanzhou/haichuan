@@ -583,7 +583,8 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
 
     await page.goto("/admin/editor/home");
     const publishButton = page.locator(".homepage-editor__toolbar-publish");
-    await expect(page.getByTestId("page-review-status")).toHaveText("已发布");
+    await expect(page.getByTestId("page-review-status")).toHaveCount(0);
+    await expect(page.getByLabel("内容语言", { exact: true })).toHaveCount(0);
     await expect(publishButton).toBeEnabled();
     await expect(publishButton).toHaveAttribute(
       "title",
@@ -631,7 +632,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       "选款中心",
       "珠宝定制",
       "关于海川",
-      "预约咨询",
+      "联系海川",
     ]);
   });
 
@@ -775,9 +776,18 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       { width: 390, height: 844 },
     ]) {
       await page.setViewportSize(viewport);
-      const locale = page.getByLabel("内容语言", { exact: true });
+      await expect(page.getByLabel("内容语言", { exact: true })).toHaveCount(0);
+      const toolbar = page.locator(".homepage-editor__toolbar");
+      const switcher = toolbar.locator(".homepage-editor__viewport-switcher");
+      const toolbarBox = await toolbar.boundingBox();
+      const switcherBox = await switcher.boundingBox();
+      if (!toolbarBox || !switcherBox) throw new Error("顶栏或设备切换缺少几何尺寸");
+      if (viewport.width >= 1025) {
+        const toolbarMid = toolbarBox.x + toolbarBox.width / 2;
+        const switcherMid = switcherBox.x + switcherBox.width / 2;
+        expect(Math.abs(toolbarMid - switcherMid), `${viewport.width} 设备切换应在顶栏中轴`).toBeLessThanOrEqual(12);
+      }
       const publish = page.locator(".homepage-editor__toolbar-publish");
-      await expect(locale).toBeVisible();
       await expect(publish).toBeVisible();
       await expect(publish).toBeEnabled();
       expect(await publish.evaluate((element) => {
@@ -785,12 +795,15 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
         const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
         return hit === element || element.contains(hit);
       })).toBe(true);
-      expect(await page.locator(".homepage-editor__locale-review-controls").evaluate((element) => (
-        element.scrollWidth <= element.clientWidth
-        && Array.from(element.querySelectorAll("select, button, [role='status']")).every(
-          (control) => control.scrollWidth <= control.clientWidth,
-        )
-      ))).toBe(true);
+      const reviewControls = page.locator(".homepage-editor__locale-review-controls");
+      if (await reviewControls.count()) {
+        expect(await reviewControls.evaluate((element) => (
+          element.scrollWidth <= element.clientWidth
+          && Array.from(element.querySelectorAll("select, button, [role='status']")).every(
+            (control) => control.scrollWidth <= control.clientWidth,
+          )
+        ))).toBe(true);
+      }
       await publish.focus();
       await expect(publish).toBeFocused();
       await expect(publish).toHaveCSS("outline-style", "solid");
@@ -1282,6 +1295,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     const remoteDraft = validDraft();
     remoteDraft.puckData.content[0].props.title = "远端编辑者的新草稿";
     remoteDraft.updatedAt = "2026-08-14T00:00:03.000Z";
+    remoteDraft.contentHash = "e".repeat(64);
     const requests = await mockEditorApis(page, {
       valid: true,
       publishFailure: true,
@@ -1321,6 +1335,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     const remoteDraft = validDraft();
     remoteDraft.puckData.content[0].props.title = "确认后加载的远端草稿";
     remoteDraft.updatedAt = "2026-08-14T00:00:03.000Z";
+    remoteDraft.contentHash = "e".repeat(64);
     const requests = await mockEditorApis(page, {
       valid: true,
       publishFailuresBeforeSuccess: 1,
@@ -1520,7 +1535,9 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     });
 
     await page.goto("/admin/editor/home");
-    await page.getByRole("button", { name: "1 项提醒" }).click();
+    const reminder = page.getByRole("button", { name: "1 项提醒" });
+    await expect(reminder).toContainText("标题仍是占位内容");
+    await reminder.click();
     const warningDialog = page.getByRole("dialog", {
       name: "不影响发布的提醒 · 1 项",
     });
@@ -1841,7 +1858,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     },
     {
       pageKey: "contact",
-      pageLabel: "预约咨询",
+      pageLabel: "联系海川",
       width: 390,
       height: 844,
       brandBlock: {
@@ -1849,7 +1866,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
         props: {
           ...validDraft().puckData.content[0].props,
           id: "contact-imported-hero",
-          title: "导入后的预约咨询",
+          title: "导入后的联系海川",
           actionText: "",
           targetType: "none",
           linkUrl: "",

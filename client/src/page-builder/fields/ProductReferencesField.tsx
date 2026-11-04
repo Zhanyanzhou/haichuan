@@ -9,6 +9,7 @@ import {
   type ProductRow,
 } from "../data-sources/productSource";
 import "./ProductReferencesField.css";
+import RouteLoading from "@/components/common/RouteLoading";
 
 interface CategoryOption {
   id: number;
@@ -497,7 +498,7 @@ export default function ProductReferencesField({
           ) : null}
 
           <div className="homepage-editor__product-picker-dialog-results" aria-live="polite" aria-busy={loading}>
-            {loading ? <div className="homepage-editor__product-picker-dialog-state">正在加载商品…</div>
+            {loading ? <RouteLoading scope="panel" label="正在加载商品…" />
               : error ? <div className="homepage-editor__product-picker-dialog-state is-error">{error === "FORBIDDEN" ? "当前账号无权浏览商品，请联系管理员。" : "商品加载失败，原有选择未改变。"}<button type="button" onClick={() => setListRevision((value) => value + 1)}>重新加载</button></div>
               : results.length ? results.map((product) => {
                   const selected = draftActiveCodes.includes(product.code);

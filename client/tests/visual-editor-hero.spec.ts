@@ -85,13 +85,26 @@ test.describe("Hero 所见即所得编辑器（确定性 UI）", () => {
       contentType: "image/svg+xml",
       body: undersizedFixtureSvg,
     }));
+    // 清晰度只按素材库里已测量的原图像素判断；预览加载出的尺寸不算事实。
+    await page.addInitScript(() => {
+      window.localStorage.setItem("haichuan.page-media", JSON.stringify([{
+        url: "/svg/template-hero.svg",
+        type: "image",
+        name: "偏小首屏图",
+        createdAt: "2026-11-01T00:00:00.000Z",
+        displayWidth: 320,
+        displayHeight: 180,
+        metadataStatus: "measured",
+      }]));
+    });
     await page.reload();
 
     const contentPanel = page.getByRole("region", { name: "内容编辑测试区" });
-    await expect(contentPanel.getByRole("alert")).toHaveText(/图片清晰度不足，建议更换更大的图片/);
-    await expect(contentPanel.getByText(/当前 320 × 180/)).not.toBeVisible();
+    await expect(contentPanel.getByRole("alert")).toHaveCount(1);
+    await expect(contentPanel.getByRole("alert")).toContainText(/像素偏低，建议源宽约 \d+/);
+    await expect(contentPanel.getByRole("alert").getByText(/320×180。/)).not.toBeVisible();
     await contentPanel.getByText("查看图片信息").click();
-    await expect(contentPanel.getByText(/当前 320 × 180；建议/)).toBeVisible();
+    await expect(contentPanel.getByRole("alert").getByText(/320×180。/)).toBeVisible();
   });
 
   test("空海报显示可点文字角色，并用预览卡调整实例样式", async ({ page }) => {

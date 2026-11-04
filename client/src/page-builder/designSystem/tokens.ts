@@ -126,8 +126,8 @@ export const DESIGN_SYSTEM_BASE_CSS = `
     --hc-type-display: clamp(28px, 2vw, 56px);
     --hc-type-h2: clamp(28px, 1.9vw, 54px);
     --hc-type-h3: clamp(22px, 2.2vw, 26px);
-    --hc-type-body: clamp(15px, 0.8vw, 22px);
-    --hc-type-caption: clamp(12px, 0.68vw, 17px);
+    --hc-type-body: clamp(16px, 0.8vw, 22px);
+    --hc-type-caption: clamp(13px, 0.68vw, 17px);
   }
 }
 /* 节奏与留白档位:密度决定基准,四档留白做乘数,bleed 通栏不吃纵向节奏 */

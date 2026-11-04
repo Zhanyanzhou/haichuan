@@ -346,17 +346,22 @@ test("根与兄弟容器按 DFS 展示 descriptor 可见摘要，纯导航与返
   expect(await fields.evaluateAll((elements) => elements.map((element) => element.getAttribute("data-page-field-label"))))
     .toEqual(["工艺主图", "工艺标题", "工艺轮播", "预约行动", "推荐商品"]);
 
-  await expect(list.getByRole("button", { name: /工艺标题/ })).toContainText("控件：文字输入");
-  await expect(list.getByRole("button", { name: /工艺标题/ })).toContainText("限制：最小 2 字；最大 36 字");
-  await expect(list.getByRole("button", { name: /工艺标题/ })).toContainText("允许文字样式/间距覆盖");
-  await expect(list.getByRole("button", { name: /工艺标题/ })).toContainText("字号 16–52 像素");
-  await expect(list.getByRole("button", { name: /工艺主图/ })).toContainText("控件：图片选择");
-  await expect(list.getByRole("button", { name: /工艺主图/ })).toContainText("建议 1600 × 1200 像素");
-  await expect(list.getByRole("button", { name: /工艺主图/ })).toContainText("不开放设计覆盖");
-  await expect(list.getByRole("button", { name: /预约行动/ })).toContainText("控件：行动与链接");
-  await expect(list.getByRole("button", { name: /预约行动/ })).toContainText("跳转 https/page");
-  await expect(list.getByRole("button", { name: /推荐商品/ })).toContainText("控件：业务引用");
-  await expect(list.getByRole("button", { name: /工艺轮播/ })).toContainText("控件：结构化内容");
+  // 字段行只显示名称、类型与公开状态；控件、限制和设计覆盖范围由 descriptor 数据属性承载，点击后在规则详情中编辑。
+  const readFieldFacts = (label: string) => list.locator(`[data-page-field-label="${label}"]`).evaluate((element) => ({
+    controlKind: element.getAttribute("data-page-field-control-kind"),
+    validation: JSON.parse(element.getAttribute("data-page-field-validation") ?? "null"),
+    policy: JSON.parse(element.getAttribute("data-page-field-policy") ?? "null"),
+    status: element.querySelector(".template-editor__page-field-row-status")?.textContent ?? "",
+  }));
+  const titleFacts = await readFieldFacts("工艺标题");
+  expect(titleFacts).toMatchObject({ controlKind: "text", validation: { minLength: 2, maxLength: 36 } });
+  expect(titleFacts.policy).toMatchObject({ typography: true, spacing: true, minFontSizePx: 16, maxFontSizePx: 52 });
+  expect(titleFacts.status).toContain("可填写");
+  const imageFacts = await readFieldFacts("工艺主图");
+  expect(imageFacts).toMatchObject({ controlKind: "image", validation: { recommendedWidth: 1600, recommendedHeight: 1200 }, policy: null });
+  expect(await readFieldFacts("预约行动")).toMatchObject({ controlKind: "link", validation: { allowedProtocols: ["https", "page"] } });
+  expect((await readFieldFacts("推荐商品")).controlKind).toBe("product");
+  expect((await readFieldFacts("工艺轮播")).controlKind).toBe("structured");
 
   await selectTemplateObject(page, ids.primaryRegionId);
   await expect(fields).toHaveCount(3);

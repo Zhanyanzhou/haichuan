@@ -952,6 +952,9 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
     const previewTemplateId = "tpl_catalog_preview_share";
     const designWidth = 1200;
     const designHeight = 900;
+    // D.46：目录画板统一按桌面 1440 宽显示，保存的设计宽度只作坐标基准换算高度。
+    const canvasWidth = 1440;
+    const canvasHeight = designHeight * canvasWidth / designWidth;
     const resource = makeResource({
       definition: makeSizedDefinition(previewTemplateId, "目录预览互通", {
         height: designHeight,
@@ -1011,7 +1014,7 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
     await expect.poll(async () => {
       const thumbnail = pageFrame.contentFrame();
       return thumbnail ? thumbnail.locator("html").evaluate(() => innerWidth) : 0;
-    }).toBe(designWidth);
+    }).toBe(canvasWidth);
 
     await expect.poll(async () => {
       const rect = await pageFrame.boundingBox();
@@ -1021,10 +1024,10 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
     }).not.toBeNull();
     const pageRect = (await pageFrame.boundingBox())!;
     const pageClip = (await pageCard.locator(".template-editor__catalog-artboard-stage").boundingBox())!;
-    const expectedScale = Math.min(pageClip.width / designWidth, 220 / designHeight);
-    expect(pageRect.width / pageRect.height, "页面装修目录保持真实比例").toBeCloseTo(designWidth / designHeight, 2);
-    expect(pageRect.width, "页面装修目录宽度同步缩放").toBeCloseTo(designWidth * expectedScale, 0);
-    expect(pageRect.height, "页面装修目录高度同步缩放").toBeCloseTo(designHeight * expectedScale, 0);
+    const expectedScale = Math.min(pageClip.width / canvasWidth, 220 / canvasHeight);
+    expect(pageRect.width / pageRect.height, "页面装修目录保持真实比例").toBeCloseTo(canvasWidth / canvasHeight, 2);
+    expect(pageRect.width, "页面装修目录宽度同步缩放").toBeCloseTo(canvasWidth * expectedScale, 0);
+    expect(pageRect.height, "页面装修目录高度同步缩放").toBeCloseTo(canvasHeight * expectedScale, 0);
     expect(pageRect.x).toBeGreaterThanOrEqual(pageClip.x - 1);
     expect(pageRect.y).toBeGreaterThanOrEqual(pageClip.y - 1);
     expect(pageRect.x + pageRect.width).toBeLessThanOrEqual(pageClip.x + pageClip.width + 1);
@@ -1332,19 +1335,19 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
 
     const checkpoints = [
       {
-        expected: { height: 900, width: 1200 },
+        expected: { height: 1080, width: 1440 },
         heightMode: "aspect-ratio" as const,
         name: HERO_TEMPLATE_NAME,
         templateId: HERO_TEMPLATE_ID,
       },
       {
-        expected: { height: 640, width: 1920 },
+        expected: { height: 640, width: 1440 },
         heightMode: "fixed" as const,
         name: CAMPAIGN_TEMPLATE_NAME,
         templateId: CAMPAIGN_TEMPLATE_ID,
       },
       {
-        expected: { height: 900, width: 1200 },
+        expected: { height: 1080, width: 1440 },
         heightMode: "aspect-ratio" as const,
         name: HERO_TEMPLATE_NAME,
         templateId: HERO_TEMPLATE_ID,

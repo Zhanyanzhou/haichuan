@@ -123,7 +123,7 @@ test.describe("新建方案向导尺寸选择（确定性 UI / route Mock）", (
       const session = await readSession(page);
       expect(session.definition!.metadata.canvasSize).toEqual({ width, height, aspectRatio: width / height });
       expect(session.definition!.nodes[session.definition!.rootNodeId].responsive.desktop.height.mode)
-        .toBe(grows ? "auto" : "fixed");
+        .toBe(grows ? "auto" : "aspect-ratio");
       expect(session.selectedObjectId).toBe(session.definition!.rootNodeId);
       expect(session.definition!.schemaVersion).toBe(3);
       expect(Object.keys(session.definition!.slots).length).toBeGreaterThan(0);
@@ -563,7 +563,8 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
     expect(ratioState.historyPast).toHaveLength(before.historyPast.length + 1);
     expect(ratioState.definition!.nodes[rootId].responsive.desktop.height).toEqual({ mode: "aspect-ratio", ratio: { width: 4, height: 3 } });
     const frame = page.locator("iframe[title$='模板隔离画布']");
-    await expect.poll(() => frame.evaluate((element) => Number.parseFloat((element as HTMLIFrameElement).style.height))).toBe(1440);
+    // 新建空白模板以 1440 宽设计画布起步（D.44），4:3 即 1080 高。
+    await expect.poll(() => frame.evaluate((element) => Number.parseFloat((element as HTMLIFrameElement).style.height))).toBe(1080);
     const ratioWidth = inspector.getByRole("spinbutton", { name: "比例宽", exact: true });
     await ratioWidth.fill("0"); await ratioWidth.press("Enter");
     await expect(ratioWidth).toHaveAttribute("aria-invalid", "true");
@@ -578,14 +579,16 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
     expect(await inspector.evaluate((element) => element.scrollWidth > element.clientWidth + 1)).toBe(false);
     await page.screenshot({ path: testInfo.outputPath(`overall-rules-${width}.png`), fullPage: true });
     await page.getByRole("button", { name: /^移动端模板布局/ }).click();
-    await expect(mode).toHaveValue("aspect-ratio");
-    await mode.selectOption("auto");
+    // 配对画布（D.51）：整体定比例时手机写为“跟随桌面比例（自动对换）”。
+    expect(ratioState.definition!.nodes[rootId].responsive.mobile.height).toEqual({ mode: "auto" });
+    await expect(mode).toHaveValue("auto");
+    await mode.selectOption("fixed");
     const mobile = await readSession(page);
-    expect(mobile.definition!.nodes[rootId].responsive.mobile.height).toEqual({ mode: "auto" });
+    expect(mobile.definition!.nodes[rootId].responsive.mobile.height).toEqual(expect.objectContaining({ mode: "fixed" }));
     expect(mobile.definition!.nodes[rootId].responsive.desktop.height).toEqual(ratioState.definition!.nodes[rootId].responsive.desktop.height);
     const property = inspector.locator('[data-template-design-property="node.height"]');
     await property.getByRole("button", { name: "恢复继承", exact: true }).click();
-    await expect(mode).toHaveValue("aspect-ratio");
+    await expect(mode).not.toHaveValue("fixed");
     expect((await readSession(page)).definition!.nodes[rootId].responsive.mobile.height).toBeUndefined();
     expect(server.writes).toEqual([]);
   });
@@ -906,6 +909,7 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
 
     await (await productionStageAction(page, "交付信息")).click();
     await fillTemplateName(page, "定义已变化的会话核对事实模板");
+    await expect.poll(async () => (await readSession(page)).dirty).toBe(true);
     const changed = await readSession(page);
     expect(changed.dirty).toBe(true);
     expect(changed.productionReviewFacts).toEqual({

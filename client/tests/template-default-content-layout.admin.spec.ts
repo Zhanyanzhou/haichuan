@@ -31,7 +31,8 @@ async function openImageDefaults(page: Page, width: number) {
   });
   await expect(page.locator(`[data-template-default-content="${target.slotId}"]`)).toBeAttached();
   await page.evaluate((detail) => window.dispatchEvent(new CustomEvent("template-editor:open-default-content", { detail })), target);
-  await expect(page.getByRole("region", { name: "模板默认内容", exact: true })).toBeVisible();
+  // 图片默认内容是 details；打开默认内容事件会展开它。
+  await expect(page.locator(`details[data-template-default-content="${target.slotId}"]`)).toHaveAttribute("open", "");
   return server;
 }
 
@@ -85,7 +86,7 @@ for (const width of [1600, 390]) {
   test(`默认图片属性在 ${width}px 保持媒体流与标准开关尺寸`, async ({ page }, testInfo) => {
     const server = await openImageDefaults(page, width);
     const before = (await readSession(page)).definition;
-    const section = page.getByRole("region", { name: "模板默认内容", exact: true });
+    const section = page.locator("details[data-template-default-content]");
     const link = section.getByRole("button", { name: "或粘贴图片链接", exact: true });
     await link.scrollIntoViewIfNeeded();
     const metrics = await section.evaluate((element) => {

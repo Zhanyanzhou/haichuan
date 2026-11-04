@@ -1,6 +1,17 @@
 import { expect, test, type Page } from "@playwright/test";
 import { installNewTemplateServer, makePublished, makeResource, openTemplateDesignWithoutDraft, readSession, saveTemplate } from "./fixtures/template-authoring-main-route";
 
+const DESKTOP_CANVAS_WIDTH = 1440;
+
+// 图片默认内容是默认收起的 details；先展开再操作其中字段。
+async function openDefaultContent(page: Page, slotId: string) {
+  const defaults = page.locator(`details[data-template-default-content="${slotId}"]`);
+  await expect(defaults).toBeVisible();
+  if (!(await defaults.evaluate((element) => (element as HTMLDetailsElement).open))) await defaults.locator(":scope > summary").click();
+  await expect(defaults).toHaveAttribute("open", "");
+  return defaults;
+}
+
 // 自有 API Mock；直接装入合法生成结果，隔离并行变化的创建选项 UI。
 // `canvas` 只在需要另一种画幅的用例里传：画幅是生成时写进定义的，测试中途改不回来。
 async function openGenerated(page: Page, canvas?: { width: number; height: number }) {
@@ -216,7 +227,7 @@ test("新增颜色字体共用修改范围；内容共享；关闭替换后裁�
   expect(definition.slots[ids.titleSlot].desktopRules.color).toBe("#123456");
   await select(page, ids.image);
   await expect(page.getByRole("switch", { name: "允许页面裁剪" })).toHaveCount(0);
-  await page.getByRole("button", { name: "设置页面开放范围", exact: true }).click();
+  await (await openDefaultContent(page, ids.imageSlot)).getByRole("button", { name: "设置页面开放范围", exact: true }).click();
   await expect(page.getByRole("tab", { name: "页面开放范围", exact: true })).toHaveAttribute("aria-selected", "true");
   const crop = page.getByRole("switch", { name: "可调整画面焦点", exact: true });
   if (!(await crop.isChecked())) await crop.click();
@@ -270,14 +281,16 @@ test("背景图片槽位保留唯一默认图片入口，容器仍可配置 CSS 
     useTemplateEditorSession.getState().executeCommand({ type: "update-definition", label: "背景槽位兼容前置", update: (next: { slots: Record<string, { semanticRole: string }> }) => { next.slots[slotId].semanticRole = "backgroundImage"; } });
   }, ids.imageSlot);
   await select(page, ids.image);
-  const defaults = page.getByRole("region", { name: "模板默认内容" });
+  const defaults = await openDefaultContent(page, ids.imageSlot);
   await expect(defaults.getByRole("button", { name: "或粘贴图片链接" })).toHaveCount(1);
   await expect(defaults.getByRole("button", { name: "本页图片", exact: true })).toBeVisible();
   await expect(defaults.locator("[data-media-field]")).toHaveAttribute("data-has-page-media", "true");
-  await expect(page.getByRole("region", { name: "模板颜色与背景" }).getByRole("button", { name: "或粘贴图片链接" })).toHaveCount(0);
+  // 背景图片入口已并入“背景与边框”属性组。
+  const appearance = page.locator('[data-template-property-group="外观"]');
+  await expect(appearance.getByRole("button", { name: "或粘贴图片链接" })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("image-properties-1600.png"), fullPage: true });
   await select(page, ids.root);
-  await expect(page.getByRole("region", { name: "模板颜色与背景" }).getByRole("button", { name: "或粘贴图片链接" })).toHaveCount(1);
+  await expect(appearance.getByRole("button", { name: "或粘贴图片链接" })).toHaveCount(1);
   await page.screenshot({ path: testInfo.outputPath("root-size-first-1600.png"), fullPage: true });
 });
 
@@ -295,7 +308,7 @@ test("图片默认内容只保存地址和说明，属性含本页图片入口",
     });
   }, { slotId: ids.imageSlot });
   await select(page, ids.image);
-  const defaults = page.getByRole("region", { name: "模板默认内容" });
+  const defaults = await openDefaultContent(page, ids.imageSlot);
   await expect(defaults.getByRole("button", { name: "本页图片", exact: true })).toBeVisible();
   await defaults.getByRole("button", { name: "图片链接" }).click();
   await defaults.getByPlaceholder("输入图片 URL；清空后确认 = 删除图片").fill("/uploads/page-assets/new.jpg");
@@ -334,7 +347,7 @@ test("模板默认图片可直接选择服务端共享素材", async ({ page }) 
   }));
 
   await select(page, ids.image);
-  const defaults = page.getByRole("region", { name: "模板默认内容" });
+  const defaults = await openDefaultContent(page, ids.imageSlot);
   await defaults.getByRole("button", { name: "本页图片", exact: true }).click();
   await defaults.getByRole("button", { name: `使用素材：${sharedAsset.name}` }).click();
 
@@ -461,9 +474,11 @@ test("模板库按真实画幅自适应完整预览，并以只读放大入口�
       });
     }, shape);
     await expect(card.locator(".template-editor__catalog-dimensions")).toHaveCount(0);
-    await expect(card.locator("[data-template-catalog-preview-shell]")).toHaveAttribute("data-preview-source-size", `${shape.width}x${shape.height}`);
+    // D.46：桌面画板统一按 1440 px 排版，保存的设计宽度只作坐标基准，高度按比例换算。
+    const sourceHeight = Math.round(DESKTOP_CANVAS_WIDTH * shape.height / shape.width);
+    await expect(card.locator("[data-template-catalog-preview-shell]")).toHaveAttribute("data-preview-source-size", `${DESKTOP_CANVAS_WIDTH}x${sourceHeight}`);
     await expect(card.locator("[data-template-catalog-preview-shell]")).toHaveAttribute("data-preview-status", "ready");
-    expect(await thumbnail.locator("html").evaluate(() => innerWidth), `${shape.name}先按真实设计视口排版`).toBe(shape.width);
+    expect(await thumbnail.locator("html").evaluate(() => innerWidth), `${shape.name}先按统一桌面画板排版`).toBe(DESKTOP_CANVAS_WIDTH);
     await expect.poll(async () => {
       const rect = await frame.boundingBox();
       const clip = await card.locator('.template-editor__catalog-artboard-stage').boundingBox();
@@ -472,33 +487,26 @@ test("模板库按真实画幅自适应完整预览，并以只读放大入口�
     }).not.toBeNull();
     const rect = (await frame.boundingBox())!;
     const clip = (await card.locator('.template-editor__catalog-artboard-stage').boundingBox())!;
-    const scrollable = shape.name === "超长页面";
     await expect(card.locator("[data-template-catalog-preview-shell]"))
-      .toHaveAttribute("data-preview-thumbnail-mode", scrollable ? "top" : "overview");
-    const expectedScale = scrollable
-      ? clip.width / shape.width
-      : Math.min(clip.width / shape.width, 220 / shape.height);
+      .toHaveAttribute("data-preview-thumbnail-mode", "overview");
+    const maxHeight = Number(await card.locator("[data-template-catalog-preview-shell]").getAttribute("data-preview-thumbnail-max-height"));
+    const expectedScale = Math.min(clip.width / DESKTOP_CANVAS_WIDTH, maxHeight / sourceHeight);
     expect(rect.width / rect.height, `${shape.name}保持真实比例`).toBeCloseTo(shape.width / shape.height, 2);
-    expect(rect.width, `${shape.name}宽度同步缩放`).toBeCloseTo(shape.width * expectedScale, 0);
-    expect(rect.height, `${shape.name}高度同步缩放`).toBeCloseTo(shape.height * expectedScale, 0);
+    expect(rect.width, `${shape.name}宽度同步缩放`).toBeCloseTo(DESKTOP_CANVAS_WIDTH * expectedScale, 0);
+    expect(rect.height, `${shape.name}高度同步缩放`).toBeCloseTo(sourceHeight * expectedScale, 0);
     expect(rect.x + rect.width / 2, `${shape.name}水平居中`).toBeCloseTo(clip.x + clip.width / 2, 0);
     expect(rect.x).toBeGreaterThanOrEqual(clip.x - 1);
     expect(rect.x + rect.width).toBeLessThanOrEqual(clip.x + clip.width + 1);
-    if (scrollable) {
-      expect(rect.y, `${shape.name}从滚动视窗顶部开始`).toBeCloseTo(clip.y, 0);
-      expect(rect.height, `${shape.name}保留完整可滚动几何`).toBeGreaterThan(clip.height);
-      expect(clip.height, `${shape.name}使用固定目录视窗`).toBeCloseTo(220, 0);
-    } else {
-      expect(rect.y + rect.height / 2, `${shape.name}垂直居中`).toBeCloseTo(clip.y + clip.height / 2, 0);
-      expect(rect.y).toBeGreaterThanOrEqual(clip.y - 1);
-      expect(rect.y + rect.height).toBeLessThanOrEqual(clip.y + clip.height + 1);
-    }
+    expect(rect.y + rect.height / 2, `${shape.name}垂直居中`).toBeCloseTo(clip.y + clip.height / 2, 0);
+    expect(rect.y).toBeGreaterThanOrEqual(clip.y - 1);
+    expect(rect.y + rect.height).toBeLessThanOrEqual(clip.y + clip.height + 1);
     observedHeights.set(shape.name, clip.height);
   }
   expect(observedHeights.get("超宽横幅")).toBeLessThan(observedHeights.get("普通横版")!);
   expect(observedHeights.get("普通横版")).toBeLessThan(observedHeights.get("方形小尺寸")!);
   expect(observedHeights.get("方形小尺寸")).toBeCloseTo(observedHeights.get("方形大尺寸")!, 0);
-  expect(observedHeights.get("超长页面")).toBeCloseTo(220, 0);
+  expect(observedHeights.get("竖版")).toBeLessThanOrEqual(observedHeights.get("超长页面")!);
+  expect(observedHeights.get("超长页面")).toBeLessThanOrEqual(221);
 
   const sessionBeforePreview = await readSession(page);
   const previewButton = card.getByRole("button", { name: `放大预览：${sessionBeforePreview.definition!.name}`, exact: true });
@@ -510,7 +518,7 @@ test("模板库按真实画幅自适应完整预览，并以只读放大入口�
   await expect.poll(() => detailScroller.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
   await dialog.getByRole("button", { name: "100%", exact: true }).click();
   const detailFrame = dialog.locator('iframe[data-template-catalog-viewport="desktop"]');
-  await expect.poll(async () => (await detailFrame.boundingBox())?.width ?? 0).toBeCloseTo(1200, 0);
+  await expect.poll(async () => (await detailFrame.boundingBox())?.width ?? 0).toBeCloseTo(DESKTOP_CANVAS_WIDTH, 0);
   await expect.poll(() => detailScroller.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
   await expect(dialog.locator("[data-template-catalog-preview-shell]")).toHaveAttribute("data-preview-status", "ready");
   await expect(dialog.locator(".template-editor__catalog-preview-issue")).toHaveText("素材未配置");
@@ -678,14 +686,14 @@ test("模板设计卡片实时镜像当前草稿，而不是同身份的线上�
   }, { slotId: prepared.titleSlot });
   const thumbnail = activeCard.locator("iframe[data-template-catalog-viewport]").contentFrame();
   await expect(activeCard.locator(".template-editor__catalog-dimensions")).toHaveCount(0);
-  expect(await thumbnail.locator("html").evaluate(() => innerWidth)).toBe(1600);
+  expect(await thumbnail.locator("html").evaluate(() => innerWidth)).toBe(DESKTOP_CANVAS_WIDTH);
   await expect(thumbnail.getByText("当前草稿标题", { exact: true })).toHaveCount(0);
   await expect(thumbnail.getByText("线上版本标题", { exact: true })).toHaveCount(0);
   await expect(activeCard.locator(".template-editor__catalog-draft-state")).toHaveText("有未保存修改");
   await expect(activeCard.locator('[data-template-catalog-preview-shell]')).toHaveAttribute("data-preview-status", "ready");
   await activeCard.getByRole("button", { name: /放大预览/ }).click();
   const detail = page.getByRole("dialog", { name: /放大预览/ });
-  await expect(detail.locator(".template-editor__catalog-dimensions")).toHaveText("桌面端 · 1600 × 1000 px · 固定高度");
+  await expect(detail.locator(".template-editor__catalog-dimensions")).toHaveText("桌面端 · 1440 × 900 px · 固定高度");
   await expect(detail.locator(".template-editor__catalog-preview-dialog-summary"))
     .toContainText("草稿预览 · 已发布 · v1 · 有未保存修改");
   await expect(detail.locator("iframe[data-template-catalog-viewport]").contentFrame().getByText("当前草稿标题", { exact: true })).toBeVisible();

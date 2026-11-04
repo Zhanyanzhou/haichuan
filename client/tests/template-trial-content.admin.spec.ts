@@ -385,8 +385,11 @@ test("试排图片侧栏与画布按当前设备复用 4:3、适配和焦点且�
     await expect(sidePreviewFrame).toHaveCSS("aspect-ratio", "4 / 3");
     await expect(sidePreview).toHaveCSS("object-fit", entry.desktop.fit);
     await expect(sidePreview).toHaveCSS("object-position", entry.desktop.position);
-    await expect(trial.getByRole("status", { name: "图片信息" }))
-      .toContainText(`${entry.width} × ${entry.height}`);
+    // 试排图只在本次会话内存里，没有已测量的原图像素，不能宣称清晰度足够。
+    const trialFacts = trial.getByRole("status", { name: "图片信息" });
+    await expect(trialFacts).toContainText("画框 4:3");
+    await expect(trialFacts).toContainText("原图像素待检测");
+    await expect(trialFacts).toContainText("还不能确认原图是否够用");
     const canvasImage = page.frameLocator("iframe.template-editor__viewport-frame")
       .locator(`[data-template-node-id="${entry.node.nodeId}"] img`);
     await expect(canvasImage).toHaveCSS("object-fit", entry.desktop.fit);

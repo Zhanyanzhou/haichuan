@@ -4812,6 +4812,18 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   cursor: not-allowed;
 }
 
+.homepage-editor__toolbar:not(.template-editor__toolbar)
+  .template-editor__toolbar-state {
+  flex: 0 0 auto;
+  max-width: none;
+}
+
+.homepage-editor__toolbar:not(.template-editor__toolbar)
+  .template-editor__toolbar-state > span {
+  overflow: visible;
+  text-overflow: clip;
+}
+
 .template-editor__workspace-context .template-editor__toolbar-state {
   flex: 0 1 auto;
   width: auto;
@@ -6732,6 +6744,10 @@ button.template-editor__toolbar-state:focus-visible {
   scrollbar-width: thin;
   scrollbar-color: #B8BEC1 transparent;
 }
+/* 适应画布时宽度已经落在可见区域内，横向滚动条只会再吃掉一截首屏。 */
+.homepage-editor__canvas-scroll.is-fit {
+  overflow-x: clip;
+}
 .homepage-editor__canvas-scroll::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -8064,9 +8080,14 @@ button.template-editor__toolbar-state:focus-visible {
 
 .homepage-editor__layer-select .homepage-editor__layer-summary {
   color: var(--adm-muted);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
-  line-height: 15px;
+  line-height: 18px;
+}
+.homepage-editor__layer-item:hover .homepage-editor__layer-select,
+.homepage-editor__layer-item:focus-within .homepage-editor__layer-select,
+.homepage-editor__layer-item.is-active .homepage-editor__layer-select {
+  padding-right: 64px;
 }
 .homepage-editor__layer-select > .homepage-editor__layer-grip {
   position: absolute !important;
@@ -8187,7 +8208,10 @@ button.template-editor__toolbar-state:focus-visible {
     overflow: hidden;
   }
 
-  .homepage-editor__layer-select {
+  .homepage-editor__layer-select,
+  .homepage-editor__layer-item:hover .homepage-editor__layer-select,
+  .homepage-editor__layer-item:focus-within .homepage-editor__layer-select,
+  .homepage-editor__layer-item.is-active .homepage-editor__layer-select {
     min-width: 0;
     padding-inline: 6px;
   }
@@ -8778,7 +8802,7 @@ button.template-editor__toolbar-state:focus-visible {
   }
 }
 
-/* 普通窗口画布偏紧时允许收成 40px 导轨；1440 起恢复满宽并隐藏收起控件。 */
+/* 普通窗口按页面装修档位收成 40px 导轨。模板设计只在 1440 以下允许收起。 */
 @media (min-width: 1025px) and (max-width: 1439px) {
   .homepage-editor__body:has(> .homepage-editor__library--collapsed) {
     --editor-library-span: 40px;
@@ -8792,12 +8816,68 @@ button.template-editor__toolbar-state:focus-visible {
 }
 
 @media (min-width: 1440px) {
-  .homepage-editor__body .homepage-editor__library-collapse-btn,
-  .homepage-editor__body .homepage-editor__library-expand-btn,
-  .homepage-editor__body .homepage-editor__structure-collapse-btn,
-  .homepage-editor__body .homepage-editor__structure-expand-btn,
-  .homepage-editor__body .homepage-editor__inspector-collapse-btn,
-  .homepage-editor__body .homepage-editor__inspector-expand-btn {
+  .homepage-editor__body:not(.template-editor__body):has(> .homepage-editor__library--collapsed) {
+    --editor-library-span: 40px;
+  }
+  .homepage-editor__body:not(.template-editor__body):has(> .homepage-editor__structure-workspace.is-collapsed) {
+    --editor-structure-span: 40px;
+  }
+  .homepage-editor__body:not(.template-editor__body):has(> .homepage-editor__right-workspace.is-inspector-collapsed) {
+    --editor-inspector-span: 40px;
+  }
+}
+
+@media (min-width: 1025px) {
+  .homepage-editor__body:not(.template-editor__body) .homepage-editor__library--collapsed .homepage-editor__library-expand-btn,
+  .homepage-editor__body:not(.template-editor__body) .homepage-editor__structure-workspace.is-collapsed .homepage-editor__structure-expand-btn,
+  .homepage-editor__body:not(.template-editor__body) .homepage-editor__right-workspace.is-inspector-collapsed .homepage-editor__inspector-expand-btn {
+    width: 32px !important;
+    height: auto !important;
+    min-height: 72px;
+    display: inline-flex !important;
+    flex-direction: column;
+    gap: 8px;
+    margin: 8px auto;
+    padding: 8px 0;
+  }
+
+  .homepage-editor__body:not(.template-editor__body) .homepage-editor__library--collapsed .homepage-editor__compact-panel-label,
+  .homepage-editor__body:not(.template-editor__body) .homepage-editor__structure-workspace.is-collapsed .homepage-editor__compact-panel-label,
+  .homepage-editor__body:not(.template-editor__body) .homepage-editor__right-workspace.is-inspector-collapsed .homepage-editor__compact-panel-label {
+    display: block;
+    max-height: 96px;
+    overflow: hidden;
+    font-size: 12px;
+    line-height: 16px;
+    letter-spacing: 0.08em;
+    writing-mode: vertical-rl;
+  }
+
+  .homepage-editor__body:not(.template-editor__body):has(> .homepage-editor__library.is-dock-overlay) {
+    --editor-library-span: 40px;
+  }
+  .homepage-editor__body:not(.template-editor__body) > .homepage-editor__library.is-dock-overlay {
+    width: var(--editor-library-dock-width);
+    z-index: 40;
+    box-shadow: 12px 0 30px rgb(24 26 27 / 18%);
+  }
+  .homepage-editor__body:not(.template-editor__body):has(> .homepage-editor__structure-workspace.is-dock-overlay) {
+    --editor-structure-span: 40px;
+  }
+  .homepage-editor__body:not(.template-editor__body) > .homepage-editor__structure-workspace.is-dock-overlay {
+    width: var(--editor-structure-dock-width);
+    z-index: 36;
+    box-shadow: 12px 0 28px rgb(24 26 27 / 16%);
+  }
+}
+
+@media (min-width: 1440px) {
+  .template-editor__body .homepage-editor__library-collapse-btn,
+  .template-editor__body .homepage-editor__library-expand-btn,
+  .template-editor__body .homepage-editor__structure-collapse-btn,
+  .template-editor__body .homepage-editor__structure-expand-btn,
+  .template-editor__body .homepage-editor__inspector-collapse-btn,
+  .template-editor__body .homepage-editor__inspector-expand-btn {
     display: none !important;
   }
 }
@@ -10041,11 +10121,22 @@ button.template-editor__toolbar-state:focus-visible {
   border-color: #181a1b;
   outline: 0;
 }
-.homepage-editor__inspector .homepage-editor__properties-actions > button[data-issue-kind="warning"] {
+.homepage-editor__properties-actions > .homepage-editor__properties-status {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.homepage-editor__properties-actions > button[data-issue-kind="warning"] {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(280px, 100%);
+  height: 30px;
+  overflow: hidden;
   color: var(--adm-muted);
   border-color: var(--adm-line);
   background: transparent;
   font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .homepage-editor__inspector .homepage-editor__properties-actions > button[data-issue-kind="warning"]:hover,
 .homepage-editor__inspector .homepage-editor__properties-actions > button[data-issue-kind="warning"]:focus-visible {
@@ -10903,6 +10994,54 @@ button.template-editor__toolbar-state:focus-visible {
     .homepage-editor__toolbar:not(.template-editor__toolbar)
     .homepage-editor__mock-mode-badge {
     display: none;
+  }
+}
+
+/* 尺寸写在按钮的 title 里。窄于 1680px 时不再把「1440 × 900」排进顶栏，避免挤掉发布状态。 */
+@media (max-width: 1679px) {
+  .admin-header__editor-slot .homepage-editor__viewport-switcher button small {
+    display: none;
+  }
+}
+
+/* 与模板设计同一条中轴：左右两列等宽，设备切换落在画布正上方。
+ * 主要操作停在右列，不再绝对定位到中部盖住「移动端」。 */
+@media (min-width: 1025px) {
+  .admin-header__editor-slot
+    .homepage-editor__toolbar:not(.template-editor__toolbar) {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  }
+
+  .admin-header__editor-slot
+    .homepage-editor__toolbar:not(.template-editor__toolbar)
+    > .homepage-editor__viewport-switcher {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: center;
+    z-index: 2;
+  }
+
+  .admin-header__editor-slot
+    .homepage-editor__toolbar:not(.template-editor__toolbar)
+    > .homepage-editor__toolbar-left-context {
+    grid-column: 1;
+    grid-row: 1;
+    justify-self: start;
+    max-width: 100%;
+  }
+
+  .admin-header__editor-slot
+    .homepage-editor__toolbar:not(.template-editor__toolbar)
+    > .homepage-editor__toolbar-actions {
+    position: static;
+    top: auto;
+    right: auto;
+    grid-column: 3;
+    grid-row: 1;
+    justify-self: end;
+    min-width: 0;
+    max-width: 100%;
+    transform: none;
   }
 }
 

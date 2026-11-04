@@ -69,9 +69,9 @@ const CONTENT_EDGE = 8;
 /** 手机分栏改单列后的行距。 */
 const MOBILE_ROW_GAP = 24;
 
-// ── UI_GUIDE 第 2.6 节行长上限（正文每行 ≤ 45 字）换算出的框宽 ────────────────
-/** 正文 15px × 45 字。 */
-const BODY_LINE_MAX = 680;
+// ── 行长上限换算出的框宽 ────────────────────────────────────────────────────
+/** 区块叙事正文 16px × 40 字（D.41 / D.44）。 */
+const BODY_LINE_MAX = 640;
 /** 单列展开时标题的行长上限，避免 1920 下一行拉满画布。 */
 const HEADING_MAX = 900;
 const SUBTITLE_MAX = 760;
@@ -123,8 +123,7 @@ function slotTextRules(
       fontRole: scale.fontRole,
       fontSize: px(scale.desktop),
       fontWeight: scale.weight,
-      // 第 2.6 节：标题行距 1.2～1.4（字越大越紧），正文 1.6～2.0（字越小越松）。
-      lineHeight: isHeading ? 1.3 : level === "caption" ? 1.6 : 1.7,
+      lineHeight: scale.lineHeight,
       textAlign: "left",
       overflow: "wrap",
       color: MAIN_INK,
@@ -291,7 +290,7 @@ interface MasterSpec {
 const PAGE_HERO: MasterSpec = {
   role: "page-hero",
   title: "页面首屏",
-  description: "全幅主视觉承载页面级标题与主行动；手机把文字移到图下，不做叠加。",
+  description: "全幅主视觉承载页面级标题与主行动；手机把文字排进图片槽位下半。",
   layoutType: "全幅图片 + 内容覆盖",
   desktopRatio: "16:9",
   visualRole: "primary-stage",
@@ -332,7 +331,7 @@ const PAGE_HERO: MasterSpec = {
         semanticRole: "backgroundImage",
         // 铺满画布、无圆角（文档第 3 节 M1 槽位表）。
         desktop: { placement: { x: 0, y: 0, width: 1, height: 1, zIndex: 0 }, radius: px(0), width: "fill" },
-        // 手机是流式：图回到文档流顶部，文字落在图下。
+        // 手机先回到文档流，再由渲染器把文字收进这张图的槽位。
         mobile: { placement: null, width: "fill" },
       }),
       {
@@ -426,7 +425,7 @@ const PAGE_HERO: MasterSpec = {
 const COLLECTION_STORY: MasterSpec = {
   role: "collection-story",
   title: "系列叙事",
-  description: "一个系列加一张氛围副图；桌面左图右文，手机改为上图下文。",
+  description: "一个系列加一张氛围副图；桌面左图右文，手机文字排进主图槽位。",
   layoutType: "左图右文",
   desktopRatio: "3:2",
   visualRole: "feature-stage",

@@ -415,9 +415,8 @@ async function captureAndVerifyReviewToolbar(
     { width: 390, height: 844 },
   ]) {
     await page.setViewportSize(viewport);
-    const locale = page.getByLabel("内容语言", { exact: true });
+    await expect(page.getByLabel("内容语言", { exact: true })).toHaveCount(0);
     const publish = page.locator(".homepage-editor__toolbar-publish");
-    await expect(locale).toBeVisible();
     await expect(publish).toBeVisible();
     await expect(publish).toBeEnabled();
     const publishBox = await publish.boundingBox();
@@ -431,12 +430,15 @@ async function captureAndVerifyReviewToolbar(
       const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
       return hit === element || element.contains(hit);
     }), `${viewport.width}×${viewport.height} 发布中心点不得被其他工具覆盖`).toBe(true);
-    expect(await page.locator(".homepage-editor__locale-review-controls").evaluate((element) => (
-      element.scrollWidth <= element.clientWidth
-      && Array.from(element.querySelectorAll("select, button, [role='status']")).every(
-        (control) => control.scrollWidth <= control.clientWidth,
-      )
-    )), `${viewport.width}×${viewport.height} 语言与审核文字不得裁切`).toBe(true);
+    const reviewControls = page.locator(".homepage-editor__locale-review-controls");
+    if (await reviewControls.count()) {
+      expect(await reviewControls.evaluate((element) => (
+        element.scrollWidth <= element.clientWidth
+        && Array.from(element.querySelectorAll("select, button, [role='status']")).every(
+          (control) => control.scrollWidth <= control.clientWidth,
+        )
+      )), `${viewport.width}×${viewport.height} 审核文字不得裁切`).toBe(true);
+    }
     await publish.focus();
     await expect(publish).toBeFocused();
     await expect(publish).toHaveCSS("outline-style", "solid");
@@ -2450,10 +2452,10 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     );
     for (const preview of [
       {
-        buttonName: "桌面端布局（1920 × 1200）",
+        buttonName: "桌面端布局（1440 × 900）",
         device: "desktop",
         direction: "row",
-        viewportLabel: "1920 × 1200",
+        viewportLabel: "1440 × 900",
       },
       {
         buttonName: "移动端布局（390 × 844）",

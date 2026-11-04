@@ -86,11 +86,20 @@ test.describe("站点发布资料入口（自有 API Mock）", () => {
     let uploads = 0;
     await page.route("**/api/upload/image", (route) => {
       uploads += 1;
-      return route.fulfill({ json: { code: 200, data: { url: `/uploads/page-assets/test-qr-${uploads}.png` } } });
+      return route.fulfill({ json: { code: 200, data: {
+        id: uploads, url: `/uploads/page-assets/test-qr-${uploads}.png`, publicEligibility: { eligible: true },
+      } } });
     });
+    // 加好友码按素材库记录核对公开授权；读回时按地址查找已上传素材。
+    await page.route("**/api/upload/media?*", (route) => route.fulfill({ json: { code: 200, data: {
+      list: Array.from({ length: uploads }, (_, index) => ({
+        id: index + 1, url: `/uploads/page-assets/test-qr-${index + 1}.png`, publicEligibility: { eligible: true },
+      })),
+      total: uploads,
+    } } }));
     await page.route("**/api/upload/media/preview-by-storage-key?*", (route) => route.fulfill({ contentType: "image/png", body: png }));
     await page.goto("/admin/site-content");
-    await expect(page.getByText("请上传公司微信提供的加好友码，非付款码。保存后立即出现在前台联系页，留空则不显示。素材公开授权沿用媒体库。")).toBeVisible();
+    await expect(page.getByText("请上传公司微信提供的加好友码，非付款码。上传后需要先确认可公开使用，再保存；未确认前联系页不会显示这张图。")).toBeVisible();
     const chooseImage = async (label: string) => {
       const chooser = page.waitForEvent("filechooser");
       await page.getByRole("button", { name: label, exact: true }).click();
