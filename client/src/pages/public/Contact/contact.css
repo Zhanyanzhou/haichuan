@@ -118,13 +118,13 @@
 .contact-methods__qr {
   position: relative;
   display: grid;
-  place-items: start;
-  width: min(220px, 100%);
-  aspect-ratio: auto;
-  margin-block: 24px 16px;
-  padding: 0;
-  border: 0;
-  background: transparent;
+  place-items: center;
+  width: min(264px, 100%);
+  aspect-ratio: 1;
+  margin-block: 28px 20px;
+  padding: 12px;
+  border: 1px solid var(--hc-line);
+  background: #fff;
 }
 
 .contact-methods__qr--empty {
@@ -145,8 +145,8 @@
 
 .contact-methods__qr img {
   display: block;
-  width: min(220px, 100%);
-  height: auto;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
 }
 

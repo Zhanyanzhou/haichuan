@@ -11,15 +11,24 @@ import {
   dynamicTemplateVersionKey,
 } from "../../src/page-builder/dynamic-template-instance";
 import type { TemplateDefinitionV2 } from "../../src/page-builder/template-definition";
+import { PublicImageFactsProvider } from "../../src/page-builder/runtime/publicImageFacts";
 import "../../src/styles/globals.css";
+
+const TEST_HERO_UPLOAD = "/uploads/test-hero.png";
+const testHeroImageFacts = {
+  [TEST_HERO_UPLOAD]: {
+    displayWidth: 2880,
+    displayHeight: 1620,
+  },
+} as const;
 
 const rendererDocument: PuckDocument = {
   content: [{
     type: "首屏主视觉",
     props: {
       id: "hero-only-renderer",
-      desktopImage: "/uploads/test-hero.png",
-      mobileImage: "/uploads/test-hero.png",
+      desktopImage: TEST_HERO_UPLOAD,
+      mobileImage: TEST_HERO_UPLOAD,
       altText: "首屏测试图",
       eyebrow: "HERO TEST",
       title: "首屏模板测试",
@@ -344,38 +353,40 @@ const emptyFixedBeforeVisibleDynamicDocument = dynamicPrimaryDocument([
 
 createRoot(document.getElementById("root")!).render(
   <MemoryRouter>
-    <div data-renderer-fixture="fixed-hero">
-      <PuckDocumentRenderer data={rendererDocument} />
-    </div>
-    <div data-renderer-fixture="fixed-hero-without-image">
-      <PuckDocumentRenderer data={emptyHeroDocument} />
-    </div>
-    <div data-renderer-fixture="multiple-fixed-heroes">
-      <PuckDocumentRenderer data={multipleHeroDocument} />
-    </div>
-    <div data-renderer-fixture="dynamic-without-image">
-      <PuckDocumentRenderer data={dynamicImageDocument(false)} />
-    </div>
-    <div data-renderer-fixture="dynamic-with-image">
-      <PuckDocumentRenderer data={dynamicImageDocument(true)} />
-    </div>
-    <div data-renderer-fixture="hidden-dynamic-before-visible-dynamic">
-      <PuckDocumentRenderer data={hiddenDynamicBeforeVisibleDynamicDocument} />
-    </div>
-    <div data-renderer-fixture="desktop-only-before-mobile-visible">
-      <PuckDocumentRenderer data={desktopOnlyBeforeMobileVisibleDocument} />
-    </div>
-    <div data-renderer-fixture="mobile-hidden-heading-before-visible-heading">
-      <PuckDocumentRenderer data={mobileHiddenHeadingBeforeVisibleHeadingDocument} />
-    </div>
-    <div data-renderer-fixture="empty-fixed-before-visible-dynamic">
-      <PuckDocumentRenderer data={emptyFixedBeforeVisibleDynamicDocument} />
-    </div>
-    <div data-renderer-fixture="unsupported-public">
-      <PuckDocumentRenderer data={unsupportedHeroDocument} />
-    </div>
-    <div data-renderer-fixture="unsupported-preview">
-      <PuckDocumentRenderer data={unsupportedHeroDocument} mode="preview" />
-    </div>
+    <PublicImageFactsProvider facts={testHeroImageFacts}>
+      <div data-renderer-fixture="fixed-hero">
+        <PuckDocumentRenderer data={rendererDocument} />
+      </div>
+      <div data-renderer-fixture="fixed-hero-without-image">
+        <PuckDocumentRenderer data={emptyHeroDocument} />
+      </div>
+      <div data-renderer-fixture="multiple-fixed-heroes">
+        <PuckDocumentRenderer data={multipleHeroDocument} />
+      </div>
+      <div data-renderer-fixture="dynamic-without-image">
+        <PuckDocumentRenderer data={dynamicImageDocument(false)} />
+      </div>
+      <div data-renderer-fixture="dynamic-with-image">
+        <PuckDocumentRenderer data={dynamicImageDocument(true)} />
+      </div>
+      <div data-renderer-fixture="hidden-dynamic-before-visible-dynamic">
+        <PuckDocumentRenderer data={hiddenDynamicBeforeVisibleDynamicDocument} />
+      </div>
+      <div data-renderer-fixture="desktop-only-before-mobile-visible">
+        <PuckDocumentRenderer data={desktopOnlyBeforeMobileVisibleDocument} />
+      </div>
+      <div data-renderer-fixture="mobile-hidden-heading-before-visible-heading">
+        <PuckDocumentRenderer data={mobileHiddenHeadingBeforeVisibleHeadingDocument} />
+      </div>
+      <div data-renderer-fixture="empty-fixed-before-visible-dynamic">
+        <PuckDocumentRenderer data={emptyFixedBeforeVisibleDynamicDocument} />
+      </div>
+      <div data-renderer-fixture="unsupported-public">
+        <PuckDocumentRenderer data={unsupportedHeroDocument} />
+      </div>
+      <div data-renderer-fixture="unsupported-preview">
+        <PuckDocumentRenderer data={unsupportedHeroDocument} mode="preview" />
+      </div>
+    </PublicImageFactsProvider>
   </MemoryRouter>,
 );

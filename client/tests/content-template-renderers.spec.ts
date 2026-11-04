@@ -99,7 +99,7 @@ test("公开 Renderer 只渲染首屏合同并保留真实渲染标记", async (
   await expect(fixture.locator('[data-content-template="hero"]')).toHaveCount(1);
   await expect(fixture.locator("img")).toHaveAttribute(
     "srcset",
-    "/uploads/test-hero.png?width=480 480w, /uploads/test-hero.png?width=800 800w, /uploads/test-hero.png?width=1200 1200w, /uploads/test-hero.png?width=1680 1680w, /uploads/test-hero.png?width=2400 2400w, /uploads/test-hero.png?width=2880 2880w",
+    "/uploads/test-hero.png?width=480&rv=2 480w, /uploads/test-hero.png?width=800&rv=2 800w, /uploads/test-hero.png?width=1200&rv=2 1200w, /uploads/test-hero.png?width=1680&rv=2 1680w, /uploads/test-hero.png?width=2400&rv=2 2400w, /uploads/test-hero.png?width=2880&rv=2 2880w",
   );
   await expect(fixture.locator("img")).toHaveAttribute("sizes", "100vw");
 });

@@ -14,7 +14,6 @@ import StaleDocumentNotice from "@/page-builder/runtime/StaleDocumentNotice";
 import { PublicPageFallback } from "@/page-builder/runtime/PublishedPageDecoration";
 import { getPublishedPageReadiness } from "@/page-builder/runtime/publishedPageReadiness";
 import type { PuckDocument } from "@/page-builder/runtime/PuckDocumentRenderer";
-import RouteLoading from "@/components/common/RouteLoading";
 import {
   buildResponsiveUploadsDerivedUrl,
   buildResponsiveUploadsSrcSet,
@@ -213,12 +212,36 @@ export function HomeFirstFold({ data }: { data?: PuckDocument | null }) {
           </div>
         </div>
       ) : hero.image ? null : (
-        <RouteLoading
+        <div
           data-home-loading-status="true"
-          scope="region"
-          surface="public"
-          label="首页内容正在准备"
-        />
+          role="status"
+          aria-live="polite"
+          style={{
+            display: "grid",
+            minHeight: "max(620px, 100svh)",
+            placeItems: "center",
+            padding: "clamp(112px, 14vw, 180px) 24px 72px",
+          }}
+        >
+          <div
+            style={{
+              display: "grid",
+              justifyItems: "center",
+              gap: 18,
+              color: "#5F6568",
+            }}
+          >
+            <span
+              style={{
+                fontSize: 12,
+                fontWeight: 400,
+                lineHeight: 1.7,
+              }}
+            >
+              首页内容正在准备
+            </span>
+          </div>
+        </div>
       )}
     </section>
   );

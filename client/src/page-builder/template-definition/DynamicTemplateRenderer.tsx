@@ -2110,7 +2110,7 @@ function RenderNode({
           pointerEvents: "none" as const,
         } : visualCollapse && mode === "editor" ? {
           minHeight: "2.5rem",
-          outline: "1px dashed #8A9194",
+          outline: "1px dashed #6E7477",
           outlineOffset: "2px",
         } : {}),
         ...(splitHeroColumn ? {

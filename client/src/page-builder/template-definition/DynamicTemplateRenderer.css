@@ -64,12 +64,12 @@
 .hc-dynamic-template[data-template-surface="editor"] .hc-dynamic-template__empty-slot {
   min-height: 2.5rem;
   padding: 4px;
-  outline: 1px dashed #8A9194;
+  outline: 1px dashed #6E7477;
   outline-offset: 2px;
 }
 
 .hc-dynamic-template[data-template-surface="editor"] [data-template-pair-group="true"] > [data-template-slot-id] {
-  outline: 1px solid #8A9194;
+  outline: 1px solid #6E7477;
   outline-offset: 2px;
 }
 
