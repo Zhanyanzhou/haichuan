@@ -1,0 +1,33 @@
+---
+description: 海川项目上下文与设计任务路由；引用共享规范和技能，防止公开页面、后台界面与模板编辑要求混用。
+alwaysApply: true
+---
+
+# 海川项目上下文路由
+
+本文件只适配 Cursor 的发现入口，不新增产品、设计、授权或验证规则。共同入口是 `AGENTS.md`；实施按 `WORKFLOW.md` 最小启动，技术边界按 `PROJECT_RULES.md`，不全量加载无关文档。
+
+## 先理解当前任务
+
+- 按用户本轮目标和指定参考定位要改变的用户结果、页面与对象；补充和纠正要求属于当前目标的更新，不能继续用旧理解代替。
+- 检查、评审与实现的授权边界只认 `AGENTS.md` 和 `WORKFLOW.md` §2。对“简约、高级、优化”等描述，先结合目标对象、现有界面与批准规范判断；重大品牌或产品取舍仍按共同规则处理。
+- 既有未提交修改、未保存内容及当前运行任务的保护，按 `AGENTS.md`；不得为加载本规则重置、清理、重建项目或中断其他任务。
+
+## 按对象读取共享来源
+
+- **客户公开页面的布局、排版、响应式与交互**：读 `docs/PROJECT_GUARDRAILS.md`、`docs/UI_GUIDE.md` 和 `.agents/skills/taste-skill/SKILL.md`。摄影、Hero、系列专题的艺术方向才追加 `.agents/skills/luxury-visual/SKILL.md`，其生图边界仍按该技能执行。
+- **管理后台的工具界面、表单、列表及属性面板体验**：读 `docs/UI_GUIDE.md` 附录 A、`docs/ADMIN_COPY_GUIDE.md`、`docs/ADMIN_INCREMENTAL_DEVELOPMENT.md`；后台内嵌公开内容预览只对预览内容应用前台规范。
+- **店铺装修、母模板、Puck 编辑器与 Renderer**：从 `AGENTS.md` §2、`WORKFLOW.md` §3 进入 `docs/page-builder/store-decoration.md`、`docs/page-builder/section-template-standard.md`、`docs/page-builder/template-creation-rules.md` 的相关章节；模板结构与编辑合同不能由通用视觉 Skill 替代。功能生命周期和已批准取舍按需核对 `docs/DECISIONS.md` 的相关编号。
+- **实现 Figma 设计**：先读 `.agents/skills/figma-design-to-code/SKILL.md`，按其工具与前置技能要求执行。
+- **浏览器验收**：按需读 `.agents/skills/playwright-testing/SKILL.md`，可用 `playwright` MCP 在隔离测试浏览器中复现、检查 DOM/尺寸并获取桌面与手机宽度截图；同一页面不混用多套浏览器控制。默认无用户登录态，不自动导入现有浏览器会话；后台鉴权、草稿和写入仍按原授权边界。完成声明按 `.agents/skills/verification-before-completion/SKILL.md`，视口检查不冒充真机或业务闭环验收，未验证部分如实说明。
+- **性能、控制台和网络诊断**：有对应任务或异常证据时使用 `chrome-devtools` MCP，在其独立测试浏览器中检查请求、错误及性能记录。保留关闭使用统计和 CrUX 外发的配置，不连接用户当前浏览器或导入登录态；与 Playwright 分工，不让两套工具同时控制同一页面。开发态 Trace 不作为生产性能或完整业务验收结论。
+- **外部依赖的 API、用法与版本兼容性**：相关时调用 `context7` 的库解析与文档查询工具，并对照项目已安装版本；查询只包含必要的公开技术问题，不发送密钥或业务数据。不可用时说明缺口并核对官方资料，不能把文档查询代替本地验证。
+
+项目技能内容只维护在 `.agents/skills/`。Cursor 支持直接发现该目录；技能相关时读取原始技能文件，不复制正文到规则、另装一套同名技能或把所有技能强制加载。
+
+## 移动端模板故障的处理入口
+
+- 用户只报告“移动端模板有问题”时，按 `AGENTS.md` 和 `WORKFLOW.md` 先诊断；这句话本身不等于授权重做模板。核对具体模板、观察宽度、异常现象及编辑/预览/保存状态，从目标差异和可复现证据开始；现象仍无法确定时只询问最必要的信息。
+- 先读 `.agents/skills/systematic-debugging/SKILL.md`，区分设备/断点/预览宽度状态、图片来源与比例、内容显隐和实际 Renderer 布局；这些是排查方向，不能未经取证就当作根因。
+- 已授权修复时，按共同流程在已定位原因处做最小完整修复。没有证据，不批量改写所有模板、两端布局、尺寸或素材回退，不把缺手机素材直接解释为必须强裁桌面图；相关策略从现行合同与决定核对。
+- 按 `WORKFLOW.md` §5 验证原问题和受影响路径：对照手机与桌面，区分编辑器、预览与公开渲染；涉及设备切换、保存或继承时再覆盖对应状态。出现新增问题先定位与本次改动的关系，不靠扩大修改范围或回退未知用户修改继续试错。不能以类型或构建通过代替界面验收。

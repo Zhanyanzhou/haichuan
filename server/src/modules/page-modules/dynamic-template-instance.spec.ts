@@ -12,7 +12,7 @@ import {
   dynamicTemplateVersionKey,
   validateDynamicTemplateInstance,
 } from "./dynamic-template-instance";
-import { definitionFixture } from "./dynamic-template-test-fixture";
+import { definitionFixture, mediaSideDefinitionFixture } from "./dynamic-template-test-fixture";
 import { calculateDynamicTemplateDefinitionChecksum } from "./dynamic-template-definition-integrity";
 import { PageModulesService } from "./page-modules.service";
 import { makeFormalPageMetadata } from "./page-modules.spec-fixtures";
@@ -207,6 +207,70 @@ test("可选图片兼容保留 alt 的旧清空值，必填图片仍明确阻断
   assert.equal(required.issues.some((issue) => issue.message.includes("图片地址无效")), false);
 });
 
+test("图片已含标题是可选布尔，缺省仍按现有页面通过", () => {
+  const absent = validateDynamicTemplateInstance(instanceProps(), definitionFixture());
+  assert.equal(absent.issues.length, 0);
+
+  const finished = validateDynamicTemplateInstance(
+    instanceProps({ imageCarriesCopy: true }),
+    definitionFixture(),
+  );
+  assert.equal(finished.issues.length, 0);
+
+  const invalid = validateDynamicTemplateInstance(
+    instanceProps({ imageCarriesCopy: "yes" }),
+    definitionFixture(),
+  );
+  assert.ok(invalid.issues.some((issue) => issue.field === "imageCarriesCopy"));
+});
+
+test("页面图片位置只接受模板声明过的设置与左右两个取值", () => {
+  const declared = mediaSideDefinitionFixture();
+
+  assert.equal(validateDynamicTemplateInstance(instanceProps(), declared).issues.length, 0);
+  assert.equal(
+    validateDynamicTemplateInstance(instanceProps({ pageSettings: { mediaSide: "end" } }), declared).issues.length,
+    0,
+  );
+
+  const undeclared = validateDynamicTemplateInstance(
+    instanceProps({ pageSettings: { mediaSide: "end" } }),
+    definitionFixture(),
+  );
+  assert.ok(undeclared.issues.some((issue) => issue.pathSuffix === ".pageSettings.mediaSide"));
+
+  const badValue = validateDynamicTemplateInstance(instanceProps({ pageSettings: { mediaSide: "left" } }), declared);
+  assert.ok(badValue.issues.some((issue) => issue.message.includes("只能选左或右")));
+
+  const unknownKey = validateDynamicTemplateInstance(instanceProps({ pageSettings: { colorScheme: "dark" } }), declared);
+  assert.ok(unknownKey.issues.some((issue) => issue.pathSuffix === ".pageSettings.colorScheme"));
+
+  const notObject = validateDynamicTemplateInstance(instanceProps({ pageSettings: "end" }), declared);
+  assert.ok(notObject.issues.some((issue) => issue.field === "pageSettings"));
+});
+
+test("完成稿的手机图和桌面图都进入素材校验", () => {
+  const definition = definitionFixture();
+  addComplexSlot(definition, "image", "ImageSlot", "image");
+  const result = validateDynamicTemplateInstance(instanceProps({
+    imageCarriesCopy: true,
+    contentBySlotId: {
+      slot_heading: "页面填写的标题",
+      slot_image: {
+        src: "/uploads/desktop.jpg",
+        alt: "戒面",
+        mobileSrc: "/uploads/mobile.jpg",
+      },
+    },
+  }), definition);
+
+  assert.equal(result.issues.length, 0);
+  assert.deepEqual(result.assets.map((asset) => asset.url), [
+    "/uploads/desktop.jpg",
+    "/uploads/mobile.jpg",
+  ]);
+});
+
 test("页面实例稳定身份与整体显隐状态遵循 V2 合同", () => {
   const result = validateDynamicTemplateInstance(instanceProps({
     instanceId: "包含空格的实例",
@@ -274,6 +338,7 @@ test("页面实例构图覆盖只允许母模板授权节点与安全范围", ()
           textAlign: "center",
           marginTopPx: 16,
           marginBottomPx: 24,
+          visuallyCollapsed: true,
         },
       },
     },
@@ -497,8 +562,8 @@ test("成熟内容模板页面实例提取素材与稳定业务引用，且不�
   const valid = validateDynamicTemplateInstance(instanceProps({ contentBySlotId }), definition);
   assert.deepEqual(valid.issues, []);
   assert.deepEqual(valid.assets, [
-    { slotId: "slot_heroTemplate", url: "https://example.com/hero.jpg" },
-    { slotId: "slot_heroTemplate", url: "https://example.com/hero-mobile.jpg" },
+    { slotId: "slot_heroTemplate", sourceField: "desktopImage", url: "https://example.com/hero.jpg" },
+    { slotId: "slot_heroTemplate", sourceField: "mobileImage", url: "https://example.com/hero-mobile.jpg" },
   ]);
   assert.ok(valid.productCodes.some((reference) => reference.value === "P-900"));
   assert.ok(valid.actions.some((reference) => reference.targetType === "product" && reference.value === "P-900"));
@@ -649,8 +714,8 @@ test("页面实例构图覆盖拒绝结构节点、按钮字号与文字槽图�
   const result = validateDynamicTemplateInstance(instanceProps({
     layoutOverridesByNodeId: {
       node_container: { desktop: { widthPercent: 120 } },
-      node_cta: { desktop: { fontSizePx: 24, textAlign: "center", marginTopPx: 16 } },
-      node_heading: { desktop: { objectFit: "cover", focusXPercent: 40 } },
+      node_cta: { desktop: { fontSizePx: 24, textAlign: "center", marginTopPx: 16, visuallyCollapsed: true } },
+      node_heading: { desktop: { objectFit: "cover", focusXPercent: 40, visuallyCollapsed: false } },
     },
   }), definition);
   const messages = result.issues.map((issue) => issue.message);
@@ -660,4 +725,6 @@ test("页面实例构图覆盖拒绝结构节点、按钮字号与文字槽图�
   assert.ok(messages.some((message) => message.includes("cta") && message.includes("上下间距")));
   assert.ok(messages.some((message) => message.includes("主标题") && message.includes("图片适配")));
   assert.ok(messages.some((message) => message.includes("主标题") && message.includes("图片焦点")));
+  assert.ok(messages.some((message) => message.includes("cta") && message.includes("不能在这一端收起文字")));
+  assert.ok(messages.some((message) => message.includes("主标题") && message.includes("不能在这一端收起文字")));
 });

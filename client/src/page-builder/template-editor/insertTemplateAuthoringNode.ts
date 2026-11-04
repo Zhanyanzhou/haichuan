@@ -6,6 +6,7 @@ import {
   type TemplateDefinitionV2,
 } from "../template-definition";
 import { findDynamicTemplateInsertionParentId } from "./dynamicTemplateEditorUtils";
+import { settleEvenWorkGrid } from "./evenWorkGridMaintenance";
 import { placeInsertedTemplateNode } from "./templateInsertionPlacement";
 import { useTemplateEditorSession } from "./templateEditorSession";
 
@@ -93,7 +94,13 @@ export function insertTemplateAuthoringNode(
       request.nodeType,
       request.insertionIndex,
     );
-    placeInsertedTemplateNode(inserted.definition, parentNodeId, inserted.nodeId);
+    if (request.nodeType === "ImageSlot") {
+      const settled = settleEvenWorkGrid(inserted.definition);
+      if (settled !== inserted.definition) inserted.definition = settled;
+      else placeInsertedTemplateNode(inserted.definition, parentNodeId, inserted.nodeId);
+    } else {
+      placeInsertedTemplateNode(inserted.definition, parentNodeId, inserted.nodeId);
+    }
     const applied = session.executeCommand({
       type: "replace-definition",
       label: `添加${getDynamicTemplateNodeRegistryEntry(request.nodeType).label}`,

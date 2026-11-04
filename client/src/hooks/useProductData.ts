@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   productApi,
   categoryApi,
@@ -20,6 +20,36 @@ export interface RealCategory {
   parentId: number | null;
   sortOrder?: number;
   children?: RealCategory[];
+}
+
+type CatalogPageSnapshot = {
+  products: CatalogProduct[];
+  total: number;
+  facets: ProductFacets;
+};
+
+const CATALOG_PAGE_CACHE_LIMIT = 8;
+
+function isCanceledRequest(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === "AbortError") return true;
+  if (typeof error !== "object" || error === null) return false;
+  const code = "code" in error ? String(error.code) : "";
+  const name = "name" in error ? String(error.name) : "";
+  return code === "ERR_CANCELED" || name === "CanceledError" || name === "AbortError";
+}
+
+function rememberCatalogPage(
+  cache: Map<string, CatalogPageSnapshot>,
+  key: string,
+  page: CatalogPageSnapshot,
+) {
+  cache.delete(key);
+  cache.set(key, page);
+  while (cache.size > CATALOG_PAGE_CACHE_LIMIT) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
 }
 
 type PublicProductMedia = {
@@ -330,8 +360,10 @@ export function useProductData(
   const refreshKey = options.refreshKey;
   // query 引用不稳定会导致无限重拉，按值序列化作为 effect 依赖
   const queryKey = query === null ? "__paused__" : JSON.stringify(query);
+  const pageCacheRef = useRef(new Map<string, CatalogPageSnapshot>());
 
   useEffect(() => {
+    const controller = new AbortController();
     let cancelled = false;
     (async () => {
       // null = 暂停商品请求；主目录仍可先取分类树，供 URL 分类展开后代。
@@ -360,10 +392,21 @@ export function useProductData(
         }
         return;
       }
-      // 同一查询已有结果时在后台刷新，不要把选款中心盖回“正在加载”。
-      const keepVisibleResults = dataQueryKey === queryKey && apiProducts !== null;
-      if (!keepVisibleResults) setLoading(true);
-      setError(false);
+      // 删掉关键词时先用上次成功的全部作品，避免新请求被卡住时列表一直停在筛选结果上。
+      const cacheKey = `${refreshKey ?? ""}|${queryKey}`;
+      const cached = pageCacheRef.current.get(cacheKey);
+      if (cached) {
+        setApiProducts(cached.products);
+        setTotal(cached.total);
+        setFacets(cached.facets);
+        setDataQueryKey(queryKey);
+        setError(false);
+        setLoading(false);
+      } else {
+        const keepVisibleResults = dataQueryKey === queryKey && apiProducts !== null;
+        if (!keepVisibleResults) setLoading(true);
+        setError(false);
+      }
       try {
         const params: Record<string, unknown> = Object.fromEntries(
           Object.entries({
@@ -387,7 +430,7 @@ export function useProductData(
           }).filter(([, value]) => value !== undefined),
         );
         const [prodRes, catRes] = await Promise.all([
-          productApi.getPublicList(params),
+          productApi.getPublicList(params, controller.signal),
           loadCategories ? categoryApi.getTree() : Promise.resolve(null),
         ]);
         const data = parsePublicProductPayload(unwrapResponse<unknown>(prodRes));
@@ -407,6 +450,11 @@ export function useProductData(
 
         const mapped = list.map((product) => mapApiProduct(product, categoryById));
         if (!cancelled) {
+          rememberCatalogPage(pageCacheRef.current, cacheKey, {
+            products: mapped,
+            total: data.total,
+            facets: data.facets,
+          });
           setApiProducts(mapped);
           setTotal(data.total);
           setFacets(data.facets);
@@ -416,14 +464,16 @@ export function useProductData(
           }
           setDataQueryKey(queryKey);
         }
-      } catch {
-        if (!cancelled) setError(true);
+      } catch (error) {
+        if (cancelled || isCanceledRequest(error)) return;
+        if (!pageCacheRef.current.has(cacheKey)) setError(true);
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => {
       cancelled = true;
+      controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revision, queryKey, loadCategories, refreshKey]);

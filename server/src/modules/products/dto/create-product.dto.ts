@@ -11,6 +11,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { CreateSkuDto } from './sku.dto';
+import { MaxProductTitleUnits } from '../product-title-length';
 
 export class ProductDetailBlockDto {
   @IsIn(['TEXT', 'IMAGE'], { message: '详情模块类型不正确' })
@@ -39,6 +40,7 @@ export class CreateProductDto {
   @IsString({ message: '商品名称必须是字符串' })
   @IsNotEmpty({ message: '请填写商品名称' })
   @MaxLength(200, { message: '商品名称不能超过200个字符' })
+  @MaxProductTitleUnits()
   name!: string;
 
   @IsString({ message: '货号必须是字符串' })

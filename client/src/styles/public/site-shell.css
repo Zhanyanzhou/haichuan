@@ -1,3 +1,15 @@
+/* 公开页滚动条浮在画面之上，不挤占布局宽度。
+   画布按 1440 / 390 整宽排版；滚动条若占位，16:9 画面会比画布窄一截。 */
+html:has(.editorial-shell),
+html:has(.site-shell) {
+  scrollbar-width: none;
+}
+html:has(.editorial-shell)::-webkit-scrollbar,
+html:has(.site-shell)::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
 /* Inner-site navigation */
 .site-shell {
   display: flex;
@@ -201,6 +213,28 @@
   }
 }
 
+.site-header__bag {
+  position: relative;
+  display: inline-flex;
+}
+.site-header__bag-count {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: #181a1b;
+  color: #f7f8f8;
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 16px;
+  text-align: center;
+}
 .site-header__nav-item svg,
 .site-menu-toggle svg {
   display: block;
@@ -262,6 +296,10 @@
   text-shadow: 0 2px 22px rgba(0, 0, 0, 0.28);
 }
 
+.site-header.is-overlay-light .site-header__bag-count {
+  background: #f7f8f8;
+  color: #181a1b;
+}
 .site-header.is-overlay-light .site-header__logo {
   filter: brightness(0) invert(1) drop-shadow(0 2px 14px rgba(0, 0, 0, 0.22));
 }
@@ -1167,17 +1205,14 @@
 @media (max-width: 420px) {
   .site-header__inner {
     width: calc(100% - 32px);
-    grid-template-columns: 44px minmax(0, 1fr) 88px;
+    /* 与 767px 相同：左右各两枚 44px 图标，列宽相等，品牌才落在视口中线。 */
+    grid-template-columns: 88px minmax(0, 1fr) 88px;
   }
 
   .site-header__left-group {
     left: 16px;
-    width: 44px;
+    width: 88px;
     gap: 0;
-  }
-
-  .site-header__left-group > .site-header__nav-item {
-    display: none;
   }
 
   .site-header__right {
@@ -1476,17 +1511,14 @@
 }
 
 .site-search__product-name {
-  display: -webkit-box;
   width: 100%;
   margin-top: 10px;
-  overflow: hidden;
   color: #181a1b;
   font-size: 13px;
   font-weight: 400;
   line-height: 1.45;
   text-align: center;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  overflow-wrap: break-word;
 }
 
 .site-search__product-price {

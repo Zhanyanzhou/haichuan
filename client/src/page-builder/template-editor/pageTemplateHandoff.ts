@@ -47,7 +47,7 @@ export function describePageTemplateHandoff(input: {
 
   if (input.pageHasBlocks) {
     return {
-      liveStatus: `刚发布的${quoted}${versionLabel} 已定位到模板组件库。正在使用它的页面草稿会自动沿用这一版。请拖到目标位置，或${add.title}。`,
+      liveStatus: `刚发布的${quoted}${versionLabel} 已定位到模板组件库。能保留内容的页面草稿会自动沿用这一版。客户前台仍等发布页面。请拖到目标位置，或${add.title}。`,
       cardAriaLabel: `刚发布的${input.name}版本${input.version}，可拖到目标位置或${add.title}`,
       add,
       focusTarget: "none" as const satisfies PageTemplateHandoffFocus,

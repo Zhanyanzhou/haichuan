@@ -14,6 +14,7 @@
 import {
   buildResponsiveUploadsDerivedUrl,
   buildResponsiveUploadsSrcSet,
+  type PublicImageSourceFacts,
 } from "@/utils/responsiveUploadsImage";
 
 export type MediaSlotViewport = "desktop" | "mobile";
@@ -73,8 +74,9 @@ const DEFAULT_REFERENCE_WIDTH: Record<MediaSlotViewport, number> = {
 export function resolveMediaSlotImage(
   contract: MediaSlotContract,
   src: string | undefined,
+  facts?: PublicImageSourceFacts | null,
 ): ResolvedMediaSlotImage {
-  const srcSet = buildResponsiveUploadsSrcSet(src);
+  const srcSet = buildResponsiveUploadsSrcSet(src, facts);
   const ratio = parseMediaSlotRatio(contract.ratio);
   const width = ratio
     ? contract.referenceWidth ?? DEFAULT_REFERENCE_WIDTH[contract.viewport]

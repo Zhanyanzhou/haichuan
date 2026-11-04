@@ -1,7 +1,7 @@
 /**
  * 自动生成，禁止手改。
  * 语义校验单一源：client/src/page-builder/template-definition/validateTemplateDefinition.ts
- * TemplateDefinition Schema SHA-256：a1917c5eb28c0e039ca161c23695c018cc8b76572c901d3bcdba74165aae4527
+ * TemplateDefinition Schema SHA-256：829234be944299184ba86551c47b16c655861c4f19208950dcdeb7692340c3f0
  */
 
 import {
@@ -23,6 +23,7 @@ import {
   sanitizeContentTemplateDefaultContent,
   sanitizeContentTemplateLayoutData,
 } from "./contentTemplates.generated";
+import { collectTemplatePublishGeometryIssues } from "./publishGeometry.generated";
 import { mergeTemplateResponsiveRecord, resolveTemplateNodeRules, TEMPLATE_CONTENT_BREAKPOINTS } from "./templateResponsive.generated";
 
 const FIXED_PUBLIC_TEXT_EXCLUDED_TYPES = new Set(["image", "product", "collection", "heroTemplate"]);
@@ -998,6 +999,16 @@ function validateMetadata(value: unknown, issues: DynamicTemplateValidationIssue
       message: "visualRole 必须是首屏主舞台、重点内容或辅助内容。",
     });
   }
+  if (value.geometryPolicy !== undefined
+    && value.geometryPolicy !== "paired-canvas"
+    && value.geometryPolicy !== "hero-media-frame") {
+    addIssue(issues, {
+      level: "error",
+      code: "INVALID_GEOMETRY_POLICY",
+      path: "metadata.geometryPolicy",
+      message: "geometryPolicy 只能是 paired-canvas 或 hero-media-frame。",
+    });
+  }
   if (value.headerCompatibility !== undefined) {
     const items = value.headerCompatibility;
     if (!Array.isArray(items)
@@ -1013,6 +1024,7 @@ function validateMetadata(value: unknown, issues: DynamicTemplateValidationIssue
       });
     }
   }
+  if (value.pageSettings !== undefined) validatePageSettingsDeclarationShape(value.pageSettings, issues);
   for (const [key, maxItems, maxLength] of [
     [
       "recommendedFor",
@@ -1037,6 +1049,92 @@ function validateMetadata(value: unknown, issues: DynamicTemplateValidationIssue
         message: `${key} 必须是去重且数量受限的文字列表。`,
       });
     }
+  }
+}
+
+const PAGE_SETTING_MEDIA_SIDES = new Set(["start", "end"]);
+
+function validatePageSettingsDeclarationShape(value: unknown, issues: DynamicTemplateValidationIssue[]) {
+  if (!isRecord(value)) {
+    addIssue(issues, {
+      level: "error",
+      code: "INVALID_PAGE_SETTINGS",
+      path: "metadata.pageSettings",
+      message: "页面可选设置必须是对象。",
+    });
+    return;
+  }
+  validateKnownKeys(value, ["mediaSide"], "metadata.pageSettings", issues);
+  if (value.mediaSide === undefined) return;
+  const mediaSide = value.mediaSide;
+  if (!isRecord(mediaSide)) {
+    addIssue(issues, {
+      level: "error",
+      code: "INVALID_PAGE_SETTINGS",
+      path: "metadata.pageSettings.mediaSide",
+      message: "图片位置设置必须说明目标横排容器与模板原样的图片位置。",
+    });
+    return;
+  }
+  validateKnownKeys(mediaSide, ["targetNodeId", "authoredSide"], "metadata.pageSettings.mediaSide", issues);
+  if (!isStableId(mediaSide.targetNodeId)) {
+    addIssue(issues, {
+      level: "error",
+      code: "INVALID_PAGE_SETTINGS",
+      path: "metadata.pageSettings.mediaSide.targetNodeId",
+      message: "图片位置设置必须指向一个节点。",
+    });
+  }
+  if (!PAGE_SETTING_MEDIA_SIDES.has(String(mediaSide.authoredSide))) {
+    addIssue(issues, {
+      level: "error",
+      code: "INVALID_PAGE_SETTINGS",
+      path: "metadata.pageSettings.mediaSide.authoredSide",
+      message: "模板原样的图片位置只能是左（start）或右（end）。",
+    });
+  }
+}
+
+/** D.47：图片位置只对调一个两栏以上的横排容器；目标缺失时页面设置无处生效。 */
+function validatePageSettingTargets(
+  definition: Record<string, unknown>,
+  nodes: Record<string, unknown>,
+  issues: DynamicTemplateValidationIssue[],
+) {
+  const metadata = isRecord(definition.metadata) ? definition.metadata : null;
+  const pageSettings = metadata && isRecord(metadata.pageSettings) ? metadata.pageSettings : null;
+  const mediaSide = pageSettings && isRecord(pageSettings.mediaSide) ? pageSettings.mediaSide : null;
+  if (!mediaSide || !isStableId(mediaSide.targetNodeId)) return;
+  const path = "metadata.pageSettings.mediaSide.targetNodeId";
+  const target = nodes[mediaSide.targetNodeId];
+  if (!isRecord(target)) {
+    addIssue(issues, {
+      level: "error",
+      code: "INVALID_PAGE_SETTING_TARGET",
+      path,
+      message: "图片位置设置指向的容器已不存在；请重新选择或移除这项设置。",
+    });
+    return;
+  }
+  const childIds = Array.isArray(target.childIds) ? target.childIds : [];
+  if (typeof target.slotId === "string" || childIds.length < 2) {
+    addIssue(issues, {
+      level: "error",
+      code: "INVALID_PAGE_SETTING_TARGET",
+      path,
+      message: "图片位置设置只能指向至少含两栏的横排容器。",
+    });
+    return;
+  }
+  const responsive = isRecord(target.responsive) ? target.responsive : null;
+  const desktopRules = responsive && isRecord(responsive.desktop) ? responsive.desktop : {};
+  if (desktopRules.display !== "flex" || (desktopRules.direction ?? "row") !== "row") {
+    addIssue(issues, {
+      level: "warning",
+      code: "PAGE_SETTING_TARGET_NOT_ROW",
+      path,
+      message: "图片位置设置指向的容器在桌面不是横排，页面选择左右时不会改变画面。",
+    });
   }
 }
 
@@ -2030,6 +2128,7 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
       });
     }
   }
+  validatePageSettingTargets(input, nodes, issues);
   const valid = !issues.some((issue) => issue.level === "error");
   return {
     valid,
@@ -2259,20 +2358,7 @@ export function validateDynamicTemplatePublishDefinition(
     }
   }
 
-  const hasVisibleTitle = Object.values(definition.nodes).some((node) => {
-    if (node.hidden || !node.slotId) return false;
-    const slot = definition.slots[node.slotId];
-    return Boolean(slot && (slot.type === "heading" || slot.semanticRole === "title"));
-  });
-  if (Object.keys(definition.slots).length > 0 && !hasVisibleTitle) {
-    addIssue(issues, {
-      level: "error",
-      code: "SECTION_REQUIRES_VISIBLE_TITLE",
-      path: `nodes.${definition.rootNodeId}`,
-      nodeId: definition.rootNodeId,
-      message: "这一节需要一个可见标题。照片里的字不能代替页面标题；被隐藏的标题可以在结构树里重新打开。",
-    });
-  }
+  // D.52：没有可见标题不阻断模板发布。成品图只需要图片槽；标题留空由页面收起。
   for (const slot of Object.values(definition.slots)) {
     if (slot.type !== "image" || slot.semanticRole !== "backgroundImage") continue;
     const mobileRatio = readQualificationRatio(slot.mobileRules?.aspectRatio);
@@ -2291,6 +2377,8 @@ export function validateDynamicTemplatePublishDefinition(
       message: `“${slot.label}”在手机上使用完整放入，外框却比横图更高，会露出深色边。请改为铺满，或让外框跟这张图的比例一致。`,
     });
   }
+
+  issues.push(...collectTemplatePublishGeometryIssues(definition));
 
   const valid = !issues.some((issue) => issue.level === "error");
   return {

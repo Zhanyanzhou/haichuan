@@ -48,21 +48,17 @@ const FIXTURE_PATHS: Record<FixtureVariant, string> = {
  * 第三条路径：**六页真实配方**（`launch-template-set.md` 第 4 节）。
  *
  * 第 7.2 节那五条判的都是跨块结论——"没有两块被做成同一块""每页只有一个主要行动"
- * "相邻两节不重复""手机竖幅只给首屏""推进不分叉"——单看一块量不出来，
+ * "相邻两节不重复""桌面横图的手机全幅按反比例""推进不分叉"——单看一块量不出来，
  * 必须先把六张公开页按配方拼出来。这一面用 `div[data-page]` 而不是 `section`/`main`：
  * 一份文档里出现多个 `main`、或嵌套 `main`，都是非法结构，会以"语义错误"的形态
  * 污染第 7.2-A 条那条"不生成页眉/页脚/主导航"的扫描。
  */
 const FIXTURE_PAGES_PATH = "/__launch-masters-pages";
 /**
- * 第四条路径：**反事实探针**，只服务第 7.2-D 条那半句"手机竖幅只给首屏"。
+ * 第四条路径：**反事实探针**。首屏声明 9:16，桌面是 16:9。
  *
- * 同一块 M1 在同一页上渲染两遍：一遍原样（`as-shipped`），一遍就地给通栏背景槽写上
- * `mobileRules.aspectRatio = "4:5"`（`declared-4x5`）。后者与母版里写
- * `mobileRatio: "4:5"` 精确等价——`DynamicTemplateInstanceInspector.tsx:439` 说明
- * 槽位规则就是按视口二选一，`generateTemplateFromRecipe.ts:204-205` 也是这么生成的。
- * 两遍并排量出来的是"只改母版会发生什么"，再与"母版 + 渲染器一起改"对照，
- * 第 7.2-D 条那条正半句该由谁来满足才有实测依据，而不是靠读代码推断。
+ * 同一块 M1 原样渲染（`as-shipped`）。没有单独手机图时，整节仍按桌面
+ * 16:9 的反比例画出 9:16，图片铺满竖框，不留深色边。
  */
 const FIXTURE_PROBE_PATH = "/__launch-masters-mobile-probe";
 
@@ -140,7 +136,7 @@ const FIXED_CANVAS_ROLES: readonly string[] = ["page-hero"];
  */
 const FIXTURE_IMAGE_SRC = "/uploads/launch-acceptance.jpg";
 const FIXTURE_IMAGE_ROUTE = /\/uploads\/launch-acceptance\.jpg(?:\?|$)/;
-const DERIVED_IMAGE_WIDTHS = [480, 800, 1200, 1680] as const;
+const DERIVED_IMAGE_WIDTHS = [480, 800, 1200, 1680, 2400, 2880] as const;
 
 /**
  * `PB-VISUAL-001` 的三张白名单。
@@ -711,7 +707,7 @@ function textUnion(section: PageSection): Box | null {
 }
 
 /**
- * 同一横排上的等宽卡片，比例约 4:5。第 3.1 节的"商品卡组"是固定三格，
+ * 同一横排上的等宽卡片，比例约 4:5。第 3.1 节的"商品卡组"是一排等宽竖卡，
  * 因此这三条一起才成立：横排 ≥3 张、等宽、竖卡。M3/M4 的副图组各自只有两张，
  * M1/M2 的多图是"主图 + 次级图"，都不是卡组。
  */
@@ -789,13 +785,9 @@ test.describe("首发七母版验收", () => {
         expect(errors, where).toEqual([]);
 
         /**
-         * 唯一放行"向上溢出"的地方是**桌面固定画幅**（`FIXED_CANVAS_ROLES`），
-         * 而且只在压力文案下——正常文案本来就装得下。
-         *
-         * 手机端绝不放行：`PB-RESP-002` 逐字要求「手机不得出现零高度或负坐标」，
-         * 而 390px 下 M1 根是流式排版、高度自适应，压根不存在"画幅装不下"这回事；
-         * 一旦这里漏到手机，就等于把文档明令禁止的现象从断言里删掉了。
-         * 槽位级断言与 `geometry` 必须共用这一个值，否则每修一处就会从下一处冒出来。
+         * 桌面固定画幅只在压力文案下登记向上溢出。
+         * 手机整节已按桌面比例对换：装不下的内容可以画出画幅，但必须仍看得见，
+         * 不能被裁掉，也不能盖住别的槽位。零高度、负坐标和被裁剪仍然失败。
          */
         const allowUpward =
           variant === "stress" && DEVICE_FOR(width) === "desktop" ? [...FIXED_CANVAS_ROLES] : [];
@@ -846,26 +838,30 @@ test.describe("首发七母版验收", () => {
           const overflow: string[] = [];
           for (const section of sections) {
             const role = section.getAttribute("data-role")!;
+            const pairedFrame = Boolean(section.querySelector("[data-template-paired-canvas]"));
             const root = (section.querySelector("[data-template-node-id]") ?? section).getBoundingClientRect();
             const leaves = Array.from(section.querySelectorAll("[data-template-slot-id]"));
+            const reportPastFrame = (label: string, detail: string) => {
+              if (pairedFrame) {
+                if (!overflow.some((item) => item.startsWith(`${label}:`))) overflow.push(`${label}:${detail}`);
+                return;
+              }
+              problems.push(`${label}:出界`);
+            };
             for (const leaf of leaves) {
               const box = leaf.getBoundingClientRect();
               const label = `${role}:${leaf.getAttribute("data-template-slot-id")}`;
               /**
-               * 出界判定里唯一放行的是**固定画幅上的向上溢出**（见 `FIXED_CANVAS_ROLES`）。
-               *
-               * M1 桌面根是 16:9 定高画幅（§3），而 `template-creation-rules.md` 又要求
-               * "长文…必须仍可到达，不能靠裁切必要内容维持画幅"——画幅不能长、内容不能裁，
-               * 两条同时成立时内容只能向上溢出。往下溢出会把主行动推出画幅、往右撑出横向
-               * 滚动条，都比向上溢出更糟。代价是画幅上方那一段够不着，所以这里把**溢出量**
-               * 量出来打进报告，让它在回归里可见，而不是假装没发生。
+               * 桌面固定画幅的压力文案可以向上溢出，并把溢出量写进报告。
+               * 手机对换画幅同样不裁内容：画出画幅的部分记成可见溢出。
+               * 没有对换画幅的区块仍然必须把内容放在自己的盒子里。
                */
               if (box.top < root.top - 1) {
                 if (allowUpward.includes(role)) overflow.push(`${label}:向上溢出 ${Math.round(root.top - box.top)}px`);
-                else problems.push(`${label}:出界`);
+                else reportPastFrame(label, "画幅外可见");
               }
               if (box.left < root.left - 1 || box.right > root.right + 1 || box.bottom > root.bottom + 1) {
-                problems.push(`${label}:出界`);
+                reportPastFrame(label, "画幅外可见");
               }
               // 槽位自己不裁，不等于没被别处裁：最近的一个会裁剪的祖先必须完整包住它。
               // `auto`/`scroll` 是滚动容器，露在外面的内容滚一滚就能看到，不算裁切；
@@ -1130,6 +1126,8 @@ test.describe("首发七母版验收", () => {
       () => (window as unknown as { __launchMasterAlts: Record<string, string> }).__launchMasterAlts,
     );
     const headingSlots = Object.entries(kinds).filter(([, kind]) => kind === "heading").map(([slotId]) => slotId);
+    // 作品网格的标题与说明默认不进入画面，槽位仍在定义里；打开模板属性后才会渲染。
+    const defaultHiddenCopy = (slotId: string) => slotId.startsWith("tpl_acc_creation_grid_") && kinds[slotId] !== "image";
     const actionSlots = Object.entries(kinds)
       .filter(([, kind]) => kind === "button" || kind === "link")
       .map(([slotId]) => slotId);
@@ -1200,7 +1198,7 @@ test.describe("首发七母版验收", () => {
     const heroHeadings = headingSlots.filter((slotId) => slotId.startsWith("tpl_acc_page_hero_"));
     expect(heroHeadings.length, "M1 没有标题槽位").toBeGreaterThan(0);
     expect(h1[0].slot, "h1 不在 M1 的标题槽位上").toBe(heroHeadings[0]);
-    for (const slotId of headingSlots) {
+    for (const slotId of headingSlots.filter((slotId) => !defaultHiddenCopy(slotId))) {
       const own = facts.headings.filter((item) => item.slot === slotId);
       // 用 `div role="heading"` 冒充标题会在这里红——`PB-A11Y-001` 要的是真的标题层级。
       expect(own.length, `${slotId}:标题槽位没有渲染出 h1～h6`).toBe(1);
@@ -1220,7 +1218,7 @@ test.describe("首发七母版验收", () => {
     // 3) 不靠隐藏通过：槽位一个不少，也没有哪个被 `display: none` / `visibility: hidden` 藏起来。
     expect(facts.hidden, "有槽位被藏起来").toEqual([]);
     expect([...new Set(facts.rendered)].sort(), "渲染出来的槽位与母版声明的对不上").toEqual(
-      Object.keys(kinds).sort(),
+      Object.keys(kinds).filter((slotId) => !defaultHiddenCopy(slotId)).sort(),
     );
 
     // 4) 不靠过度缩小通过：字号仍是 `typographyScale.ts` 声明的那套桌面档位。
@@ -1231,7 +1229,7 @@ test.describe("首发七母版验收", () => {
     expect(
       [...new Set(measured.map((item) => item.slot))].sort(),
       "有声明承载文字的槽位没量到字号",
-    ).toEqual(Object.entries(kinds).filter(([, kind]) => textKinds.has(kind)).map(([slotId]) => slotId).sort());
+    ).toEqual(Object.entries(kinds).filter(([slotId, kind]) => textKinds.has(kind) && !defaultHiddenCopy(slotId)).map(([slotId]) => slotId).sort());
     const sizes = new Set(measured.map((item) => item.size));
     const offScale = measured.filter((item) => !DESKTOP_TYPE_STEPS.has(item.size));
     console.log(`[a11y/1440/stress] 字号 ${[...sizes].sort((a, b) => b - a).join(" ")}`);
@@ -1523,12 +1521,12 @@ test.describe("首发七母版验收", () => {
       section.actions.filter((action) => action.kind === "button").map((action) => action.role)))].sort();
     expect(buttonRoles, "主按钮长到了 page-hero / service-invitation 之外").toEqual(["page-hero", "service-invitation"]);
 
-    // 六、M5 是作品网格不是商品网格：同排固定三格，一个行动都没有。
+    // 六、M5 是作品网格不是商品网格：同排固定四格，一个行动都没有。
     //     数的是卡组而不是 `img` 总数——母版里还可能有品牌标之类的非作品图，混进来会数错。
     const grids = sections.filter((section) => section.role === "creation-grid");
     expect(grids.length, "六页配方里没有用到作品网格").toBeGreaterThan(0);
     for (const grid of grids) {
-      expect(cardRow(grid).length, `${grid.page}:作品网格不是同排三格`).toBe(3);
+      expect(cardRow(grid).length, `${grid.page}:作品网格不是同排四格`).toBe(4);
       expect(grid.actions.length, `${grid.page}:作品网格里出现了行动槽`).toBe(0);
     }
   });
@@ -1635,7 +1633,7 @@ test.describe("首发七母版验收", () => {
     }
   });
 
-  test("跨块：手机竖幅只给首屏，其余全幅一律不竖（§7.2-D）", async ({ page }) => {
+  test("跨块：没有手机图时，全幅媒体一律不裁成竖幅（§7.2-D）", async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.route("**/api/**", (route) => route.abort());
@@ -1652,13 +1650,12 @@ test.describe("首发七母版验收", () => {
       }
     }
 
-    // 手机端：竖幅只给首屏。判据是渲染出来的媒体框，不是槽位声明——
-    // 声明了 4:5 却被渲染器摆成 16:9，量框才看得出来。
+    // 手机端：判据是渲染出来的媒体框，不是槽位声明。
+    // 首屏仍声明 9:16；母版没有单独手机图时，共享横图按桌面比例满宽铺满。
     await openPages(page, 390);
     const mobile = await readPages(page);
     const mobileWidth = await page.evaluate(() => document.documentElement.clientWidth);
     expect(errors, "390px").toEqual([]);
-    const portrait = (item: { width: number; height: number }) => item.height > item.width;
     const reading = (section: PageSection) =>
       fullBleedMedia(section, mobileWidth).map((item) => `${item.slot} ${Math.round(item.width)}×${Math.round(item.height)}`).join(" ");
 
@@ -1668,14 +1665,12 @@ test.describe("首发七母版验收", () => {
         const full = fullBleedMedia(section, mobileWidth);
         if (full.length === 0) continue;
         const where = `390px:/${recipe.page}:${section.role}(${reading(section)})`;
-        if (index === 0) {
-          // 首屏是唯一允许竖幅的地方，而且第 3.1 节要求它**就是**竖幅：
-          // 手机端首屏全幅主视觉必须是竖的，横着就是没做成"手机竖幅"。
-          expect(full.some(portrait), `${where}:首屏全幅主视觉不是竖幅`).toBe(true);
-        } else {
-          // 首屏之外一律不竖——竖幅占掉两屏高度、把后面几节推到很深的滚动位置。
-          for (const item of full) {
-            expect(item.height, `${where}:首屏之外的全幅媒体仍是竖幅`).toBeLessThanOrEqual(item.width);
+        // 桌面横图的手机全幅按反比例画出。左右图文的主图仍保持桌面横图，文字排在图下。
+        for (const item of full) {
+          if (section.role === "page-hero" || section.role === "service-invitation") {
+            expect(item.height, `${where}:桌面横图的手机全幅应按反比例画出`).toBeGreaterThan(item.width);
+          } else {
+            expect(item.height, `${where}:左右图文主图被拉成竖幅`).toBeLessThanOrEqual(item.width);
           }
         }
       }
@@ -1731,8 +1726,8 @@ test.describe("首发七母版验收", () => {
     }
   });
 
-  /** §7.2-D 的正向探针：机器声明与 Renderer 最终几何必须同时保持手机 4:5。 */
-  test("探针：首屏母版声明 4:5 且渲染器保留手机竖幅（§7.2-D）", async ({ page }, testInfo) => {
+  /** 槽位声明手机 9:16；没有手机图时整节仍按桌面 16:9 的反比例画出。 */
+  test("探针：首屏母版按桌面 16:9 的反比例画出 9:16（§7.2-D）", async ({ page }, testInfo) => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.route("**/api/**", (route) => route.abort());
@@ -1768,11 +1763,11 @@ test.describe("首发七母版验收", () => {
     expect(declared.key).toBe("heroBackground");
     expect(declared.semanticRole).toBe("backgroundImage");
     expect(declared.desktop).toBe("16:9");
-    expect(declared.mobile).toBe("4:5");
+    expect(declared.mobile).toBe("9:16");
     expect(shipped.slot).toBe(declared.slotId);
-    expect(shipped.fit, "手机 4:5 外框应由共享横图铺满，不能露出深色边").toBe("cover");
-    expect(shipped.frameRatio, "渲染器没有保留手机 4:5 外框").toBe("4 / 5");
-    expect(shipped.height, `${shipped.width}×${shipped.height}:手机首屏媒体框仍然不是竖向`).toBeGreaterThan(shipped.width);
+    expect(shipped.fit, "没有手机图时竖图应铺满自己的外框，不能露出深色边").toBe("cover");
+    expect(shipped.width / shipped.height, "桌面 16:9 的首屏应按 9:16 画出").toBeCloseTo(9 / 16, 1);
+    expect(shipped.height, `${shipped.width}×${shipped.height}:首屏仍是横图`).toBeGreaterThan(shipped.width);
     await page.screenshot({ path: testInfo.outputPath("m1-mobile-390.png"), fullPage: false });
   });
 

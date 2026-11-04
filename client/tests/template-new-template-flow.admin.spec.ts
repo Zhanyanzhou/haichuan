@@ -99,8 +99,8 @@ test.describe("新建方案向导尺寸选择（确定性 UI / route Mock）", (
     { name: "宽幅主视觉", width: 1440, height: 810, grows: false },
     { name: "编辑横版", width: 1440, height: 960, grows: false },
     { name: "均衡横版", width: 1440, height: 1080, grows: false },
-    { name: "方形卡片", width: 1080, height: 1080, grows: false },
-    { name: "竖向卡片", width: 1080, height: 1350, grows: false },
+    { name: "方形卡片", width: 1440, height: 1440, grows: false },
+    { name: "竖向卡片", width: 1440, height: 1800, grows: false },
   ] as const) {
     test(`尺寸预设 ${preset.name} 创建、选中、列表、逻辑尺寸与等比例适配`, async ({ page }, testInfo) => {
       const { name, width, height, grows } = preset;
@@ -202,7 +202,7 @@ test.describe("新建方案向导尺寸选择（确定性 UI / route Mock）", (
     await expect.poll(async () => {
       const result = await readCanvasReadout(page);
       return [result.width, result.height];
-    }).toEqual([4096, 4096]);
+    }).toEqual([1440, 1440]);
     const frame = await page.locator("iframe[title$='模板隔离画布']:visible").boundingBox();
     expect(frame!.width).toBeCloseTo(frame!.height, 1);
     expect(frame!.height).toBeLessThan(800);
@@ -224,11 +224,11 @@ test.describe("新建方案向导尺寸选择（确定性 UI / route Mock）", (
     const card = page.locator(`[data-template-name="${created.templateId}"]`);
     await card.getByRole("button", { name: /^打开未命名模板/ }).click();
     await expect.poll(async () => (await readSession(page)).definition?.metadata.canvasSize)
-      .toEqual({ width: 1080, height: 1350, aspectRatio: 1080 / 1350 });
+      .toEqual({ width: 1440, height: 1800, aspectRatio: 1440 / 1800 });
     await expect.poll(async () => {
       const result = await readCanvasReadout(page);
       return [result.width, result.height];
-    }).toEqual([1080, 1350]);
+    }).toEqual([1440, 1800]);
   });
 
   test("画布尺寸合同拒绝非法值并兼容旧模板", async ({ page }) => {
@@ -1117,11 +1117,12 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
       await waitForMeasurementCycles(page, 2);
       expect((await frame.boundingBox())!.y).toBeLessThan(350);
       const inspector = page.getByRole("complementary", { name: "模板属性", exact: true });
-      const sizeHeading = inspector.getByRole("heading", { name: "尺寸与位置", exact: true });
-      await expect(sizeHeading).toBeVisible();
-      const sizeHeadingBox = await sizeHeading.boundingBox();
-      expect(sizeHeadingBox).not.toBeNull();
-      expect(sizeHeadingBox!.y + sizeHeadingBox!.height).toBeLessThanOrEqual(await page.evaluate(() => window.innerHeight));
+      const sizeGroup = inspector.locator('details[data-template-property-group="尺寸与位置"]');
+      await expect(sizeGroup).toBeVisible();
+      await expect(sizeGroup).not.toHaveAttribute("open");
+      const sizeSummaryBox = await sizeGroup.locator("> summary").boundingBox();
+      expect(sizeSummaryBox).not.toBeNull();
+      expect(sizeSummaryBox!.y + sizeSummaryBox!.height).toBeLessThanOrEqual(await page.evaluate(() => window.innerHeight));
       await page.getByRole("button", { name: "调整间距", exact: true }).click();
       for (const side of ["上", "右", "下", "左"]) {
         const handle = page.getByRole("button", { name: `拖动调整${side}内边距`, exact: true });

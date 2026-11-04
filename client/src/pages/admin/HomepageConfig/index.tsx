@@ -85,6 +85,15 @@ import {
 import { UnifiedTemplateLibrary } from "@/page-builder/template-editor/TemplateEditorLibrary";
 import { notifyPageTemplateInserted } from "@/page-builder/template-editor/templateCatalogEvents";
 import { resolvePublishedTemplateInsertionIndex } from "@/page-builder/template-editor/pageTemplateHandoff";
+import {
+  applyEditorCanvasMetrics,
+  clearPageCanvasTemplatePreview,
+  pageCanvasTemplatePreviewMatches,
+  PageCanvasTemplatePreview,
+  setPageCanvasTemplatePreviewAddHandler,
+  showPageCanvasTemplatePreview,
+  usePageCanvasTemplatePreview,
+} from "./pageCanvasTemplatePreview";
 import WorkspaceCanvasControls from "@/page-builder/template-editor/WorkspaceCanvasControls";
 import { useTemplateWorkspaceController } from "@/page-builder/template-editor/TemplateWorkspaceController";
 import { replaceExactStringValues } from "@/page-builder/inspector/replaceExactStringValues";
@@ -313,7 +322,22 @@ function EditorCanvasShell({
     (state) => state.appState.ui.viewports.current,
   );
   const canvasData = useHomepagePuck((state) => state.appState.data);
-  const headerMode = resolvePageHeaderMode(pageKey, canvasData);
+  const resolvedDefinitions = useResolvedDynamicTemplateDefinitions();
+  // Puck 只保留 root / content / zones，会丢掉 resolvedDynamicTemplates。
+  // 精确模板版本仍在页面会话里。页头是否用浅色字必须读这份缓存，
+  // 否则深色首屏上的菜单、店名和账户会变成深字，叠在画面上看不见。
+  const puckResolved = (canvasData as {
+    [DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY]?: unknown;
+  })[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY];
+  const headerMode = resolvePageHeaderMode(
+    pageKey,
+    puckResolved
+      ? canvasData
+      : {
+          ...canvasData,
+          [DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY]: resolvedDefinitions,
+        },
+  );
   const businessRegionIndex = canvasData.content.findIndex(
     (block: { type?: string }) => block?.type === "业务功能区",
   );
@@ -397,6 +421,7 @@ function EditorCanvasShell({
       <BusinessRegionCanvasProvider
         hasLeadingDecoration={hasLeadingDecoration}
       >
+        {canvasData.content.length === 0 ? <PageCanvasTemplatePreview /> : null}
         {children}
       </BusinessRegionCanvasProvider>
       <EditorCanvasFooter />
@@ -439,7 +464,8 @@ function CanvasBlockAnchor({
   blockId?: string;
   blockType: string;
   children: ReactNode;
-}) {  const anchorRef = useRef<HTMLDivElement>(null);
+}) {
+  const anchorRef = useRef<HTMLDivElement>(null);
   const clearFocusTimer = useRef<number | null>(null);
   const [isFocused, setIsFocused] = useState(false);
   const currentViewport = useHomepagePuck(
@@ -449,6 +475,8 @@ function CanvasBlockAnchor({
   const selectedBlockId = useHomepagePuck(
     (state) => state.selectedItem?.props?.id,
   );
+  const canvasPreview = usePageCanvasTemplatePreview();
+  const canvasContent = useHomepagePuck((state) => state.appState.data.content);
   const editorViewportHeight =
     currentViewport.height === "auto"
       ? RESPONSIVE_CANVAS.desktop.height
@@ -494,43 +522,7 @@ function CanvasBlockAnchor({
 
     // iframe 被内容撑高后，svh/vh 会随 iframe 高度变化，进而使模块再次变高。
     // 使用编辑器当前设备预设，而不是 iframe 的实时高度，保证切换设备后比例仍准确且整页高度稳定。
-    const viewportHeight = Math.max(1, Math.round(editorViewportHeight));
-    anchor.style.setProperty(
-      "--homepage-editor-viewport-height",
-      `${viewportHeight}px`,
-    );
-    anchor.style.setProperty(
-      "--homepage-editor-single-height",
-      `${Math.round(viewportHeight * 1.1)}px`,
-    );
-    anchor.style.setProperty(
-      "--homepage-editor-single-image-height",
-      `${Math.min(860, Math.round(viewportHeight * 0.76))}px`,
-    );
-    anchor.style.setProperty(
-      "--homepage-editor-single-copy-offset",
-      `${Math.round(viewportHeight * 0.22)}px`,
-    );
-    anchor.style.setProperty(
-      "--homepage-editor-double-height",
-      `${Math.round(viewportHeight * 1.18)}px`,
-    );
-    anchor.style.setProperty(
-      "--homepage-editor-double-main-height",
-      `${Math.min(900, Math.max(560, Math.round(viewportHeight * 0.8)))}px`,
-    );
-    anchor.style.setProperty(
-      "--homepage-editor-double-detail-height",
-      `${Math.min(520, Math.max(320, Math.round(viewportHeight * 0.48)))}px`,
-    );
-    anchor.style.setProperty(
-      "--homepage-editor-bleed-height",
-      `${Math.round(viewportHeight * 0.9)}px`,
-    );
-    anchor.style.setProperty(
-      "--homepage-editor-bleed-bottom-padding",
-      `${Math.min(80, Math.max(38, Math.round(viewportHeight * 0.07)))}px`,
-    );
+    applyEditorCanvasMetrics(anchor, editorViewportHeight);
   }, [editorViewportHeight]);
 
   useEffect(() => {
@@ -611,19 +603,27 @@ function CanvasBlockAnchor({
     }, 60);
   };
 
+  const blockIndex = blockId
+    ? (canvasContent ?? []).findIndex((block) => block.props?.id === blockId)
+    : -1;
+  const previewPlacement = canvasPreview && blockIndex === 0 ? "before" : null;
+
   return (
-    <CanvasBlockInteractionBoundary
-      ref={anchorRef}
-      blockId={blockId}
-      blockType={blockType}
-      blockLabel={BLOCK_META[blockType]?.name ?? blockType}
-      focused={isFocused}
-      selected={selectedBlockId === blockId}
-      scrollMarginTop={CANVAS_SCROLL_SPY_TOP_OFFSET * 2 + 32}
-      onSelect={requestCanvasSelection}
-    >
-      {children}
-    </CanvasBlockInteractionBoundary>
+    <>
+      {previewPlacement === "before" ? <PageCanvasTemplatePreview /> : null}
+      <CanvasBlockInteractionBoundary
+        ref={anchorRef}
+        blockId={blockId}
+        blockType={blockType}
+        blockLabel={BLOCK_META[blockType]?.name ?? blockType}
+        focused={isFocused}
+        selected={selectedBlockId === blockId}
+        scrollMarginTop={CANVAS_SCROLL_SPY_TOP_OFFSET * 2 + 32}
+        onSelect={requestCanvasSelection}
+      >
+        {children}
+      </CanvasBlockInteractionBoundary>
+    </>
   );
 }
 
@@ -779,7 +779,11 @@ function PageTemplateLibraryAdapter({
   const insertPublishedDynamicTemplate = useCallback((
     template: PublishedDynamicTemplateResource,
     requestedInsertionIndex?: number,
+    source?: "preview",
   ) => {
+    const insertAtPreview = source === "preview"
+      || (requestedInsertionIndex === undefined && pageCanvasTemplatePreviewMatches(template));
+    clearPageCanvasTemplatePreview();
     const currentDocument = appDataRef.current;
     const resolved = {
       templateId: template.templateId,
@@ -800,11 +804,13 @@ function PageTemplateLibraryAdapter({
       && typeof itemSelectorRef.current.index === "number"
       ? itemSelectorRef.current.index
       : null;
-    const insertionIndex = resolvePublishedTemplateInsertionIndex(
-      content.length,
-      selectedRootIndex,
-      requestedInsertionIndex,
-    );
+    const insertionIndex = insertAtPreview
+      ? 0
+      : resolvePublishedTemplateInsertionIndex(
+        content.length,
+        selectedRootIndex,
+        requestedInsertionIndex,
+      );
     const instance = {
       type: DYNAMIC_TEMPLATE_BLOCK_TYPE,
       props: createDynamicTemplateInstanceProps({
@@ -829,14 +835,14 @@ function PageTemplateLibraryAdapter({
       } as typeof currentDocument,
       recordHistory: true,
     });
-    if (requestedInsertionIndex !== undefined) {
+    if (source !== "preview" && requestedInsertionIndex !== undefined) {
       onRetainLibraryAfterSelection();
     }
     dispatch({
       type: "setUi",
       ui: { itemSelector: { index: insertionIndex, zone: ROOT_ZONE } },
     });
-    if (requestedInsertionIndex === undefined) {
+    if (source === "preview" || requestedInsertionIndex === undefined) {
       onPageActionComplete();
     }
     notifyPageTemplateInserted({
@@ -845,6 +851,18 @@ function PageTemplateLibraryAdapter({
     });
     message.success(`已添加“${publishedTemplateDisplayName(template)}”v${template.version}，可在右侧填写页面内容`);
   }, [dispatch, message, onPageActionComplete, onRetainLibraryAfterSelection]);
+
+  const insertPublishedRef = useRef(insertPublishedDynamicTemplate);
+  insertPublishedRef.current = insertPublishedDynamicTemplate;
+  useEffect(() => {
+    setPageCanvasTemplatePreviewAddHandler((template) => {
+      insertPublishedRef.current(template, undefined, "preview");
+    });
+    return () => {
+      setPageCanvasTemplatePreviewAddHandler(null);
+      clearPageCanvasTemplatePreview();
+    };
+  }, []);
 
   return (
     <UnifiedTemplateLibrary
@@ -857,6 +875,12 @@ function PageTemplateLibraryAdapter({
       pageHasBlocks={pageHasBlocks}
       hasRootSelection={hasRootSelection}
       onInsertPublished={insertPublishedDynamicTemplate}
+      onPreviewPublished={(template) => {
+        showPageCanvasTemplatePreview({
+          template,
+          name: publishedTemplateDisplayName(template),
+        });
+      }}
       onPublishedDragStart={(template) => onTemplateDragStart(
         publishedTemplateDisplayName(template),
         (insertionIndex) => insertPublishedDynamicTemplate(template, insertionIndex),
@@ -2328,6 +2352,12 @@ export default function StoreDecorationWorkbench({
   const canManageTemplates = adminRole === "SUPER_ADMIN";
   const contentLocale: PublicContentLocale = "zh-CN";
   const [workspaceMode, setWorkspaceMode] = useState<EditorWorkspaceMode>("page");
+  useEffect(() => {
+    clearPageCanvasTemplatePreview();
+  }, [pageKey]);
+  useEffect(() => {
+    if (workspaceMode !== "page") clearPageCanvasTemplatePreview();
+  }, [workspaceMode]);
   const pageViewportBeforeTemplateRef = useRef<{ width: number; height: number } | null>(null);
   const pageWorkspaceController = usePageWorkspaceController({
     pageKey,

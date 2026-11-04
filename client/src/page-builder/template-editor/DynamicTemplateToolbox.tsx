@@ -20,6 +20,7 @@ import {
 import { useTemplateEditorSession } from "./templateEditorSession";
 import { addConfiguredTemplateRegion } from "./dynamicTemplateDraftRepository";
 import TemplateLayoutStarterPicker from "./TemplateLayoutStarterPicker";
+import { settleEvenWorkGrid } from "./evenWorkGridMaintenance";
 import { placeInsertedTemplateNode } from "./templateInsertionPlacement";
 
 const PUBLIC_RENDERER_BUILTIN_SLOT_TYPES = new Set([
@@ -131,6 +132,10 @@ function addConfiguredSlot(
       .map((item) => item.key));
     while (keys.has(keyIndex === 1 ? "description" : `description${keyIndex}`)) keyIndex += 1;
     slot.key = keyIndex === 1 ? "description" : `description${keyIndex}`;
+  }
+  if (tool.type === "ImageSlot") {
+    const settled = settleEvenWorkGrid(next);
+    if (settled !== next) return { definition: settled, nodeId: result.nodeId };
   }
   placeInsertedTemplateNode(next, parentId, result.nodeId);
   return { definition: next, nodeId: result.nodeId };

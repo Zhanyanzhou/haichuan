@@ -121,6 +121,18 @@ function withLongText(
     ]));
 }
 
+export function composeTemplatePreviewFillSamples(
+  definition: TemplateDefinitionV2,
+  content: Record<string, unknown>,
+): Record<string, unknown> {
+  const filled = structuredClone(content);
+  for (const slot of Object.values(definition.slots)) {
+    if (slot.type === "image" || !(slot.slotId in filled)) continue;
+    filled[slot.slotId] = createLongTextValue(slot, filled[slot.slotId]);
+  }
+  return withMediaRatios(filled, [], { current: 0 }) as Record<string, unknown>;
+}
+
 function createLongTextValue(slot: DynamicTemplateSlotDefinition, value: unknown) {
   if (SIMPLE_TEXT_SLOT_TYPES.has(slot.type)) {
     return createStressText(getTextLimit(slot, slot.key));

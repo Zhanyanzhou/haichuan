@@ -9,6 +9,7 @@ import { unwrapResponse } from "@/utils/unwrap";
 import { withPublicMediaWidth } from "@/utils/publicMediaWidth";
 import { publicProductPath } from "@/utils/publicProductPath";
 import RouteLoading from "@/components/common/RouteLoading";
+import { clampProductTitle } from "@/utils/productTitleLength";
 
 type SiteSearchDialogProps = {
   open: boolean;
@@ -463,7 +464,7 @@ export default function SiteSearchDialog({ open, onClose }: SiteSearchDialogProp
                           <SecureImage src={work.image} alt="" />
                         ) : null}
                       </span>
-                      <span className="site-search__product-name">{work.name}</span>
+                      <span className="site-search__product-name" title={work.name}>{clampProductTitle(work.name)}</span>
                       {price ? <span className="site-search__product-price">{price}</span> : null}
                     </Link>
                   );

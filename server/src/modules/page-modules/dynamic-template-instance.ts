@@ -45,6 +45,8 @@ export interface DynamicTemplateInstanceIssue {
 export interface DynamicTemplateAssetReference {
   slotId: string;
   url: string;
+  /** 同一槽位内的具体字段，例如 src 与 mobileSrc。发布清单按路径哈希唯一。 */
+  sourceField?: string;
 }
 
 export interface DynamicTemplateBusinessReference {
@@ -179,8 +181,11 @@ export function getDynamicTemplateDocumentMediaReferences(
         if (!visibleSlotIds.has(asset.slotId)) return;
         references.push({
           url: asset.url,
-          path: `${basePath}[${blockIndex}].props.contentBySlotId.${asset.slotId}`,
-          field: asset.slotId,
+          path: dynamicTemplateAssetReferencePath(
+            `${basePath}[${blockIndex}].props.contentBySlotId`,
+            asset,
+          ),
+          field: dynamicTemplateAssetReferenceField(asset),
           ...(blockId ? { blockId } : {}),
           moduleType: DYNAMIC_TEMPLATE_BLOCK_TYPE,
         });
@@ -241,8 +246,8 @@ export function getDynamicTemplateDefinitionMediaReferences(
   }, definition, { includeTemplateDefaults: true });
   instance.assets.forEach((asset) => references.push({
     url: asset.url,
-    path: `defaultContent.${asset.slotId}`,
-    field: asset.slotId,
+    path: dynamicTemplateAssetReferencePath(`defaultContent`, asset),
+    field: dynamicTemplateAssetReferenceField(asset),
     moduleType: DYNAMIC_TEMPLATE_BLOCK_TYPE,
   }));
   const seen = new Set<string>();
@@ -254,6 +259,23 @@ export function getDynamicTemplateDefinitionMediaReferences(
     seen.add(key);
     return true;
   });
+}
+
+function dynamicTemplateAssetReferenceField(asset: DynamicTemplateAssetReference): string {
+  const sourceField = asset.sourceField?.trim();
+  return sourceField ? `${asset.slotId}.${sourceField}` : asset.slotId;
+}
+
+/**
+ * 桌面 src 与手机 mobileSrc 必须落在不同路径。
+ * 发布清单以路径哈希做唯一键；共用路径会在写入时触发唯一约束，并被记成 409。
+ */
+function dynamicTemplateAssetReferencePath(
+  basePath: string,
+  asset: DynamicTemplateAssetReference,
+): string {
+  const sourceField = asset.sourceField?.trim();
+  return sourceField ? `${basePath}.${asset.slotId}.${sourceField}` : `${basePath}.${asset.slotId}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -353,6 +375,35 @@ function readStructuredAction(value: Record<string, unknown>, prefix = "") {
   return { targetType, targetValue };
 }
 
+/** D.47：页面只能选模板声明过的设置；缺省即按模板原样。 */
+function validateInstancePageSettings(
+  input: unknown,
+  definition: TemplateDefinitionV2,
+  issues: DynamicTemplateInstanceIssue[],
+) {
+  if (input === undefined) return;
+  if (!isRecord(input)) {
+    issues.push({ message: "页面模板设置必须是对象", field: "pageSettings", pathSuffix: ".pageSettings" });
+    return;
+  }
+  for (const key of Object.keys(input)) {
+    if (key === "mediaSide") continue;
+    issues.push({ message: `页面模板设置包含未声明项 ${key}`, field: "pageSettings", pathSuffix: `.pageSettings.${key}` });
+  }
+  if (input.mediaSide === undefined) return;
+  if (input.mediaSide !== "start" && input.mediaSide !== "end") {
+    issues.push({ message: "图片位置只能选左或右", field: "pageSettings", pathSuffix: ".pageSettings.mediaSide" });
+    return;
+  }
+  if (!definition.metadata.pageSettings?.mediaSide) {
+    issues.push({
+      message: "当前模板版本没有开放图片位置设置，请恢复模板原样后再保存",
+      field: "pageSettings",
+      pathSuffix: ".pageSettings.mediaSide",
+    });
+  }
+}
+
 function validateLayoutOverrides(
   input: unknown,
   definition: TemplateDefinitionV2,
@@ -448,6 +499,10 @@ function validateLayoutOverrides(
       if (spacingValues.length > 0 && (!isLayoutOverrideCapabilityEnabled(policy, slot, "marginTopPx")
         || spacingValues.some((value) => typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > (policy.maxSpacingPx ?? 120)))) {
         issues.push({ message: `${node.name}上下间距超出母模板授权范围`, field: nodeId, pathSuffix: `.layoutOverridesByNodeId.${nodeId}.${device}` });
+      }
+      if (rawDevice.visuallyCollapsed !== undefined && (rawDevice.visuallyCollapsed !== true
+        || !isLayoutOverrideCapabilityEnabled(policy, slot, "visuallyCollapsed"))) {
+        issues.push({ message: `${node.name}不能在这一端收起文字`, field: nodeId, pathSuffix: `.layoutOverridesByNodeId.${nodeId}.${device}.visuallyCollapsed` });
       }
     }
   }
@@ -604,7 +659,7 @@ export function validateDynamicTemplateInstance(
   const allowedInstanceKeys = new Set([
     "id", "instanceSchemaVersion", "instanceId", "templateId", "templateVersion",
     "moduleName", "contentBySlotId", "overrides", "layoutOverridesByNodeId",
-    "hiddenSlotIds", "isVisible",
+    "hiddenSlotIds", "isVisible", "imageCarriesCopy", "pageSettings",
   ]);
   for (const key of Object.keys(props)) {
     if (allowedInstanceKeys.has(key)) continue;
@@ -650,6 +705,14 @@ export function validateDynamicTemplateInstance(
   if (typeof props.isVisible !== "boolean") {
     issues.push({ message: "页面模板实例显示状态必须是布尔值", field: "isVisible", pathSuffix: ".isVisible" });
   }
+  if (props.imageCarriesCopy !== undefined && typeof props.imageCarriesCopy !== "boolean") {
+    issues.push({
+      message: "图片是否已含标题必须是布尔值",
+      field: "imageCarriesCopy",
+      pathSuffix: ".imageCarriesCopy",
+    });
+  }
+  validateInstancePageSettings(props.pageSettings, definition, issues);
   const contentBySlotId = isRecord(props.contentBySlotId) ? props.contentBySlotId : {};
   if (!isRecord(props.contentBySlotId)) {
     issues.push({ message: "页面实例内容必须按 slotId 保存", field: "contentBySlotId", pathSuffix: ".contentBySlotId" });
@@ -767,9 +830,14 @@ export function validateDynamicTemplateInstance(
       if (!image || !isNonEmptyString(image.src)) {
         issues.push({ message: `${slot.label}图片地址无效`, field: slot.slotId, pathSuffix: `.contentBySlotId.${slot.slotId}` });
       } else {
-        assets.push({ slotId: slot.slotId, url: image.src.trim() });
+        assets.push({ slotId: slot.slotId, url: image.src.trim(), sourceField: "src" });
         if (!isNonEmptyString(image.alt)) {
           issues.push({ message: `${slot.label}替代文字不能为空`, field: slot.slotId, pathSuffix: `.contentBySlotId.${slot.slotId}.alt` });
+        }
+        if (image.mobileSrc !== undefined && typeof image.mobileSrc !== "string") {
+          issues.push({ message: `${slot.label}手机图地址无效`, field: slot.slotId, pathSuffix: `.contentBySlotId.${slot.slotId}.mobileSrc` });
+        } else if (typeof image.mobileSrc === "string" && image.mobileSrc.trim()) {
+          assets.push({ slotId: slot.slotId, url: image.mobileSrc.trim(), sourceField: "mobileSrc" });
         }
       }
       continue;
@@ -847,7 +915,7 @@ export function validateDynamicTemplateInstance(
         if (!isRecord(candidate)) return;
         for (const [nestedKey, nestedValue] of Object.entries(candidate)) {
           if (isNonEmptyString(nestedValue) && /^(?:image|desktopImage|mobileImage|mainImage|detailImage|eventImage|backgroundImage|bgImage|beforeImage|afterImage|posterUrl|videoUrl)$/i.test(nestedKey)) {
-            assets.push({ slotId: slot.slotId, url: nestedValue.trim() });
+            assets.push({ slotId: slot.slotId, url: nestedValue.trim(), sourceField: nestedKey });
           }
           if (isNonEmptyString(nestedValue) && /^(?:productCode|secondaryProductCode)$/i.test(nestedKey)) {
             productCodes.push({ slotId: slot.slotId, value: nestedValue.trim(), index: referenceIndex++ });

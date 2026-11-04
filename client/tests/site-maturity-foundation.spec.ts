@@ -286,13 +286,22 @@ test("预渲染首页在公开接口返回前不展示构建快照，接口失�
   await expect(page.locator("output")).toHaveText("静态首屏");
   await expect(page.getByRole("heading", { name: "静态首屏" })).toHaveCount(0);
   await expect(page.getByText("稳定首屏副标题")).toBeVisible();
+  const heroSrcSet = "/uploads/static-hero.jpg?width=480 480w, /uploads/static-hero.jpg?width=800 800w, /uploads/static-hero.jpg?width=1200 1200w, /uploads/static-hero.jpg?width=1680 1680w, /uploads/static-hero.jpg?width=2400 2400w, /uploads/static-hero.jpg?width=2880 2880w";
   await expect(page.locator('section[aria-label="首页首屏"] source')).toHaveAttribute(
     "srcset",
-    "/uploads/static-hero.jpg?width=480",
+    heroSrcSet,
   );
   await expect(page.locator('section[aria-label="首页首屏"] img')).toHaveAttribute(
     "src",
     "/uploads/static-hero.jpg?width=1680",
+  );
+  await expect(page.locator('section[aria-label="首页首屏"] img')).toHaveAttribute(
+    "srcset",
+    heroSrcSet,
+  );
+  await expect(page.locator('section[aria-label="首页首屏"] img')).toHaveAttribute(
+    "sizes",
+    "100vw",
   );
   await expect(page.locator('section[aria-label="首页首屏"] img')).toHaveAttribute(
     "fetchpriority",

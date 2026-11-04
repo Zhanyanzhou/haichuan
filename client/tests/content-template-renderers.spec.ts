@@ -99,7 +99,7 @@ test("公开 Renderer 只渲染首屏合同并保留真实渲染标记", async (
   await expect(fixture.locator('[data-content-template="hero"]')).toHaveCount(1);
   await expect(fixture.locator("img")).toHaveAttribute(
     "srcset",
-    "/uploads/test-hero.png?width=480 480w, /uploads/test-hero.png?width=800 800w, /uploads/test-hero.png?width=1200 1200w, /uploads/test-hero.png?width=1680 1680w",
+    "/uploads/test-hero.png?width=480 480w, /uploads/test-hero.png?width=800 800w, /uploads/test-hero.png?width=1200 1200w, /uploads/test-hero.png?width=1680 1680w, /uploads/test-hero.png?width=2400 2400w, /uploads/test-hero.png?width=2880 2880w",
   );
   await expect(fixture.locator("img")).toHaveAttribute("sizes", "100vw");
 });
@@ -173,7 +173,7 @@ test("公开 Renderer 按页面顺序展示多个有图首屏", async ({ page })
   await expect(fixture.getByRole("heading", { level: 2 })).toHaveCount(1);
   await expect(fixture.locator("picture")).toHaveCount(1);
   expect(imageMethods).not.toContain("HEAD");
-  expect(imageUrls.some((url) => /[?&]width=(?:480|800|1200|1680)(?:&|$)/.test(url))).toBe(true);
+  expect(imageUrls.some((url) => /[?&]width=(?:480|800|1200|1680|2400|2880)(?:&|$)/.test(url))).toBe(true);
 
   await fixture.getByRole("heading", { name: "第二个首屏模板" }).scrollIntoViewIfNeeded();
   await expect(fixture.locator("picture")).toHaveCount(2);

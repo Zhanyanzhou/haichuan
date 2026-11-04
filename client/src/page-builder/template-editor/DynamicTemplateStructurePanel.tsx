@@ -60,6 +60,7 @@ import {
   getDynamicTemplateRegionDisplayName,
 } from "./dynamicTemplateEditorUtils";
 import { orderStructureChildIds } from "./structureReadingOrder";
+import { settleEvenWorkGrid } from "./evenWorkGridMaintenance";
 import { requestDeleteTemplateNode } from "./requestTemplateNodeDeletion";
 import { addConfiguredTemplateRegion } from "./dynamicTemplateDraftRepository";
 import { DynamicTemplateNodePalette } from "./DynamicTemplateToolbox";
@@ -1177,7 +1178,11 @@ export default function DynamicTemplateStructurePanel({
     try {
       if (action === "duplicate") {
         const result = duplicateDynamicTemplateNode(currentDraft.definition, nodeId);
-        applyStructureDefinition(result.definition, { onSuccess: () => selectObject(result.nodeId) });
+        const slot = result.definition.nodes[result.nodeId]?.slotId
+          ? result.definition.slots[result.definition.nodes[result.nodeId].slotId ?? ""]
+          : undefined;
+        const definition = slot?.type === "image" ? settleEvenWorkGrid(result.definition) : result.definition;
+        applyStructureDefinition(definition, { onSuccess: () => selectObject(result.nodeId) });
         return;
       }
       if (action === "toggle") {

@@ -21,8 +21,8 @@ export const CANVAS_PRESETS = [
   { name: "宽幅主视觉", ratio: "16:9", width: 1440, height: 810 },
   { name: "编辑横版", ratio: "3:2", width: 1440, height: 960 },
   { name: "均衡横版", ratio: "4:3", width: 1440, height: 1080 },
-  { name: "方形卡片", ratio: "1:1", width: 1080, height: 1080 },
-  { name: "竖向卡片", ratio: "4:5", width: 1080, height: 1350 },
+  { name: "方形卡片", ratio: "1:1", width: 1440, height: 1440 },
+  { name: "竖向卡片", ratio: "4:5", width: 1440, height: 1800 },
 ] as const;
 export const LAYOUTS = [
   ["topImageBottomContent", "上图下文"], ["topContentBottomImage", "上文下图"],
@@ -115,7 +115,7 @@ const NEUTRAL_RECOMMENDATION: SectionRoleRecommendation = { ratios: [], layouts:
 const SECTION_RECOMMENDATIONS: Record<TemplateSectionRole, SectionRoleRecommendation> = {
   "page-hero": { ratios: ["16:9"], layouts: ["fullImageOverlay"], mediaPreset: "backgroundLogo", contents: ["title", "subtitle", "cta"] },
   "collection-story": { ratios: ["3:2"], layouts: ["leftImageRightContent", "leftContentRightImage"], mediaPreset: "heroOne", contents: ["subtitle", "title", "description", "cta"] },
-  "editorial-split": { ratios: ["3:2"], layouts: ["leftImageRightContent", "leftContentRightImage"], mediaPreset: "heroTwo", contents: ["subtitle", "title", "description", "cta"] },
+  "editorial-split": { ratios: ["3:2"], layouts: ["leftImageRightContent", "leftContentRightImage"], mediaPreset: "heroTwo", contents: ["title", "description"] },
   "craft-detail": { ratios: ["4:5"], layouts: ["leftImageRightContent", "topImageBottomContent"], mediaPreset: "heroTwo", contents: ["subtitle", "title", "description"] },
   "editorial-media": { ratios: ["16:9"], layouts: ["fullImageOverlay", "centerSubject"], mediaPreset: "hero", contents: ["title", "description"] },
   // 卡片比例取 4:5 而不是本表写作时的 1:1：4:5 是 UI_GUIDE 的商品卡比例，

@@ -727,6 +727,54 @@ for (const limit of ["root-max-height", "root-max-width"] as const) {
   });
 }
 
+test("画布尺寸：区块读数不包含编辑提示，宽高单位和小数保持一致", async ({ page }) => {
+  await mountCanvas(page, false, false, false, false, false, false, "root-auto");
+  const before = await snapshot(page);
+  const frame = page.locator("iframe");
+  const root = page.frameLocator("iframe").locator(`[data-template-node-id="${before.rootId}"]`);
+  const region = page.frameLocator("iframe").locator(`[data-template-node-id="${before.ids.region}"]`);
+  const readout = page.locator(".template-editor__canvas-view-readout");
+  await expect(readout).toHaveText("本节尺寸 宽 900 px × 高 550 px · 标准比例 3:2");
+  // 只在隔离页面模拟 Renderer 的根外编辑提示；提示应继续可见，但不能算进区块读数。
+  await root.evaluate((element) => {
+    const note = element.ownerDocument.createElement("p");
+    note.dataset.testEditorNote = "true";
+    note.setAttribute("role", "status");
+    note.style.cssText = "height:28px;margin:0";
+    note.textContent = "编辑提示不属于区块内容";
+    element.after(note);
+  });
+  await expect.poll(() => frame.evaluate((element) => Number.parseFloat(element.style.height))).toBe(578);
+  await expect(readout).toHaveText("本节尺寸 宽 900 px × 高 550 px · 标准比例 3:2");
+  await expect(page.locator(".template-editor__canvas-ruler--vertical span").last()).toHaveText("550");
+  await expect(page.frameLocator("iframe").getByText("编辑提示不属于区块内容", { exact: true })).toBeVisible();
+  await region.evaluate((element) => { element.style.height = "632.5px"; });
+  await expect(readout).toHaveText("本节尺寸 宽 900 px × 高 633 px · 标准比例 3:2");
+  await expect.poll(() => region.evaluate((element) => element.getBoundingClientRect().height)).toBe(632.5);
+  await expect.poll(() => frame.evaluate((element) => Number.parseFloat(element.style.height))).toBe(661);
+  const after = await snapshot(page);
+  expect(after.rootResponsive).toEqual(before.rootResponsive);
+  expect(after.history).toBe(0);
+  expect(after.dirty).toBe(false);
+});
+
+test("画布尺寸：固定画幅保留根外编辑提示且不把提示误报为内容越界", async ({ page }) => {
+  await mountCanvas(page, false, false, false, false, false, false, "root-ratio");
+  const state = await snapshot(page);
+  const root = page.frameLocator("iframe").locator(`[data-template-node-id="${state.rootId}"]`);
+  await root.evaluate((element) => {
+    const note = element.ownerDocument.createElement("p");
+    note.setAttribute("role", "status");
+    note.style.cssText = "height:28px;margin:0";
+    note.textContent = "根外编辑提醒";
+    element.after(note);
+  });
+  await expect.poll(() => page.locator("iframe").evaluate((element) => Number.parseFloat(element.style.height))).toBe(703);
+  await expect(page.locator(".template-editor__canvas-view-readout")).toContainText("高 675 px");
+  await expect(page.getByRole("button", { name: /内容越界/ })).toHaveCount(0);
+  await expect(page.frameLocator("iframe").getByText("根外编辑提醒", { exact: true })).toBeVisible();
+});
+
 for (const mode of ["root-ratio", "root-auto", "fixed"] as const) {
   test(`画布尺寸：${mode} 区分内容撑高与固定边界溢出，并能回落`, async ({ page }) => {
     await mountCanvas(page, false, false, false, false, false, false, mode);

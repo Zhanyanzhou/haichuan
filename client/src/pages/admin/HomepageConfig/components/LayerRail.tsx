@@ -17,6 +17,13 @@ import {
 const PAGE_MODULE_DELETE_RECOVERY_COPY =
   "确认后，当前编辑会话中可用顶部“撤销”恢复；刷新或离开编辑会话后，不能依靠撤销找回。发布历史只包含已发布快照；从未发布的模块内容无法从发布历史恢复。";
 import { ROOT_ZONE, focusCanvasBlock, useHomepagePuck } from "../editor-store";
+import {
+  clearPageCanvasTemplatePreview,
+  focusPageCanvasTemplatePreview,
+  setPageCanvasTemplatePreviewFocused,
+  setPageCanvasTemplatePreviewHidden,
+  usePageCanvasTemplatePreview,
+} from "../pageCanvasTemplatePreview";
 import { getModuleDisplayName, resolveTemplateSectionRole } from "../editor-utils";
 import { DYNAMIC_TEMPLATE_BLOCK_TYPE } from "@/page-builder/dynamic-template-instance/types";
 import { useResolvedDynamicTemplateDefinitions } from "@/page-builder/dynamic-template-instance/registry";
@@ -110,6 +117,7 @@ export default function LayerRail({
   const panelMode = useVisualEditorSession((state) => state.panelMode);
   const visualSelection = useVisualEditorSession((state) => state.selection);
   const selectVisualNode = useVisualEditorSession((state) => state.selectNode);
+  const canvasPreview = usePageCanvasTemplatePreview();
   const content = appData.content as PageModuleData[];
   const resolvedDefinitions = useResolvedDynamicTemplateDefinitions();
   const rolesByTemplateId = usePublishedTemplateSectionRoles((state) => state.rolesByTemplateId);
@@ -222,6 +230,7 @@ export default function LayerRail({
       anchorRef.current = null;
     }
     anchorRef.current = index;
+    setPageCanvasTemplatePreviewFocused(false);
     selectLayer(index);
   };
 
@@ -430,8 +439,60 @@ export default function LayerRail({
             </button>
           </div>
         )}
+        {canvasPreview ? (
+          <WorkspaceTreeRow
+            rowClassName="homepage-editor__layer-item is-preview"
+            selected={canvasPreview.focused}
+            hidden={canvasPreview.hidden}
+            rowProps={{ "data-layer-preview": "true" }}
+            buttonClassName="homepage-editor__layer-select"
+            buttonProps={{
+              onClick: () => {
+                setPageCanvasTemplatePreviewFocused(true);
+                if (canvasPreview.hidden) setPageCanvasTemplatePreviewHidden(false);
+                focusPageCanvasTemplatePreview();
+              },
+              "aria-label": canvasPreview.name,
+              "aria-current": canvasPreview.focused ? "location" : undefined,
+            }}
+            actions={!readOnly ? (
+              <div
+                className="homepage-editor__layer-actions"
+                role="group"
+                aria-label={`${canvasPreview.name}图层操作`}
+              >
+                <button
+                  type="button"
+                  onClick={() => setPageCanvasTemplatePreviewHidden(!canvasPreview.hidden)}
+                  aria-label={`${canvasPreview.hidden ? "显示" : "隐藏"}${canvasPreview.name}`}
+                  title={canvasPreview.hidden ? "显示预览" : "隐藏预览"}
+                >
+                  {canvasPreview.hidden ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+                </button>
+                <button
+                  type="button"
+                  className="is-danger"
+                  onClick={() => clearPageCanvasTemplatePreview()}
+                  aria-label={`删除${canvasPreview.name}`}
+                  title="关闭预览"
+                >
+                  <DeleteOutlined />
+                </button>
+              </div>
+            ) : null}
+          >
+            <span className="homepage-editor__layer-copy">
+              <span className="homepage-editor__layer-name">
+                {canvasPreview.name}
+              </span>
+              <small className="homepage-editor__layer-summary" aria-hidden="true">
+                尚未加入页面
+              </small>
+            </span>
+          </WorkspaceTreeRow>
+        ) : null}
         {content.map((item, index) => {
-          const active = item.props?.id === selectedId;
+          const active = item.props?.id === selectedId && !canvasPreview?.focused;
           const inView = scrollSpyIndex === index;
           const multiSelected = multiIndices.includes(index);
           const visible = item.props?.isVisible !== false;
@@ -524,7 +585,7 @@ export default function LayerRail({
             </WorkspaceTreeRow>
           );
         })}
-        {appData.content.length === 0 && (
+        {appData.content.length === 0 && !canvasPreview && (
           <div className="homepage-editor__layer-empty">
             从左侧添加模块后，这里会显示页面结构。
           </div>

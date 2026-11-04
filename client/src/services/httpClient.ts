@@ -361,7 +361,9 @@ api.interceptors.response.use(
         } else if (
           domain === "customer" &&
           typeof window !== "undefined" &&
-          /^\/(cart|checkout|partner)(\/|$)/.test(window.location.pathname)
+          // 购物袋在交易关闭时对访客开放，身份探测的 401 不能把整页送去登录。
+          // 交易开启后的购物车仍由 CustomerProtectedRoute 在会话清空后回到登录页。
+          /^\/(checkout|partner)(\/|$)/.test(window.location.pathname)
         ) {
           const returnTo = window.location.pathname + window.location.search;
           window.location.href = `/customer?returnTo=${encodeURIComponent(returnTo)}`;

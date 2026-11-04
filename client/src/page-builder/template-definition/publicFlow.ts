@@ -3,7 +3,7 @@ import { isSafeTemplateMediaUrl } from "./validateTemplateDefinition";
 /**
  * 公开页上还会占住一条流式高度的节点。
  * 空的文字、按钮和只剩内边距的容器不算：手机深色画布上它们会在满幅图下面露出一条黑带。
- * 编辑器仍渲染这些空位，方便选中和补内容。
+ * 按钮底色和文字槽自己的底色都只是壳。属性面板没填文案时不算内容。模板结构编辑仍单独留着空位。
  */
 export interface PublicFlowNode {
   hidden?: boolean;
@@ -19,6 +19,7 @@ export interface PublicFlowNode {
 }
 
 const TEXT_SLOTS = new Set(["heading", "text", "richText", "badge", "icon"]);
+const COPY_SLOTS = new Set(["heading", "text", "richText", "badge"]);
 const ACTION_SLOTS = new Set(["button", "link"]);
 
 function textContent(value: unknown): string {
@@ -49,11 +50,12 @@ function hasOwnPaint(node: PublicFlowNode): boolean {
 export function publicFlowNodeIsVisible(node: PublicFlowNode): boolean {
   if (node.hidden) return false;
   if (node.type === "Spacer" || node.type === "Divider") return true;
-  if (hasOwnPaint(node)) return true;
   const slotType = node.slot?.type;
+  if (slotType && ACTION_SLOTS.has(slotType)) return Boolean(actionLabel(node.content));
+  if (slotType && COPY_SLOTS.has(slotType)) return Boolean(textContent(node.content));
+  if (hasOwnPaint(node)) return true;
   if (slotType === "image") return Boolean(imageSource(node.content));
   if (slotType && TEXT_SLOTS.has(slotType)) return Boolean(textContent(node.content));
-  if (slotType && ACTION_SLOTS.has(slotType)) return Boolean(actionLabel(node.content));
   // 商品和集合在公开页由业务区渲染，槽位本身不占高度。
   if (slotType === "product" || slotType === "collection") return false;
   if (slotType) return true;

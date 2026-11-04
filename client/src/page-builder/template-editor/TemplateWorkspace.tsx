@@ -37,7 +37,9 @@ import type { TemplateInspectorIssueTarget } from "./templateInspectorCapabiliti
 import type { TemplateEditorDraft } from "./types";
 import DynamicTemplateRenderer from "../template-definition/DynamicTemplateRenderer";
 import type { TemplateDefinitionV2 } from "../template-definition";
-import { catalogCardName } from "./catalogCardName";
+import type { TemplateBreakpoint } from "../template-definition/responsive";
+import { catalogCardName, catalogStoredName } from "./catalogCardName";
+import { editingGeometryDiverged, previewExitGeometry } from "./templateEditingGeometry";
 import {
   type DynamicTemplateResource,
   type PublishedDynamicTemplateResource,
@@ -62,7 +64,7 @@ import {
 } from "./templateStressPreviewEngine";
 
 const STRESS_PREVIEW_LABELS: Record<TemplateStressPreviewScenario, string> = {
-  "short-text": "短文字与中性内容",
+  "short-text": "当前默认内容（保留空值）",
   "long-text": "超长文字与换行",
   "optional-missing": "可选内容缺失",
   "required-missing": "必填内容缺失",
@@ -99,7 +101,7 @@ function describeStressPreview(
   if (scenario === "long-text") {
     return "已按每个字段的长度上限生成长文字，用于检查换行、截断和高度稳定性。";
   }
-  return "使用中性短内容检查模板的基础构图、顺序和间距。";
+  return "沿用当前默认内容。明确留空的字段保持空白，不会补上示例。";
 }
 
 const WORKSPACE_SCROLL_SELECTORS = {
@@ -120,6 +122,8 @@ interface TemplatePreviewEntrySnapshot {
   templateId: string;
   selectionSnapshot: TemplateEditorSelectionSnapshot;
   device: "desktop" | "mobile";
+  breakpoint: TemplateBreakpoint;
+  previewWidth: number | null;
   canvasZoom: number | null;
   inspectorTask: TemplateInspectorTask;
   inspectorView: TemplateInspectorView;
@@ -291,6 +295,9 @@ export default function TemplateWorkspace({
     readWorkspaceScroll,
     updateWorkspaceScroll,
   } = controller;
+  const editingBreakpoint = useTemplateEditorSession((state) => state.breakpoint);
+  const previewFillSamples = useTemplateEditorSession((state) => state.previewFillSamples);
+  const geometryDiverged = !previewMode && editingGeometryDiverged(device, editingBreakpoint);
   const activeTemplateId = draft?.definition.templateId;
   const [structureCollapsed, setStructureCollapsed] = useState(() => {
     try {
@@ -510,6 +517,8 @@ export default function TemplateWorkspace({
       templateId: state.draft.definition.templateId,
       selectionSnapshot: structuredClone(state.selectionSnapshot),
       device: state.device,
+      breakpoint: state.breakpoint,
+      previewWidth: state.previewWidth,
       canvasZoom: state.canvasZoom,
       inspectorTask: state.inspectorTask,
       inspectorView: state.inspectorView,
@@ -560,7 +569,7 @@ export default function TemplateWorkspace({
       previewMode: false,
       selectionSnapshot: snapshot.selectionSnapshot,
       ...projectTemplateEditorSelectionSnapshot(snapshot.selectionSnapshot),
-      device: snapshot.device,
+      ...previewExitGeometry(snapshot),
       canvasZoom: snapshot.canvasZoom,
       inspectorTask: snapshot.inspectorTask,
       inspectorView: snapshot.inspectorView,
@@ -1378,7 +1387,7 @@ export default function TemplateWorkspace({
           <button
             type="button"
             className="template-editor__workspace-subject template-editor__mobile-settings"
-            aria-label={previewMode ? `当前模板：${catalogCardName(draft.definition.metadata.sectionRole ?? draft.definition.templateRecipe?.sectionRole, draft.definition.name)}` : "打开模板设置"}
+            aria-label={previewMode ? `当前模板：${catalogCardName(draft.definition.metadata.sectionRole ?? draft.definition.templateRecipe?.sectionRole, draft.definition.name)}${catalogStoredName(draft.definition.metadata.sectionRole ?? draft.definition.templateRecipe?.sectionRole, draft.definition.name) ? `，${catalogStoredName(draft.definition.metadata.sectionRole ?? draft.definition.templateRecipe?.sectionRole, draft.definition.name)}` : ""}` : "打开模板设置"}
             disabled={previewMode || publishing || lifecycleBusy || saveStatus === "saving" || (Boolean(publishReview) && !controller.publishIssueEditing)}
             onClick={() => window.dispatchEvent(new Event("template-editor:open-settings"))}
           >
@@ -1386,7 +1395,7 @@ export default function TemplateWorkspace({
             <strong>{
               !draft.definition.name.trim() || draft.definition.name.trim() === "未命名模板"
                 ? "未命名模板"
-                : catalogCardName(draft.definition.metadata.sectionRole ?? draft.definition.templateRecipe?.sectionRole, draft.definition.name)
+                : `${catalogCardName(draft.definition.metadata.sectionRole ?? draft.definition.templateRecipe?.sectionRole, draft.definition.name)}${catalogStoredName(draft.definition.metadata.sectionRole ?? draft.definition.templateRecipe?.sectionRole, draft.definition.name) ? ` · ${catalogStoredName(draft.definition.metadata.sectionRole ?? draft.definition.templateRecipe?.sectionRole, draft.definition.name)}` : ""}`
             }</strong>
           </button>
         ) : null}
@@ -1469,6 +1478,19 @@ export default function TemplateWorkspace({
             <p>从左侧选择母模板后，这里会显示模板整体、图片槽位、文字槽位和行动对象。</p>
           </aside>
         )}
+        {geometryDiverged ? (
+          <Alert
+            type="warning"
+            showIcon
+            message="查看的设备和正在编辑的一端不一致"
+            description="画布、面包屑和属性写到的一端必须相同。恢复后才能修改设计。"
+            action={(
+              <Button size="small" onClick={() => useTemplateEditorSession.getState().alignEditingGeometry()}>
+                恢复到当前查看的一端
+              </Button>
+            )}
+          />
+        ) : null}
         {draft ? <DynamicTemplateCanvas /> : (
           <section className="homepage-editor__stage template-editor__stage template-editor__empty-stage" aria-label="空模板画布">
             <div className="template-editor__empty-stage-card">
@@ -1545,6 +1567,14 @@ export default function TemplateWorkspace({
                         <option key={scenario} value={scenario}>{STRESS_PREVIEW_LABELS[scenario]}</option>
                       ))}
                     </select>
+                  </label>
+                  <label className="template-editor__stress-preview-select">
+                    <input
+                      type="checkbox"
+                      checked={previewFillSamples}
+                      onChange={(event) => useTemplateEditorSession.getState().setPreviewFillSamples(event.target.checked)}
+                    />
+                    <span>同时放入示例图和长文（不写入草稿）</span>
                   </label>
                   <TemplateTrialPreviewControls definition={draft.definition} initialNodeId={trialTargetNodeId} />
                   <p
@@ -1687,7 +1717,7 @@ export default function TemplateWorkspace({
             : saveStatus === "publish-error"
               ? "模板发布失败，草稿仍在"
               : saveStatus === "publish-success"
-                ? "模板新版本已发布，已有页面保持原版本"
+                ? "模板新版本已发布。能保留内容的草稿会沿用。客户前台仍等发布页面。"
                 : ""}
       </span>
     </>

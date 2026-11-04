@@ -10,6 +10,7 @@ import {
 import { getContentTemplateModuleTypeForSlotType } from "../template-definition/validateTemplateDefinition";
 import { setVisualOverridePath } from "../runtime/visualLayout";
 import { describeDynamicTemplateRemoval, findDynamicTemplateParentId } from "./dynamicTemplateEditorUtils";
+import { reflowEvenWorkGridIfTagged } from "./evenWorkGridMaintenance";
 import { useTemplateEditorSession } from "./templateEditorSession";
 
 export interface TemplateDeletionConfirmOptions {
@@ -127,7 +128,7 @@ export function requestDeleteTemplateNode(nodeId: string, ui: TemplateDeletionUi
             const currentSlotId = next.nodes[nodeId]?.slotId;
             if (!currentSlotId || !next.slots[currentSlotId]) return current;
             next.slots[currentSlotId].required = false;
-            return removeDynamicTemplateNode(next, nodeId);
+            return reflowEvenWorkGridIfTagged(removeDynamicTemplateNode(next, nodeId));
           },
         });
         if (!result.ok) {
@@ -190,7 +191,7 @@ export function requestDeleteTemplateNode(nodeId: string, ui: TemplateDeletionUi
       const result = useTemplateEditorSession.getState().executeCommand({
         type: "transform-definition",
         label: "删除节点",
-        transform: (current) => removeDynamicTemplateNode(current, nodeId),
+        transform: (current) => reflowEvenWorkGridIfTagged(removeDynamicTemplateNode(current, nodeId)),
       });
       if (!result.ok) {
         reportCommandFailure(ui, result.message, result.code);

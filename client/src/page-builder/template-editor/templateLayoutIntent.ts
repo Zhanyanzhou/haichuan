@@ -2,6 +2,31 @@ import type { DynamicTemplateDefinitionCommand } from "../template-definition/op
 import type { DynamicTemplatePlacement, TemplateBreakpoint, TemplateDefinitionV2 } from "../template-definition";
 import { resolveTemplateNodeRules, setTemplateNodeRule } from "../template-definition/responsive";
 
+export type TemplateLayoutChildRect = { x: number; y: number; width: number; height: number };
+
+/** 读取当前画布的真实子项几何；不以定义变化冒充画面变化。 */
+export function measureTemplateLayoutChildren(nodeId: string, breakpoint: TemplateBreakpoint, childIds: readonly string[]): Record<string, TemplateLayoutChildRect> {
+  if (typeof document === "undefined") return {};
+  const surfaces = [document, ...Array.from(document.querySelectorAll("iframe")).flatMap((frame) => {
+    try { return frame.contentDocument ? [frame.contentDocument] : []; } catch { return []; }
+  })];
+  for (const surface of surfaces) {
+    const focus = surface.querySelector<HTMLElement>(`[data-canvas-focus-breakpoint="${breakpoint}"]`);
+    const parent = focus?.querySelector<HTMLElement>(`[data-template-node-id="${CSS.escape(nodeId)}"]`);
+    if (!parent || !parent.getClientRects().length || !parent.offsetWidth || !parent.offsetHeight) continue;
+    const bounds = parent.getBoundingClientRect();
+    const scaleX = bounds.width / parent.offsetWidth, scaleY = bounds.height / parent.offsetHeight;
+    if (!(scaleX > 0 && scaleY > 0)) continue;
+    return Object.fromEntries(childIds.flatMap((id) => {
+      const child = parent.querySelector<HTMLElement>(`[data-template-node-id="${CSS.escape(id)}"]`);
+      if (!child?.getClientRects().length) return [];
+      const rect = child.getBoundingClientRect();
+      return [[id, { x: (rect.x - bounds.x) / scaleX, y: (rect.y - bounds.y) / scaleY, width: rect.width / scaleX, height: rect.height / scaleY }]];
+    }));
+  }
+  return {};
+}
+
 export function createTemplateColumnResizeCommand(definition: TemplateDefinitionV2, nodeId: string, breakpoint: TemplateBreakpoint, boundaryIndex: number, deltaPx: number, availableWidth: number): DynamicTemplateDefinitionCommand {
   const rules = resolveTemplateNodeRules(definition, nodeId, breakpoint);
   const columns = [...(rules.columns ?? [])];

@@ -11,8 +11,11 @@ import {
 import {
   getContentTemplateModuleTypeForSlotType,
   isMatureContentTemplateSlotType,
+  isSafeTemplateMediaUrl,
   MATURE_CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE,
 } from "../template-definition/validateTemplateDefinition";
+import { pageHeroReusesDesktopFrame } from "../template-definition/mobileWorkGrid";
+import { formatTemplateRatio } from "../template-definition/templateDimensions";
 import type { DynamicTemplateSlotType } from "../template-definition/generated/templateDefinition.generated";
 import { createTemplateRecipePreviewContent, neutralTemplatePlaceholder } from "../template-creation/previewContent";
 import type { DynamicTemplatePreviewScenario } from "./types";
@@ -83,7 +86,13 @@ function isPreviewPlaceholderAsset(value: string) {
   return !value
     || value.startsWith("data:image/svg+xml")
     || value.includes("neutral-template-preview-v1")
+    || value.includes("catalog-structure-media.svg")
     || value.includes("product-placeholder.svg");
+}
+
+/** 属性面板保存进槽位或节点背景的产品图。样图、空地址和中性图都不算。 */
+function isTemplatePropertyProductImage(value: string) {
+  return !isPreviewPlaceholderAsset(value.trim());
 }
 
 function resolveTemplateDesignSampleMedia(path: string[], sequence: number) {
@@ -276,32 +285,73 @@ function readImageSource(value: unknown): string {
   return typeof src === "string" ? src.trim() : "";
 }
 
+function readMobileImageSource(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const src = (value as { mobileSrc?: unknown }).mobileSrc;
+  return typeof src === "string" ? src.trim() : "";
+}
+
+/** 只保留属性面板写入的背景产品图。样图和空背景不显示。不写回定义。 */
+function retainPropertyBackgrounds(definition: TemplateDefinitionV2) {
+  for (const node of Object.values(definition.nodes)) {
+    for (const device of ["desktop", "mobile", "tablet"] as const) {
+      const rules = node.responsive[device];
+      if (!rules?.backgroundImage) continue;
+      if (!isTemplatePropertyProductImage(rules.backgroundImage)) rules.backgroundImage = "";
+    }
+  }
+}
+
 /**
- * 设计画布的图片槽使用中性示意，节点背景保持作者当前规则，方便看见刚设置的背景。
- * 目录缩略图另行去掉背景和正式图片。这里不写回默认内容。
+ * 图片槽默认换成同一张中性图。属性面板保存的桌面图或手机图留在对应位置。
+ * `force` 只用于结构示意，连产品图也换成中性图。不写回默认内容。
+ */
+function projectTemplateImageContent(current: unknown, forceNeutral: boolean): unknown {
+  const src = readImageSource(current);
+  const mobileSrc = readMobileImageSource(current);
+  const keepSrc = !forceNeutral && isTemplatePropertyProductImage(src);
+  const keepMobile = !forceNeutral && isTemplatePropertyProductImage(mobileSrc);
+  if (!keepSrc && !keepMobile) return { src: neutralCatalogMedia, alt: "结构示意" };
+  const record = current && typeof current === "object" && !Array.isArray(current)
+    ? { ...(current as Record<string, unknown>) }
+    : {};
+  const next: Record<string, unknown> = { ...record, src: keepSrc ? src : neutralCatalogMedia };
+  if (keepMobile) next.mobileSrc = mobileSrc;
+  else delete next.mobileSrc;
+  if (!keepSrc) next.alt = "结构示意";
+  return next;
+}
+
+/**
+ * 设计画布、放大预览和目录缩略图共用这一条：没有产品图就显示中性图。
+ * 节点背景只保留属性面板保存的产品图。这里不写回默认内容。
  */
 export function withNeutralTemplateImages(
   definition: TemplateDefinitionV2,
   content: Record<string, unknown>,
+  options?: { force?: boolean },
 ): { definition: TemplateDefinitionV2; contentBySlotId: Record<string, unknown> } {
   const projected = structuredClone(definition);
+  retainPropertyBackgrounds(projected);
   const contentBySlotId = structuredClone(content);
   for (const slot of Object.values(definition.slots)) {
     if (slot.type !== "image") continue;
-    const current = contentBySlotId[slot.slotId];
-    contentBySlotId[slot.slotId] = current && typeof current === "object" && !Array.isArray(current)
-      ? { ...current, src: neutralCatalogMedia, alt: "结构示意" }
-      : { src: neutralCatalogMedia, alt: "结构示意" };
+    contentBySlotId[slot.slotId] = projectTemplateImageContent(
+      contentBySlotId[slot.slotId],
+      Boolean(options?.force),
+    );
   }
   return { definition: projected, contentBySlotId };
 }
 
 export function createTemplateDesignCanvasContent(
   definition: TemplateDefinitionV2,
+  options?: { force?: boolean },
 ): Record<string, unknown> {
   return withNeutralTemplateImages(
     definition,
     withNeutralTemplateText(definition, createTemplatePreviewContentBySlotId(definition)),
+    options,
   ).contentBySlotId;
 }
 
@@ -363,23 +413,34 @@ function withNeutralCatalogMedia(value: unknown, path: string[] = []): unknown {
   ]));
 }
 
-/** 目录只读投影：沿用真实节点几何，不读取正式或归档图片，不写回模板定义。 */
-export function createNeutralTemplateCatalogPreview(definition: TemplateDefinitionV2): {
+/**
+ * 目录只读投影。缩略图可显示属性面板已保存的产品图；中性结构不显示。
+ * 文字仍是中性短文。不写回模板定义。
+ */
+export function createNeutralTemplateCatalogPreview(
+  definition: TemplateDefinitionV2,
+  options?: { showPropertyImages?: boolean },
+): {
   definition: TemplateDefinitionV2;
   contentBySlotId: Record<string, unknown>;
 } {
   const projected = structuredClone(definition);
-  for (const node of Object.values(projected.nodes)) {
-    for (const device of ["desktop", "mobile", "tablet"] as const) {
-      const rules = node.responsive[device];
-      if (rules?.backgroundImage) rules.backgroundImage = "";
+  if (options?.showPropertyImages) retainPropertyBackgrounds(projected);
+  else {
+    for (const node of Object.values(projected.nodes)) {
+      for (const device of ["desktop", "mobile", "tablet"] as const) {
+        const rules = node.responsive[device];
+        if (rules?.backgroundImage) rules.backgroundImage = "";
+      }
     }
   }
   const sourceContent = createTemplateCatalogPreviewContentBySlotId(definition);
   const contentBySlotId: Record<string, unknown> = {};
   for (const slot of Object.values(definition.slots)) {
     if (slot.type === "image") {
-      contentBySlotId[slot.slotId] = { src: neutralCatalogMedia, alt: "" };
+      contentBySlotId[slot.slotId] = options?.showPropertyImages
+        ? projectTemplateImageContent(sourceContent[slot.slotId], false)
+        : { src: neutralCatalogMedia, alt: "" };
     } else if (isMatureContentTemplateSlotType(slot.type)) {
       contentBySlotId[slot.slotId] = withNeutralCatalogMedia(getExamplePreviewContentForSlot(slot.type));
     } else if (TEXT_SLOT_TYPES.has(slot.type)) {
@@ -480,11 +541,47 @@ export function createTemplatePreviewScenarioContentBySlotId(
   return content;
 }
 
+function heroPreviewImages(definition: TemplateDefinitionV2) {
+  return Object.values(definition.slots).flatMap((slot) => {
+    if (slot.type !== "image") return [];
+    if (slot.semanticRole !== "backgroundImage" && slot.semanticRole !== "heroImage") return [];
+    const content = definition.defaultContent?.[slot.slotId];
+    const mobileSrc = content && typeof content === "object" && !Array.isArray(content)
+      ? (content as { mobileSrc?: unknown }).mobileSrc
+      : undefined;
+    return [{
+      desktopAspect: slot.desktopRules?.aspectRatio,
+      hasMobileAsset: isSafeTemplateMediaUrl(mobileSrc),
+      // 槽位默认的 cover 只决定图片怎么填进画框，不是要求把整节裁成 9:16。
+      // 渲染器只把实例上的 layoutOverride 当作明确铺满；这里与它对齐。
+    }];
+  });
+}
+
 export function resolveTemplatePreviewViewport(
   definition: TemplateDefinitionV2,
   device: "desktop" | "mobile",
 ) {
-  return resolveTemplateDesignFrame(definition, device);
+  const declared = resolveTemplateDesignFrame(definition, device);
+  // 固定双端画幅已经把 16:9 对换成 9:16。缺手机图不能把这块竖画布改回横图。
+  if (device !== "mobile" || declared.pairedCanvas) return { ...declared, frameNote: undefined as string | undefined };
+  const sectionRole = definition.metadata.sectionRole ?? definition.templateRecipe?.sectionRole;
+  if (!pageHeroReusesDesktopFrame({ sectionRole, images: heroPreviewImages(definition) })) {
+    return { ...declared, frameNote: undefined as string | undefined };
+  }
+  const desktop = resolveTemplateDesignFrame(definition, "desktop");
+  const width = desktop.sourceWidth > 0 ? desktop.sourceWidth : declared.sourceWidth;
+  const height = desktop.fallbackHeight > 0 ? desktop.fallbackHeight : width * 9 / 16;
+  const sourceWidth = declared.sourceWidth > 0 ? declared.sourceWidth : 390;
+  const fallbackHeight = width > 0 ? sourceWidth * height / width : declared.fallbackHeight;
+  return {
+    ...declared,
+    heightMode: "aspect-ratio" as const,
+    fallbackHeight,
+    ratioLabel: formatTemplateRatio(sourceWidth, fallbackHeight),
+    pairedCanvas: false,
+    frameNote: "没有手机图，沿用桌面横图，本次未对换",
+  };
 }
 
 /** 模板目录消费的纯展示模型；不写入模板定义、页面实例或公开 Renderer。 */

@@ -309,6 +309,13 @@
   cursor: pointer;
 }
 
+/* 水平滑动交给作品图切换，垂直滑动仍滚动页面。 */
+@media (max-width: 767px), ((hover: none) and (pointer: coarse)) {
+  .catalog-product-card__media[data-catalog-image-swipe="true"] {
+    touch-action: pan-y;
+  }
+}
+
 .catalog-product-card__media .catalog-img {
   display: block;
   width: 100%;
@@ -388,26 +395,29 @@
 
 .catalog-product-card__copy {
   flex: 0 0 auto;
-  padding: 14px 8px 0;
+  padding: 16px 16px 0;
   text-align: center;
 }
 
 .catalog-product-card__title {
-  display: -webkit-box;
-  margin: 0 0 6px;
-  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  min-height: 2.8em;
+  max-width: 28em;
+  margin: 0 auto 8px;
   color: #181a1b;
   font-family: "Noto Serif SC", "Songti SC", SimSun, serif;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 400;
-  line-height: 1.45;
+  line-height: 1.4;
   letter-spacing: 0;
-  text-overflow: ellipsis;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
+  overflow-wrap: break-word;
+  text-wrap: balance;
 }
 
 .catalog-product-card__title a {
+  display: block;
   color: inherit;
   text-decoration: none;
 }
@@ -415,18 +425,16 @@
 .catalog-product-card__facts {
   min-height: 1.5em;
   margin: 0;
-  overflow: hidden;
   color: #5f6568;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.5;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .catalog-product-card__price {
-  margin: 8px 0 0;
+  margin: 12px 0 0;
   color: #181a1b;
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 400;
   font-variant-numeric: lining-nums;
   line-height: 1.4;
@@ -499,6 +507,20 @@
   }
 }
 
+@media (max-width: 767px) {
+  .catalog-product-card__title {
+    font-size: 15px;
+  }
+
+  .catalog-product-card__facts {
+    font-size: 12px;
+  }
+
+  .catalog-product-card__price {
+    font-size: 15px;
+  }
+}
+
 @media (max-width: 639px) {
   .catalog-matrix[data-result-count="1"] {
     grid-template-columns: minmax(0, 1fr);
@@ -535,13 +557,6 @@
 
   .catalog-matrix:not([data-result-count="1"]) .catalog-product-card__copy {
     padding: 8px 2px 0;
-  }
-
-  .catalog-matrix:not([data-result-count="1"]) .catalog-product-card__title {
-    margin-bottom: 4px;
-    font-size: 13px;
-    line-height: 1.4;
-    -webkit-line-clamp: 2;
   }
 
   .catalog-image-next {
@@ -1035,6 +1050,21 @@
   background: transparent;
   border-color: #dde1e2;
   color: #6e7477;
+}
+
+.product-detail-page__bag-action {
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid #181a1b;
+  background: transparent;
+  color: #181a1b;
+  font: inherit;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.product-detail-page__bag-action[aria-pressed="true"] {
+  background: #f4f5f5;
 }
 
 .product-detail-page__status-copy {

@@ -17,3 +17,28 @@ export const SIGNED_PUBLIC_CONTACT = {
 export function preferSiteSetting(value: unknown, signed: string): string {
   return typeof value === "string" && value.trim() ? value.trim() : signed;
 }
+
+function storedText(value: string | undefined): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/** 只把可拨打的号码当成电话，避免微信号被显示成联系电话。 */
+export function isDialablePhone(value: string): boolean {
+  return /^\+?[\d\s()-]+$/.test(value) && /\d/.test(value);
+}
+
+export function resolvePublicPhone(stored: string | undefined): string {
+  const value = storedText(stored);
+  return isDialablePhone(value) ? value : SIGNED_PUBLIC_CONTACT.phone;
+}
+
+/**
+ * 公司微信号优先。联系电话里若填的不是可拨打号码，且微信号为空，
+ * 则把该值标成微信号，不再冒充电话。
+ */
+export function resolvePublicWechat(storedWechat: string | undefined, storedPhone: string | undefined): string {
+  const wechat = storedText(storedWechat);
+  if (wechat) return wechat;
+  const phone = storedText(storedPhone);
+  return phone && !isDialablePhone(phone) ? phone : "";
+}

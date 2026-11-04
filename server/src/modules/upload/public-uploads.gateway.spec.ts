@@ -86,11 +86,15 @@ test('普通 uploads 路径只解析无歧义的相对 storageKey', () => {
 test('公开 uploads 图片只接受固定响应式宽度与安全图片路径', () => {
   assert.deepEqual(
     parseResponsivePublicImageRequest('/2026/09/01/hero.png?width=480'),
-    { kind: 'IMAGE', storageKey: '2026/09/01/hero.png', width: 480 },
+    { kind: 'IMAGE', storageKey: '2026/09/01/hero.png', width: 480, strategyVersion: null },
   );
   assert.deepEqual(
     parseResponsivePublicImageRequest('/page-assets/hero.jpg?revision=2&width=1680'),
-    { kind: 'IMAGE', storageKey: 'page-assets/hero.jpg', width: 1680 },
+    { kind: 'IMAGE', storageKey: 'page-assets/hero.jpg', width: 1680, strategyVersion: null },
+  );
+  assert.deepEqual(
+    parseResponsivePublicImageRequest('/page-assets/hero.jpg?width=2880'),
+    { kind: 'IMAGE', storageKey: 'page-assets/hero.jpg', width: 2880, strategyVersion: null },
   );
   assert.deepEqual(parseResponsivePublicImageRequest('/2026/09/01/hero.png'), { kind: 'NONE' });
 
@@ -115,6 +119,8 @@ test('响应式图片保持比例并输出明显更小的 WebP', async () => {
     },
   }).png().toBuffer();
   const output = await resizePublicImageBuffer(input, 480, 'image/png');
+  assert.equal(output.ok, true);
+  if (!output.ok) return;
   const metadata = await sharp(output.buffer).metadata();
 
   assert.equal(output.mimeType, 'image/webp');

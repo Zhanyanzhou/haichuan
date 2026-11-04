@@ -719,6 +719,107 @@ test.describe("商品编辑器现有接口契约", () => {
     expect(createBodies[1]).toEqual(createBodies[0]);
   });
 
+  test("新建商品上架成功后清空表单，可直接填写下一件", async ({ page }) => {
+    await installAdminSession(page);
+    let createAttempts = 0;
+    const products = new Map<number, { id: number; status: string; code?: string; name?: string }>();
+
+    await page.route("**/api/**", async (route) => {
+      const url = new URL(route.request().url());
+      const method = route.request().method();
+      if (url.pathname === "/api/auth/profile") return route.fallback();
+      if (url.pathname === "/api/categories/admin/tree") return fulfill(route, [{ id: 1, name: "吊坠", children: [] }]);
+      if (url.pathname === "/api/shipping-templates") return fulfill(route, []);
+      if (url.pathname === "/api/settings/flags") return fulfill(route, { commerceEnabled: true, cartEnabled: true, paymentEnabled: true });
+      if (url.pathname === "/api/products" && method === "POST") {
+        createAttempts += 1;
+        const body = route.request().postDataJSON() as { code?: string; name?: string; categoryId?: number };
+        const id = 70 + createAttempts;
+        const product = {
+          id,
+          code: body.code,
+          name: body.name,
+          categoryId: body.categoryId,
+          materialType: "OTHER",
+          price: 1280,
+          status: "DRAFT",
+          visibility: "INTERNAL",
+          salesMode: "DIRECT_PURCHASE",
+          inventoryPolicy: "STANDARD",
+          purchaseRegion: "MAINLAND",
+          publishMode: "IMMEDIATE",
+          fulfillmentType: "IN_STOCK",
+          dispatchTime: "WITHIN_48_HOURS",
+          deliveryMethods: [],
+          images: [],
+          skus: [],
+          detailContent: [],
+        };
+        products.set(id, product);
+        return fulfill(route, product);
+      }
+      const statusMatch = url.pathname.match(/^\/api\/products\/(\d+)\/status$/);
+      if (statusMatch && method === "PUT") {
+        const product = products.get(Number(statusMatch[1]));
+        if (product) product.status = "PUBLISHED";
+        return fulfill(route, product ?? {});
+      }
+      const productMatch = url.pathname.match(/^\/api\/products\/(\d+)$/);
+      if (productMatch && (method === "GET" || method === "PUT")) {
+        return fulfill(route, products.get(Number(productMatch[1])) ?? {});
+      }
+      return fulfill(route, {});
+    });
+
+    await page.goto("/admin/products/new");
+    await page.getByRole("button", { name: "基础信息" }).click();
+    await page.getByRole("textbox", { name: "商品标题" }).fill("18K金红宝石吊坠");
+    await page.getByRole("textbox", { name: "货号" }).fill("ATP-310");
+    await page.getByRole("combobox", { name: "当前类目" }).click();
+    await page.getByText("吊坠", { exact: true }).click();
+    await page.getByRole("spinbutton", { name: "成交价" }).fill("1280");
+    await page.getByRole("spinbutton", { name: "金重（g）" }).fill("11");
+    const openVisibility = async () => {
+      const field = page.locator("#product-editor-main_visibility");
+      await field.evaluate((node) => {
+        const scroller = node.closest(".pro-editor__body");
+        if (!(scroller instanceof HTMLElement)) return;
+        const nodeRect = node.getBoundingClientRect();
+        const scrollerRect = scroller.getBoundingClientRect();
+        scroller.scrollTop += nodeRect.top - scrollerRect.top - 120;
+      });
+      await page.locator(".ant-form-item").filter({ hasText: "可见范围" }).locator(".ant-select").click();
+    };
+    await openVisibility();
+    await page.getByText("仅内部可见", { exact: true }).click();
+
+    await page.getByRole("button", { name: "上架商品" }).click();
+    await expect(page.getByText("商品已上架。可以继续填写下一件")).toBeVisible();
+    await expect(page).toHaveURL(/\/admin\/products\/new$/);
+    await expect(page.getByRole("textbox", { name: "商品标题" })).toHaveValue("");
+    await expect(page.getByRole("textbox", { name: "货号" })).toBeEnabled();
+    await expect(page.getByRole("textbox", { name: "货号" })).toHaveValue("");
+    await expect(page.getByRole("spinbutton", { name: "成交价" })).toHaveValue("");
+    await expect(page.getByRole("spinbutton", { name: "金重（g）" })).toHaveValue("");
+    await expect(page.getByRole("button", { name: "上架商品" })).toBeEnabled();
+    await expect(page.getByText("尚未保存", { exact: true })).toBeVisible();
+    await expect(page.locator(".pro-editor__category .ant-tag")).toHaveText("草稿");
+    expect(createAttempts).toBe(1);
+
+    await page.getByRole("textbox", { name: "商品标题" }).fill("足金小鱼耳钉");
+    await page.getByRole("textbox", { name: "货号" }).fill("ATP-311");
+    await page.getByRole("combobox", { name: "当前类目" }).click();
+    await page.getByText("吊坠", { exact: true }).click();
+    await page.getByRole("spinbutton", { name: "成交价" }).fill("860");
+    await openVisibility();
+    await page.getByText("仅内部可见", { exact: true }).click();
+    await page.getByRole("button", { name: "上架商品" }).click();
+    await expect(page.getByText("商品已上架。可以继续填写下一件")).toBeVisible();
+    await expect(page).toHaveURL(/\/admin\/products\/new$/);
+    await expect(page.getByRole("textbox", { name: "商品标题" })).toHaveValue("");
+    expect(createAttempts).toBe(2);
+  });
+
   test("拖拽顺序用前移后移保存，直接销售可填写可售数量", async ({ page }) => {
     await installAdminSession(page);
     const product = {

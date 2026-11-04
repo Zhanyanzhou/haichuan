@@ -1,7 +1,7 @@
 /**
  * 自动生成，禁止手改。
  * 来源：contracts/page-builder/template-definition.schema.json
- * SHA-256：a1917c5eb28c0e039ca161c23695c018cc8b76572c901d3bcdba74165aae4527
+ * SHA-256：829234be944299184ba86551c47b16c655861c4f19208950dcdeb7692340c3f0
  */
 
 export const DYNAMIC_TEMPLATE_SCHEMA_VERSION = 3;
@@ -12,7 +12,7 @@ export const DYNAMIC_TEMPLATE_SUPPORTED_SCHEMA_VERSIONS = [
 ] as const;
 /** 统一模板产品模型版本；JSON Schema 自身仍独立按 schemaVersion 演进。 */
 export const TEMPLATE_DEFINITION_MODEL_VERSION = 2 as const;
-export const DYNAMIC_TEMPLATE_SCHEMA_HASH = "a1917c5eb28c0e039ca161c23695c018cc8b76572c901d3bcdba74165aae4527";
+export const DYNAMIC_TEMPLATE_SCHEMA_HASH = "829234be944299184ba86551c47b16c655861c4f19208950dcdeb7692340c3f0";
 export const TEMPLATE_RECIPE_SCHEMA = {
   "type": "object",
   "additionalProperties": false,
@@ -691,6 +691,7 @@ export const DYNAMIC_TEMPLATE_METADATA_FIELDS = [
   "recommendedFor",
   "desktopRatio",
   "mobileRatio",
+  "geometryPolicy",
   "canvasSize",
   "previewDesktopWidth",
   "previewMobileWidth",
@@ -701,6 +702,7 @@ export const DYNAMIC_TEMPLATE_METADATA_FIELDS = [
   "defaultBackgroundToken",
   "visualRole",
   "headerCompatibility",
+  "pageSettings",
   "tags"
 ] as const;
 export const DYNAMIC_TEMPLATE_METADATA_INTEGER_BOUNDS = {
@@ -923,6 +925,8 @@ export interface DynamicTemplateMetadata {
   recommendedFor: string[];
   desktopRatio: string;
   mobileRatio: string;
+  /** 手机几何读取路径。缺省与 paired-canvas 按 D.46 对换整节；hero-media-frame 按 D.48 只改媒体框。 */
+  geometryPolicy?: "paired-canvas" | "hero-media-frame";
   canvasSize?: DynamicTemplateCanvasSize;
   previewDesktopWidth?: number;
   previewMobileWidth?: number;
@@ -933,7 +937,25 @@ export interface DynamicTemplateMetadata {
   defaultBackgroundToken?: string;
   visualRole?: "primary-stage" | "feature-stage" | "support-stage";
   headerCompatibility?: Array<"solid" | "overlay-light">;
+  /** 模板向页面开放的可选设置（D.47）；页面未选时按模板原样。 */
+  pageSettings?: DynamicTemplatePageSettingsDeclaration;
   tags: string[];
+}
+
+export type DynamicTemplateMediaSide = "start" | "end";
+
+export interface DynamicTemplatePageSettingsDeclaration {
+  /** 图片位置：页面可在桌面把目标横排容器左右对调，手机排布与阅读顺序不变。 */
+  mediaSide?: {
+    targetNodeId: string;
+    /** 模板原样的图片位置：start 为左，end 为右。 */
+    authoredSide: DynamicTemplateMediaSide;
+  };
+}
+
+/** 页面实例选定的设置；只能选模板声明过的项。 */
+export interface TemplateInstancePageSettings {
+  mediaSide?: DynamicTemplateMediaSide;
 }
 
 /** 统一母模板的正式产品合同。 */
@@ -966,6 +988,8 @@ export interface TemplateInstanceLayoutOverride {
   textAlign?: "left" | "center" | "right";
   marginTopPx?: number;
   marginBottomPx?: number;
+  /** 为真时这一端不绘制该文字，原文仍留给读屏。不是清空内容。 */
+  visuallyCollapsed?: boolean;
 }
 
 export type TemplateInstanceLayoutOverridesByNodeId = Record<
@@ -982,6 +1006,10 @@ export interface TemplateInstanceV2 {
   layoutOverridesByNodeId: TemplateInstanceLayoutOverridesByNodeId;
   hiddenSlotIds: string[];
   isVisible: boolean;
+  /** 图片已含排好的标题。缺省为照片：标题仍由模板绘制。 */
+  imageCarriesCopy?: boolean;
+  /** 页面选定的模板设置（D.47）。缺省或某项未选时按模板原样。 */
+  pageSettings?: TemplateInstancePageSettings;
 }
 
 export interface DynamicTemplateNodeRegistryEntry {

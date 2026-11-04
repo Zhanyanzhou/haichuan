@@ -449,29 +449,26 @@ export const productApi = {
         },
       });
     }
+    // 调用方自带取消信号时不能并入在途去重：旧请求被取消后，新请求会领到同一个已失败的 Promise。
+    const requestConfig = {
+      params: { ...params, locale },
+      signal,
+      dedupe: signal ? false : undefined,
+      suppressGlobalError: true,
+    };
     if (!useCustomerAuthStore.getState().isLoggedIn) {
-      return api.get("/products/public", {
-        params: { ...params, locale },
-        signal,
-        suppressGlobalError: true,
-      });
+      return api.get("/products/public", requestConfig);
     }
     try {
       return await api.get("/products/catalog", {
-        params: { ...params, locale },
-        signal,
+        ...requestConfig,
         headers: customerAuthHeaders(),
-        suppressGlobalError: true,
       });
     } catch (error) {
       if (requestStatus(error) !== 401) throw error;
       // 客户令牌失效时不把公开浏览变成登录墙，清理旧会话后降级到游客目录。
       clearCustomerSession();
-      return api.get("/products/public", {
-        params: { ...params, locale },
-        signal,
-        suppressGlobalError: true,
-      });
+      return api.get("/products/public", requestConfig);
     }
   },
   getById: async (id: number) => {

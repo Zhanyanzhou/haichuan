@@ -18,11 +18,12 @@ export class BindWechatDto {
   @Matches(/^1[3-9]\d{9}$/, { message: "请提供有效的手机号码" })
   phone!: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty({ message: "请输入登录密码" })
-  // 既有手机号需要原密码，新手机号的密码长度规则由 service 在短信验真后执行。
+  // 新会员可不设密码，登录后在账户里用短信设置。已注册手机号必须提供原密码。
+  // 若此处填写新密码，长度仍由 service 按 6–18 位校验。
   @MaxLength(128, { message: "密码输入过长" })
-  password!: string;
+  password?: string;
 
   @IsOptional()
   @IsString()

@@ -23,6 +23,8 @@ const sourceText = await readFile(sourcePath, "utf8");
 const source = JSON.parse(sourceText);
 const semanticValidatorSource = await readFile(semanticValidatorSourcePath, "utf8");
 const responsiveSource = await readFile(path.join(root, "client/src/page-builder/template-definition/responsive.ts"), "utf8");
+const publishGeometrySource = await readFile(path.join(root, "client/src/page-builder/template-definition/publishGeometry.ts"), "utf8");
+const mobileWorkGridSource = await readFile(path.join(root, "client/src/page-builder/template-definition/mobileWorkGrid.ts"), "utf8");
 
 function invariant(condition, message) {
   if (!condition) throw new Error(`动态模板合同无效：${message}`);
@@ -331,6 +333,8 @@ export interface DynamicTemplateMetadata {
   recommendedFor: string[];
   desktopRatio: string;
   mobileRatio: string;
+  /** 手机几何读取路径。缺省与 paired-canvas 按 D.46 对换整节；hero-media-frame 按 D.48 只改媒体框。 */
+  geometryPolicy?: "paired-canvas" | "hero-media-frame";
   canvasSize?: DynamicTemplateCanvasSize;
   previewDesktopWidth?: number;
   previewMobileWidth?: number;
@@ -341,7 +345,25 @@ export interface DynamicTemplateMetadata {
   defaultBackgroundToken?: string;
   visualRole?: "primary-stage" | "feature-stage" | "support-stage";
   headerCompatibility?: Array<"solid" | "overlay-light">;
+  /** 模板向页面开放的可选设置（D.47）；页面未选时按模板原样。 */
+  pageSettings?: DynamicTemplatePageSettingsDeclaration;
   tags: string[];
+}
+
+export type DynamicTemplateMediaSide = "start" | "end";
+
+export interface DynamicTemplatePageSettingsDeclaration {
+  /** 图片位置：页面可在桌面把目标横排容器左右对调，手机排布与阅读顺序不变。 */
+  mediaSide?: {
+    targetNodeId: string;
+    /** 模板原样的图片位置：start 为左，end 为右。 */
+    authoredSide: DynamicTemplateMediaSide;
+  };
+}
+
+/** 页面实例选定的设置；只能选模板声明过的项。 */
+export interface TemplateInstancePageSettings {
+  mediaSide?: DynamicTemplateMediaSide;
 }
 
 /** 统一母模板的正式产品合同。 */
@@ -374,6 +396,8 @@ export interface TemplateInstanceLayoutOverride {
   textAlign?: "left" | "center" | "right";
   marginTopPx?: number;
   marginBottomPx?: number;
+  /** 为真时这一端不绘制该文字，原文仍留给读屏。不是清空内容。 */
+  visuallyCollapsed?: boolean;
 }
 
 export type TemplateInstanceLayoutOverridesByNodeId = Record<
@@ -390,6 +414,10 @@ export interface TemplateInstanceV2 {
   layoutOverridesByNodeId: TemplateInstanceLayoutOverridesByNodeId;
   hiddenSlotIds: string[];
   isVisible: boolean;
+  /** 图片已含排好的标题。缺省为照片：标题仍由模板绘制。 */
+  imageCarriesCopy?: boolean;
+  /** 页面选定的模板设置（D.47）。缺省或某项未选时按模板原样。 */
+  pageSettings?: TemplateInstancePageSettings;
 }
 
 export interface DynamicTemplateNodeRegistryEntry {
@@ -434,6 +462,10 @@ ${semanticValidatorSource
   .replace(
     'from "./responsive";',
     'from "./templateResponsive.generated";',
+  )
+  .replace(
+    'from "./publishGeometry";',
+    'from "./publishGeometry.generated";',
   )}`;
 
 invariant(
@@ -454,6 +486,26 @@ if (checkOnly) {
     mismatched = true;
   }
 } else await writeFile(responsiveOutputPath, responsiveGenerated, "utf8");
+
+const mobileWorkGridOutputPath = path.join(root, "server/src/modules/page-modules/generated/mobileWorkGrid.generated.ts");
+const mobileWorkGridGenerated = `/** 自动生成，禁止手改。来源：client/src/page-builder/template-definition/mobileWorkGrid.ts */\n${mobileWorkGridSource}`;
+const publishGeometryOutputPath = path.join(root, "server/src/modules/page-modules/generated/publishGeometry.generated.ts");
+const publishGeometryGenerated = `/** 自动生成，禁止手改。来源：client/src/page-builder/template-definition/publishGeometry.ts */\n${publishGeometrySource
+  .replaceAll('from "./generated/templateDefinition.generated";', 'from "./templateDefinition.generated";')
+  .replaceAll('from "./mobileWorkGrid";', 'from "./mobileWorkGrid.generated";')
+  .replaceAll('from "./responsive";', 'from "./templateResponsive.generated";')
+  .replaceAll('from "./validateTemplateDefinition";', 'from "./validateTemplateDefinition.generated";')}`;
+for (const [outputPath, contents, label] of [
+  [mobileWorkGridOutputPath, mobileWorkGridGenerated, "动态模板手机作品栅格生成物不一致"],
+  [publishGeometryOutputPath, publishGeometryGenerated, "动态模板发布几何生成物不一致"],
+]) {
+  if (checkOnly) {
+    if (await readFile(outputPath, "utf8").catch(() => "") !== contents) {
+      console.error(label);
+      mismatched = true;
+    }
+  } else await writeFile(outputPath, contents, "utf8");
+}
 for (const outputPath of typeOutputPaths) {
   await mkdir(path.dirname(outputPath), { recursive: true });
   if (checkOnly) {

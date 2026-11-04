@@ -239,6 +239,13 @@ export function analyzeDynamicTemplateUpgrade(input: {
       }));
     }
   }
+  if (instance.pageSettings?.mediaSide && !targetDefinition.metadata.pageSettings?.mediaSide) {
+    destructiveBlockers.push({
+      kind: "layout",
+      nodeId: currentDefinition.metadata.pageSettings?.mediaSide?.targetNodeId,
+      reason: "页面选择的“图片位置”无法由目标版本表达。",
+    });
+  }
 
   const addedSlotIds = new Set(slotDiff.added);
   const pendingRequiredSlots = Object.values(targetDefinition.slots).flatMap((slot) => {

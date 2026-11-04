@@ -83,11 +83,7 @@ test.describe("公开页面自动无障碍回归（自有 API Mock）", () => {
       const headerActions = page.getByRole("banner").getByRole("navigation", { name: "菜单与搜索" });
       await expect(headerActions).toBeAttached();
       await expect(headerActions.getByRole("button", { name: "打开菜单", exact: true })).toBeVisible();
-      if (viewport.name === "desktop") {
-        await expect(headerActions.getByRole("button", { name: "搜索", exact: true })).toBeVisible();
-      } else {
-        await expect(headerActions.getByRole("button", { name: "搜索", exact: true })).toBeHidden();
-      }
+      await expect(headerActions.getByRole("button", { name: "搜索", exact: true })).toBeVisible();
       await scan(page, testInfo, "privacy");
 
       const toggle = page.getByRole("button", { name: "打开菜单", exact: true });

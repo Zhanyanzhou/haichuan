@@ -18,6 +18,7 @@ import {
 import { getContentTemplateContract } from "../generated/contentTemplates.generated";
 import { getContentTemplateModuleTypeForSlotType } from "../template-definition/validateTemplateDefinition";
 import { focusFirstInvalidNumberField } from "../inspector/controls/NumberField";
+import { editingGeometryDiverged } from "./templateEditingGeometry";
 import { resolveTemplateBreakpoint, type TemplateBreakpoint } from "../template-definition/responsive";
 import {
   createTemplateEditorSelectionSnapshot,
@@ -352,6 +353,7 @@ interface TemplateEditorSessionState {
   inspectorView: TemplateInspectorView;
   previewMode: boolean;
   previewScenario: TemplateStressPreviewScenario;
+  previewFillSamples: boolean;
   canvasZoom: number | null;
   previewWidth: number | null;
   workspaceScroll: TemplateWorkspaceScrollState;
@@ -399,6 +401,8 @@ interface TemplateEditorSessionState {
   confirmStressPreviewScenarioReview: (scenario: TemplateStressPreviewScenario) => void;
   setPreviewMode: (previewMode: boolean) => void;
   setPreviewScenario: (previewScenario: TemplateStressPreviewScenario) => void;
+  setPreviewFillSamples: (previewFillSamples: boolean) => void;
+  alignEditingGeometry: () => void;
   setCanvasZoom: (canvasZoom: number | null) => void;
   setPreviewWidth: (width: number | null) => boolean;
   setWorkspaceScroll: (
@@ -440,6 +444,7 @@ const EMPTY_STATE = {
   inspectorView: "context" as const,
   previewMode: false,
   previewScenario: "short-text" as const,
+  previewFillSamples: false,
   canvasZoom: null as number | null,
   previewWidth: null as number | null,
   workspaceScroll: {
@@ -722,6 +727,17 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set,
   executeCommand: (command) => {
     const state = get();
     if (state.previewMode) return createPreviewReadOnlyResult(command.label);
+    if (editingGeometryDiverged(state.device, state.breakpoint)) {
+      const result: DynamicTemplateCommandResult = {
+        ok: false,
+        changed: false,
+        code: "GEOMETRY_SCOPE_MISMATCH",
+        label: command.label,
+        message: "当前查看的设备和正在编辑的一端不一致。请先恢复到同一端，再修改设计。",
+      };
+      set({ lastCommandResult: result });
+      return result;
+    }
     if (!state.draft) {
       const result: DynamicTemplateCommandResult = {
         ok: false,
@@ -996,6 +1012,12 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set,
   )),
   setPreviewMode: (previewMode) => set({ previewMode, activeInteraction: null, previewDocument: null }),
   setPreviewScenario: (previewScenario) => set({ previewScenario }),
+  setPreviewFillSamples: (previewFillSamples) => set({ previewFillSamples }),
+  alignEditingGeometry: () => set((state) => ({
+    breakpoint: state.device,
+    previewWidth: null,
+    lastCommandResult: null,
+  })),
   setCanvasZoom: (canvasZoom) => set((state) => (
     state.previewMode ? state : { canvasZoom }
   )),

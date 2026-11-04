@@ -278,11 +278,13 @@ interface MasterSpec {
   visualRole: "primary-stage" | "feature-stage" | "support-stage";
   recommendedFor: string[];
   body: NodeSpec;
+  /** 开放“图片位置”的图文分栏节点 id；作者构图里媒体列在前，即图在左。 */
+  mediaSideNodeId?: string;
 }
 
 /**
  * M1 页面首屏：全幅主视觉 + 前景叠加。
- * 七块里唯一一处固定画幅——`Stack 主舞台` 桌面 free + 16:9，手机 flow + auto。
+ * 桌面主舞台 `Stack` 为 free + 16:9。手机主舞台随内容增高，背景媒体框为 9:16。
  * 前景用 `Container` 而不是 `Stack`：机器合同不允许 `Stack` 直接包含 `Stack`（文档第 2.1 节）。
  */
 const PAGE_HERO: MasterSpec = {
@@ -325,7 +327,7 @@ const PAGE_HERO: MasterSpec = {
         key: "heroBackground",
         label: "背景图",
         ratio: "16:9",
-        mobileRatio: "4:5",
+        mobileRatio: "9:16",
         semanticRole: "backgroundImage",
         // 铺满画布、无圆角（文档第 3 节 M1 槽位表）。
         desktop: { placement: { x: 0, y: 0, width: 1, height: 1, zIndex: 0 }, radius: px(0), width: "fill" },
@@ -501,11 +503,12 @@ const COLLECTION_STORY: MasterSpec = {
 const EDITORIAL_SPLIT: MasterSpec = {
   role: "editorial-split",
   title: "左右图文",
-  description: "一段说明配一张主图与两张细节副图；手机三张图统一 4:5，副图组仍并排。",
+  description: "一段说明配一张主图与两张 4:5 细节副图；手机图在上、文在下，副图组仍并排。",
   layoutType: "左图右文",
   desktopRatio: "3:2",
   visualRole: "feature-stage",
   recommendedFor: ["home", "products", "custom", "about", "contact"],
+  mediaSideNodeId: "split",
   body: blockBody([
     splitRow(
       structure(
@@ -534,7 +537,7 @@ const EDITORIAL_SPLIT: MasterSpec = {
                 name: "副图 1",
                 key: "splitDetailA",
                 label: "副图 1",
-                ratio: "1:1",
+                ratio: "4:5",
                 mobileRatio: "4:5",
                 semanticRole: "secondaryImage",
                 desktop: { width: "fill" },
@@ -544,7 +547,7 @@ const EDITORIAL_SPLIT: MasterSpec = {
                 name: "副图 2",
                 key: "splitDetailB",
                 label: "副图 2",
-                ratio: "1:1",
+                ratio: "4:5",
                 mobileRatio: "4:5",
                 semanticRole: "secondaryImage",
                 desktop: { width: "fill" },
@@ -682,13 +685,13 @@ const CRAFT_DETAIL: MasterSpec = {
 };
 
 /**
- * M5 作品网格：首发固定三格，展示已审核作品，不绑定商品、不显示品名。
+ * M5 作品网格：首发固定四格，展示已审核作品，不绑定商品、不显示品名。
  * 将来做绑定商品的网格必须另立一块母版。
  */
 const CREATION_GRID: MasterSpec = {
   role: "creation-grid",
   title: "作品网格",
-  description: "标题加一段说明，下接三格等宽作品；卡比例两端不变，手机由三列改两列。",
+  description: "下接四格等宽作品；卡比例两端不变。桌面四列一行，手机两列两行。标题与说明默认不显示，可在模板属性中打开。",
   layoutType: "卡片式布局",
   desktopRatio: "4:5",
   visualRole: "feature-stage",
@@ -716,13 +719,14 @@ const CREATION_GRID: MasterSpec = {
       "Grid",
       "作品卡组",
       [
-        // 三格是并列关系，没有主副之分，因此不声明语义角色。
+        // 四格是并列关系，没有主副之分，因此不声明语义角色。
         imageSlot({ id: "workA", name: "作品图 1", key: "workA", label: "作品图 1", ratio: "4:5", desktop: { width: "fill" } }),
         imageSlot({ id: "workB", name: "作品图 2", key: "workB", label: "作品图 2", ratio: "4:5", desktop: { width: "fill" } }),
         imageSlot({ id: "workC", name: "作品图 3", key: "workC", label: "作品图 3", ratio: "4:5", desktop: { width: "fill" } }),
+        imageSlot({ id: "workD", name: "作品图 4", key: "workD", label: "作品图 4", ratio: "4:5", desktop: { width: "fill" } }),
       ],
-      { columns: [1, 1, 1], gap: px(TIGHT_GAP) },
-      // 只存两端列数：768～1439px 的栏数减少是几何适配，不另存一套内容。
+      { columns: [1, 1, 1, 1], gap: px(TIGHT_GAP) },
+      // 手机只记录两列。四张正好两行；奇数张的首张跨列仍由渲染器完成，不写进定义。
       { columns: [1, 1] },
     ),
   ]),
@@ -1022,10 +1026,14 @@ function buildMaster(spec: MasterSpec, templateId: string = masterTemplateId(spe
     desktopRatio: spec.desktopRatio,
     // 手机一律随内容增长：推荐画幅落在主图外框上，不落在根高度上（第 3 节说明 1）。
     mobileRatio: "auto",
+    geometryPolicy: "hero-media-frame",
     previewDesktopWidth: PREVIEW_DESKTOP_WIDTH,
     previewMobileWidth: RESPONSIVE_CANVAS.mobile.width,
     visualRole: spec.visualRole,
     tags: [LAUNCH_CATEGORY, spec.title],
+    ...(spec.mediaSideNodeId
+      ? { pageSettings: { mediaSide: { targetNodeId: `${templateId}_node_${spec.mediaSideNodeId}`, authoredSide: "start" as const } } }
+      : {}),
   };
   assertPublishable(definition);
   return definition;

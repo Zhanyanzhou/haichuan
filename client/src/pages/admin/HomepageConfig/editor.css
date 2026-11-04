@@ -1626,9 +1626,14 @@ body:has(.homepage-editor)
   left: 0;
   transform-origin: top left;
 }
-/* 画布预览保持纯白，仅在编辑器画布内生效。 */
+/* 画布预览保持纯白，且只在编辑器 iframe 内生效。
+   页面滚动由外层画布接管。iframe 文档若出现哪怕 1px 溢出，
+   Windows 会在右侧画出几乎铺满的深色滚动条。 */
+html:has(.homepage-editor__storefront-frame),
 body:has(.homepage-editor__storefront-frame) {
-  background: var(--adm-content-bg);
+  overflow: hidden;
+  background: var(--adm-content-bg, #ffffff);
+  color-scheme: light;
 }
 .homepage-editor__storefront-frame {
   display: flex;
@@ -1728,12 +1733,18 @@ body:has(.homepage-editor__storefront-frame) {
   .site-header__left-group {
   position: absolute;
 }
-/* 编辑态导航只承担视觉参考和由外层控制的菜单状态，不能覆盖首屏对象的
-   选择、拖动或缩放命中区。显式预览时恢复导航自身的指针交互。 */
+/* 编辑态页头条本身不接点击，空白处仍能选中、拖动下面的首屏。
+   pointer-events 会继承，必须把链接和按钮单独打开，否则菜单、搜索、
+   账户和购物袋都点不中。 */
 .homepage-editor__storefront-frame[data-canvas-editable="true"]
   .storefront-navigation--preview
   .site-header {
   pointer-events: none;
+}
+.homepage-editor__storefront-frame[data-canvas-editable="true"]
+  .storefront-navigation--preview
+  .site-header :is(a, button) {
+  pointer-events: auto;
 }
 .homepage-editor__storefront-frame .storefront-navigation--preview .brand-menu {
   position: absolute;
@@ -1822,9 +1833,12 @@ body:has(.homepage-editor__storefront-frame) {
   isolation: isolate;
 }
 .homepage-editor__preview-frame.is-device {
-  border: 1px solid var(--adm-line);
+  border: 0;
   border-radius: 5px;
-  box-shadow: 0 10px 26px rgba(24,26,27, 0.12);
+  /* 描边用阴影，避免 border-box 把 iframe 视口挤窄、挤矮后露出滚动条。 */
+  box-shadow:
+    0 0 0 1px var(--adm-line),
+    0 10px 26px rgba(24,26,27, 0.12);
 }
 .homepage-editor__device-bar {
   display: none;
@@ -1938,11 +1952,18 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   cursor: not-allowed;
   opacity: 0.55;
 }
-.homepage-editor__preview-frame :is(img, video, embed, object) {
+.homepage-editor__preview-frame :is(img, video, embed, object):not([data-template-image-fit]) {
   position: relative !important;
   display: block;
   width: 100% !important;
   max-width: 100% !important;
+  box-sizing: border-box;
+}
+.homepage-editor__preview-frame img[data-template-image-fit] {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
   box-sizing: border-box;
 }
 .homepage-editor__preview-frame video {
@@ -1953,6 +1974,7 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   width: 100%;
   height: 100% !important;
   min-height: 0;
+  overflow: hidden;
   border: 0;
 }
 .homepage-media-spec {
@@ -2040,6 +2062,18 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
 }
 .homepage-editor__canvas-empty span {
   font-size: 12px;
+}
+.homepage-editor__canvas-template-preview {
+  position: relative;
+  z-index: 2;
+}
+/* Puck 把模块后代的指针事件关掉，点击会落到外层包装上。
+   预览不在页面数据里，必须自己接收点击，避免误选相邻模块。 */
+.homepage-editor__canvas-template-preview,
+.homepage-editor__canvas-template-preview * {
+  pointer-events: auto !important;
+  user-select: text;
+  -webkit-user-select: text;
 }
 .homepage-editor__hidden-block {
   display: grid;
@@ -3231,9 +3265,11 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   box-shadow: 0 12px 34px rgba(24,26,27, 0.06);
 }
 .homepage-editor__preview-frame {
-  border: 1px solid var(--adm-line);
+  border: 0;
   border-radius: 7px;
-  box-shadow: 0 14px 32px rgba(24,26,27, 0.14);
+  box-shadow:
+    0 0 0 1px var(--adm-line),
+    0 14px 32px rgba(24,26,27, 0.14);
 }
 .homepage-editor__layer-rail {
   border-right: 1px solid var(--adm-line);
@@ -6162,6 +6198,56 @@ button.template-editor__toolbar-state:focus-visible {
   padding-block: 9px;
   line-height: 1.6;
 }
+.homepage-editor__contact-facts,
+.homepage-editor__contact-fact,
+.homepage-editor__contact-qr {
+  display: grid;
+  gap: 8px;
+}
+.homepage-editor__contact-facts {
+  gap: 16px;
+}
+.homepage-editor__contact-facts-note,
+.homepage-editor__contact-qr-label {
+  margin: 0;
+  color: var(--adm-muted);
+  font-size: 13px;
+  line-height: 22px;
+}
+.homepage-editor__contact-facts-note[role="alert"] {
+  color: var(--adm-error);
+}
+.homepage-editor__contact-qr-label {
+  color: var(--adm-text-strong);
+  font-size: 12px;
+  font-weight: 500;
+}
+.homepage-editor__contact-qr img {
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
+  border: 1px solid var(--adm-line);
+  border-radius: 4px;
+  background: var(--adm-content-bg);
+}
+.homepage-editor__contact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.homepage-editor__contact-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--adm-ink);
+  border-radius: 4px;
+  color: var(--adm-ink);
+  font-size: 14px;
+  line-height: 22px;
+  text-decoration: none;
+}
 
 /* 图片是编辑区第二主角：桌面图使用大幅横向预览，手机图保留竖向构图。 */
 .homepage-editor__inspector .homepage-editor__media-preview-img {
@@ -6945,6 +7031,12 @@ button.template-editor__toolbar-state:focus-visible {
   color: var(--inspector-action);
   background: var(--inspector-canvas);
   box-shadow: inset 0 0 0 1px rgba(24, 26, 27, 0.12);
+}
+.homepage-editor__inspector .homepage-editor__inspector-segmented button:disabled {
+  border-color: var(--inspector-line);
+  color: var(--inspector-text);
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .homepage-editor__inspector .homepage-editor__properties-actions {

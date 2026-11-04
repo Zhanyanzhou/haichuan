@@ -388,9 +388,16 @@ test("Catalog 搜索的空态、错误态与 390px 溢出状态完整", async ({
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/catalog");
   const input = page.getByRole("search").getByRole("combobox", { name: "关键词或货号" });
+  await input.fill("作品 01");
+  await expect(page.getByRole("heading", { name: "作品 01", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "作品 02", exact: true })).toHaveCount(0);
+  await input.press("ControlOrMeta+a");
+  await input.press("Backspace");
+  await expect(page).not.toHaveURL(/query=/);
+  await expect(page.getByRole("heading", { name: "作品 02", exact: true })).toBeVisible();
   await input.fill("无结果");
-  await input.press("Enter");
-  await expect(page.getByText("没有符合当前筛选的作品")).toBeVisible();
+  await expect(page.getByText("没有找到「无结果」")).toBeVisible();
+  await expect(page.getByRole("button", { name: "查看全部作品" })).toBeVisible();
 
   await input.fill("触发错误");
   await input.press("Enter");
@@ -422,7 +429,7 @@ test("Catalog 筛选无结果时保留仍有效的持久化选款", async ({ pag
   await seedSelection(page, [1]);
   await page.goto("/catalog?query=%E6%97%A0%E7%BB%93%E6%9E%9C");
 
-  await expect(page.getByText("没有符合当前筛选的作品")).toBeVisible();
+  await expect(page.getByText("没有找到「无结果」")).toBeVisible();
   await expect(
     page.getByRole("button", { name: "查看已选 1 款并提交选款咨询" }),
   ).toBeVisible();

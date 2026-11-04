@@ -8,6 +8,7 @@ import { usePageMetaStore } from "@/store/pageMetaStore";
 import { usePageDecorationState } from "@/page-builder/runtime/PublishedPageDecoration";
 import { normalizePublicProductReference } from "@/utils/publicProductPath";
 import { lookupPublicWork } from "@/data/publicWorkLookup";
+import { clampProductTitle } from "@/utils/productTitleLength";
 import { usePublicContactResource, type PublicSiteSettingsResource } from "@/hooks/usePublicSiteSettings";
 import PublicContactDetails from "@/components/common/PublicContactDetails";
 import { useStructuredData } from "@/hooks/useStructuredData";
@@ -497,7 +498,7 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
   };
 
   const virtualInquiryPrefix = sourceProduct?.virtual
-    ? `【演示款式 ${sourceProduct.name} ${sourceProduct.code || ""}】`.trim()
+    ? `【演示款式 ${clampProductTitle(sourceProduct.name)} ${sourceProduct.code || ""}】`.trim()
     : "";
   const messageLimit = virtualInquiryPrefix
     ? Math.max(0, 2000 - virtualInquiryPrefix.length - 1)
@@ -793,11 +794,11 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
       style={{ background: T.bg }}
     >
       {embedded ? (
-        <div className="contact-chapter" style={{ width: "min(40rem, calc(100% - 2 * clamp(20px, 5.55vw, 80px)))", marginInline: "auto", paddingTop: "clamp(36px,5vh,56px)", textAlign: "center" }}>
-          <h2 style={{ fontFamily: '"Noto Serif SC", "Songti SC", SimSun, serif', fontSize: "clamp(22px,2.8vw,32px)", fontWeight: 400, color: T.txt, margin: "0 0 8px" }}>
+        <div className="contact-chapter" style={{ width: "min(1120px, calc(100% - 2 * clamp(20px, 5.55vw, 80px)))", marginInline: "auto", paddingTop: "clamp(48px, 6vw, 80px)", textAlign: "left" }}>
+          <h2 style={{ fontFamily: '"Noto Serif SC", "Songti SC", SimSun, serif', fontSize: "clamp(24px, 2.5vw, 32px)", fontWeight: 400, color: T.txt, margin: "0 0 12px", lineHeight: 1.35 }}>
             预约咨询
           </h2>
-          <p style={{ fontSize: 14, color: T.sec, margin: "0 auto", maxWidth: 520, lineHeight: 1.7 }}>
+          <p style={{ fontSize: 16, color: T.sec, margin: 0, maxWidth: "36em", lineHeight: 1.75 }}>
             微信和电话可直接沟通。若暂时不便联系，可在此留下选款、定制或到店需求，我们按您选择的方式回复。
           </p>
         </div>
@@ -842,7 +843,7 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
         <div
           className="contact-grid"
           style={embedded ? {
-            width: "min(40rem, calc(100% - 2 * clamp(20px, 5.55vw, 80px)))",
+            width: "min(1120px, calc(100% - 2 * clamp(20px, 5.55vw, 80px)))",
             marginInline: "auto",
             display: "block",
           } : {
@@ -899,7 +900,7 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
                       本次咨询作品
                     </p>
                     <strong style={{ display: "block", color: T.txt, fontSize: 15, fontWeight: 500 }}>
-                      {sourceProduct.name}
+                      {clampProductTitle(sourceProduct.name)}
                     </strong>
                     <p style={{ margin: "4px 0 12px", color: T.sec, fontSize: 12 }}>
                       货号：{sourceProduct.code || "未提供"}
@@ -1464,45 +1465,48 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
         }}
       >
         <div className="contact-faq" style={embedded ? {
-          width: "min(40rem, calc(100% - 2 * clamp(20px, 5.55vw, 80px)))",
+          width: "min(1120px, calc(100% - 2 * clamp(20px, 5.55vw, 80px)))",
           marginInline: "auto",
         } : { maxWidth: MW, marginInline: "auto", paddingInline: PX }}>
-          <p
+          <h2
             style={{
-              fontSize: 11,
-              letterSpacing: "0.12em",
-              color: T.light,
-              marginBottom: 20,
+              fontFamily: '"Noto Serif SC", "Songti SC", SimSun, serif',
+              fontSize: "clamp(24px, 2.5vw, 32px)",
+              fontWeight: 400,
+              lineHeight: 1.35,
+              color: T.txt,
+              margin: "0 0 24px",
             }}
           >
             常见问题
-          </p>
-          <div style={{ display: "grid", gap: 16 }}>
+          </h2>
+          <div style={{ display: "grid", gap: 24, maxWidth: "40em" }}>
             {FAQS.map((faq, i) => (
               <div
                 key={i}
                 style={{
-                  paddingBottom: i < FAQS.length - 1 ? 16 : 0,
+                  paddingBottom: i < FAQS.length - 1 ? 24 : 0,
                   borderBottom:
                     i < FAQS.length - 1 ? `1px solid ${T.line}` : "none",
                 }}
               >
                 <p
                   style={{
-                    fontSize: 14,
+                    fontSize: 16,
                     fontWeight: 400,
+                    lineHeight: 1.75,
                     color: T.txt,
-                    margin: "0 0 4px",
+                    margin: "0 0 8px",
                   }}
                 >
                   {faq.q}
                 </p>
                 <p
                   style={{
-                    fontSize: 13,
+                    fontSize: 15,
                     color: T.sec,
                     margin: 0,
-                    lineHeight: 1.6,
+                    lineHeight: 1.75,
                   }}
                 >
                   {faq.a}

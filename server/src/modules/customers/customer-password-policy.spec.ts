@@ -167,12 +167,12 @@ test("会员历史长密码仍能按原哈希登录", async () => {
   assert.equal("passwordHash" in result.customer, false);
 });
 
-test("微信绑定创建新会员需短信验真并强制 6-18 位新密码", async () => {
-  const createdPasswords: string[] = [];
+test("微信绑定创建新会员需短信验真；密码可留空，填写时仍强制 6-18 位", async () => {
+  const createdPasswords: Array<string | null> = [];
   const prisma = {
       customer: {
         findUnique: async () => null,
-        create: async ({ data }: { data: { phone: string; passwordHash: string } }) => {
+        create: async ({ data }: { data: { phone: string; passwordHash: string | null } }) => {
           createdPasswords.push(data.passwordHash);
           return {
             id: 9,
@@ -228,6 +228,23 @@ test("微信绑定创建新会员需短信验真并强制 6-18 位新密码", as
   }
   assert.equal(createdPasswords.length, 0);
 
+  const withoutPassword = await service.bindWechat({
+    bindToken: "header.payload.signature",
+    phone: "13800138000",
+    smsCode: "123456",
+  });
+  assert.equal(withoutPassword.customer.id, 9);
+  assert.equal(createdPasswords.at(-1), null);
+
+  const blankPassword = await service.bindWechat({
+    bindToken: "header.payload.signature",
+    phone: "13800138000",
+    password: "   ",
+    smsCode: "123456",
+  });
+  assert.equal(blankPassword.customer.id, 9);
+  assert.equal(createdPasswords.at(-1), null);
+
   for (const password of ["a1b2c3", `a1${"x".repeat(16)}`]) {
     const result = await service.bindWechat({
       bindToken: "header.payload.signature",
@@ -238,7 +255,7 @@ test("微信绑定创建新会员需短信验真并强制 6-18 位新密码", as
     assert.equal(result.customer.id, 9);
     assert.equal(await bcrypt.compare(password, createdPasswords.at(-1)!), true);
   }
-  assert.equal(createdPasswords.length, 2);
+  assert.equal(createdPasswords.length, 4);
 });
 
 test("短信通道未配置时微信绑定拒绝新建账户（不建无主权号）", async () => {
@@ -319,5 +336,18 @@ test("微信绑定既有手机号按历史哈希校验且不套用 18 位新密�
     password: historicalPassword,
   });
   assert.equal(result.customer.id, 12);
+  assert.equal(updatedCustomerId, 12);
+
+  await assert.rejects(
+    service.bindWechat({
+      bindToken: "header.payload.signature",
+      phone: "13800138000",
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof BadRequestException);
+      assert.match(error.message, /请输入原密码/);
+      return true;
+    },
+  );
   assert.equal(updatedCustomerId, 12);
 });

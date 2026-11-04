@@ -404,6 +404,7 @@ function Preview({
         contentBySlotId={contentBySlotId}
         hiddenSlotIds={instance.hiddenSlotIds}
         layoutOverridesByNodeId={instance.layoutOverridesByNodeId}
+        pageSettings={instance.pageSettings}
         mode="thumbnail"
       />
     </div>

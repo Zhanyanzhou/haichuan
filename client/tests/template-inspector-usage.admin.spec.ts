@@ -22,6 +22,15 @@ test("确定性 UI：空白模板先显示整体尺寸与比例，模板设置�
   });
   const overall = page.getByRole("group", { name: "模板整体比例预设", exact: true });
   await expect(overall).toBeVisible();
+  // 桌面给横版档位，手机给对换后的竖版档位（16:9 对 9:16，4:3 对 3:4）。
+  await expect(overall.getByRole("button", { name: "16:9", exact: true })).toBeVisible();
+  await expect(overall.getByRole("button", { name: "9:16", exact: true })).toHaveCount(0);
+  await page.evaluate(() => window.__templateScopeSession.getState().setBreakpoint("mobile"));
+  await expect(overall.getByRole("button", { name: "9:16", exact: true })).toBeVisible();
+  await expect(overall.getByRole("button", { name: "3:4", exact: true })).toBeVisible();
+  await expect(overall.getByRole("button", { name: "16:9", exact: true })).toHaveCount(0);
+  await page.evaluate(() => window.__templateScopeSession.getState().setBreakpoint("desktop"));
+  await expect(overall.getByRole("button", { name: "16:9", exact: true })).toBeVisible();
   const templateName = page.getByRole("textbox", { name: "模板名称", exact: true });
   const usage = page.getByRole("region", { name: "模板名称与页面职责", exact: true });
   await expect(templateName).toHaveValue("空白职责测试");
@@ -91,7 +100,18 @@ test("确定性 UI：页面表单顺序和填写规则来自现有字段，查�
     return { definition: JSON.stringify(state.draft!.definition), dirty: state.dirty, history: state.historyPast.length };
   });
   const before = await snapshot();
+  const rows = page.locator("[data-template-page-rule-row]");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText("工艺主图");
+  await expect(rows.nth(1)).toContainText("工艺标题");
+  await expect(rows.nth(1)).toHaveAccessibleName("编辑工艺标题的页面使用规则");
+  await expect(rows.nth(1)).toContainText("编辑规则");
   const preview = page.locator(".template-editor__page-form-preview");
+  expect(await preview.evaluate((element) => {
+    const rows = document.querySelectorAll("[data-template-page-rule-row]");
+    const lastRow = rows.item(rows.length - 1);
+    return Boolean(lastRow && (lastRow.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING));
+  })).toBe(true);
   await preview.getByText("查看页面字段 · 2 项 · 只读", { exact: true }).click();
   const fields = preview.locator(".template-editor__page-form-field");
   await expect(fields).toHaveCount(2);
@@ -104,4 +124,24 @@ test("确定性 UI：页面表单顺序和填写规则来自现有字段，查�
   await fields.nth(1).getByRole("button", { name: "工艺标题 建议填写 · 定位对象", exact: true }).click();
   expect(await snapshot()).toEqual(before);
   await expect(page.locator('[data-template-page-scope-field="label"] input')).toHaveValue("工艺标题");
+});
+
+test("确定性 UI：页面规则清单明确可编辑，定位和返回不写模板", async ({ page }, testInfo) => {
+  await mountInspector(page);
+  await page.evaluate(() => window.__templateScopeSession.getState().selectObject(window.__templateScopeIds.rootId));
+  const snapshot = () => page.evaluate(() => {
+    const state = window.__templateScopeSession.getState();
+    return { definition: structuredClone(state.draft!.definition), history: state.historyPast.length, dirty: state.dirty };
+  });
+  const before = await snapshot();
+  const row = page.getByRole("button", { name: "编辑工艺标题的页面使用规则", exact: true });
+  await expect(row).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("properties-page-rules.png"), animations: "disabled" });
+  await row.click();
+  await expect(page.locator('[data-template-page-scope-field="label"] input')).toHaveValue("工艺标题");
+  expect(await snapshot()).toEqual(before);
+  await expect(page.getByRole("switch", { name: "页面可填写内容", exact: true })).toBeChecked();
+  await page.getByRole("button", { name: "返回当前结构全部字段", exact: true }).click();
+  await expect(page.locator("[data-template-page-rule-row]")).toHaveCount(2);
+  expect(await snapshot()).toEqual(before);
 });

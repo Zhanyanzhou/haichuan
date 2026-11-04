@@ -10,6 +10,7 @@ import type { InventoryPolicy, Product } from "@/types";
 import { trackRemoveFromCart, trackViewCart } from "@/hooks/useAnalytics";
 import { getRequestErrorMessage } from "@/services/httpClient";
 import RouteLoading from "@/components/common/RouteLoading";
+import { clampProductTitle } from "@/utils/productTitleLength";
 
 type CartItem = {
   id: number;
@@ -238,7 +239,7 @@ export default function Cart() {
                 className="flex flex-col gap-4 p-5 bg-brand-surface border border-brand-line sm:flex-row sm:gap-6 sm:p-6">
                 <div className="w-full aspect-[4/3] bg-brand-bg flex-shrink-0 flex items-center justify-center sm:w-24 sm:h-24 sm:aspect-auto"><ShoppingOutlined className="text-brand-muted text-2xl" /></div>
                 <div className="flex-1 min-w-0">
-                  <Link to={`/products/${item.productId}`} className="font-display text-lg hover:text-brand-gold transition-colors">{item.product.name}</Link>
+                  <Link to={`/products/${item.productId}`} className="font-display text-lg hover:text-brand-gold transition-colors" title={item.product.name}>{clampProductTitle(item.product.name)}</Link>
                   <p className="text-sm text-brand-muted mt-1">{getMaterialLabel(item.sku.material)} · {getItemGoldWeight(item)}g</p>
                   <div className="flex flex-col gap-4 mt-4 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex items-center gap-3">

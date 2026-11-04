@@ -130,6 +130,7 @@ import {
 import { editorPages } from "../config/editorPages";
 import { TEMPLATE_NODE_NAME_MAX_LENGTH } from "./templateEditorLimits";
 import { describePublishedTemplateAvailability } from "./templatePublishWorkflow";
+import { templateContentMatchesPublishedVersion } from "./templatePublicationStatus";
 import {
   getTemplateInspectorCapabilities,
   getTemplateResponsiveSource,
@@ -1120,6 +1121,7 @@ export default function DynamicTemplateInspectorPanel({
     };
   }, [publishReview?.requestId, workspaceVisible]);
   const draft = useTemplateEditorSession((state) => state.draft);
+  const dirty = useTemplateEditorSession((state) => state.dirty);
   const previewDocument = useTemplateEditorSession((state) => state.previewDocument);
   const breakpoint = useTemplateEditorSession((state) => state.breakpoint);
   const baseline = useTemplateEditorSession((state) => state.baseline);
@@ -1242,6 +1244,8 @@ export default function DynamicTemplateInspectorPanel({
     const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => {
       const field = inspectorPanelRef.current?.querySelector<HTMLElement>(`[data-template-default-content="${CSS.escape(defaultContentFocus.slotId)}"]`);
       if (!field) return;
+      const details = field.tagName === "DETAILS" ? field as HTMLDetailsElement : field.closest("details");
+      if (details) details.open = true;
       field.scrollIntoView({ block: "nearest" });
       field.querySelector<HTMLElement>("button:not(:disabled),input:not(:disabled):not([type=file]):not([type=hidden]),textarea:not(:disabled)")?.focus();
     }); });
@@ -1924,13 +1928,40 @@ export default function DynamicTemplateInspectorPanel({
     : publishWorkflow && "lastFailure" in publishWorkflow
       ? publishWorkflow.lastFailure
       : undefined;
-  const publishFailureText = publishFailure?.category === "permission"
+  const inputChangedSinceReview = Boolean(
+    publishWorkflow && "currentInputChanged" in publishWorkflow && publishWorkflow.currentInputChanged,
+  );
+  const contentMatchesPublished = templateContentMatchesPublishedVersion({
+    dirty,
+    currentInputChanged: inputChangedSinceReview,
+    publishedDefinitionChecksum: draft?.remote?.publishedDefinitionChecksum,
+    draftDefinitionChecksum: draft?.remote?.draftDefinitionChecksum,
+    reviewedBaselineChecksum: reviewedSnapshot?.baseline?.checksum,
+    savedChecksum: publishWorkflow && "saved" in publishWorkflow ? publishWorkflow.saved?.checksum : undefined,
+  }) || (
+    publishFailure?.code === "DYNAMIC_TEMPLATE_CONTENT_UNCHANGED"
+    && !dirty
+    && !inputChangedSinceReview
+  );
+  const unchangedPublishedContent = contentMatchesPublished
+    && publishFailure?.category !== "permission"
+    && publishFailure?.category !== "conflict"
+    && (
+      publishWorkflow?.status === "review-ready"
+      || (publishWorkflow?.status === "partial-failure" && publishWorkflow.reason === "draft-saved-template-unpublished")
+    );
+  const unchangedPublishedCopy = `当前设计与正式版本 v${draft?.remote?.publishedVersion ?? reviewedSnapshot?.targetVersion ?? ""} 相同，没有新版本需要发布。这一版已经可以在页面装修里使用。`;
+  const publishFailureText = unchangedPublishedContent
+    ? null
+    : publishFailure?.category === "permission"
     ? "服务端拒绝当前操作：当前账号没有模板管理权限。如需处理，请联系管理员。"
     : publishFailure?.category === "conflict"
       ? "数据已被其他操作更新。当前输入仍保留，请重新检查后再试。"
-      : publishFailure
-        ? "本次操作尚未完成。当前输入和已确认事实仍保留，请使用这里的恢复动作。"
-        : null;
+      : publishFailure?.message
+        ? publishFailure.message
+        : publishFailure
+          ? "本次操作尚未完成。当前输入和已确认事实仍保留，请使用这里的恢复动作。"
+          : null;
   const publishReviewHasBlockingIssue = Boolean(publishReview) && (
     displayedValidationIssues.some((issue) => issue.level === "error")
     || publishWorkflow?.issues.some((issue) => issue.blocking)
@@ -1938,7 +1969,9 @@ export default function DynamicTemplateInspectorPanel({
   );
   const validationStatus = publishWorkflow?.status === "review-stale"
     ? "检查已过期"
-    : publishReview
+    : unchangedPublishedContent
+      ? "已是当前正式版本"
+      : publishReview
       ? publishReviewHasBlockingIssue ? "请先完成必要修改" : "可以发布"
       : activeValidation.valid
         ? isRoot ? "可以发布" : "可保存草稿"
@@ -1951,8 +1984,8 @@ export default function DynamicTemplateInspectorPanel({
               {reviewedSnapshot ? (
                 <dl className="template-editor__publish-review-summary">
                   <div><dt>模板</dt><dd>{reviewedSnapshot.reviewedDefinition.name}</dd></div>
-                  <div><dt>保存状态</dt><dd>{reviewedSnapshot.baseline ? "已有草稿，本次修改将在发布时保存" : "本次发布会先保存草稿"}</dd></div>
-                  <div><dt>目标版本</dt><dd>v{reviewedSnapshot.targetVersion}</dd></div>
+                  <div><dt>保存状态</dt><dd>{unchangedPublishedContent ? "内容与正式版本相同" : reviewedSnapshot.baseline ? "已有草稿，本次修改将在发布时保存" : "本次发布会先保存草稿"}</dd></div>
+                  <div><dt>目标版本</dt><dd>{unchangedPublishedContent ? `已是 v${draft?.remote?.publishedVersion ?? reviewedSnapshot.targetVersion}` : `v${reviewedSnapshot.targetVersion}`}</dd></div>
                   <div><dt>适用范围</dt><dd>{reviewedSnapshot.reviewedDefinition.metadata.recommendedFor.map((pageKey) => editorPages.find((page) => page.key === pageKey)?.label ?? pageKey).join("、") || "未限制页面"}</dd></div>
                   <div><dt>版本说明</dt><dd>{reviewedSnapshot.reviewedVersionNote || "未填写"}</dd></div>
                 </dl>
@@ -2008,7 +2041,7 @@ export default function DynamicTemplateInspectorPanel({
                 </Button>
               </span>
               </details>
-              {publishWorkflow?.status === "review-ready" ? <p>确认后保存当前设计并发布为模板版本。正在使用旧版本的页面草稿会自动沿用新版本，页面里已经填写的内容会保留。客户前台仍在发布页面后更新。</p> : null}
+              {publishWorkflow?.status === "review-ready" ? <p>{unchangedPublishedContent ? unchangedPublishedCopy : "确认后保存当前设计并发布为模板版本。能保留内容的页面草稿、语言草稿和装修方案会自动沿用，已填写的内容会保留。同一份里有一处保不住时，整份保持旧版本。客户前台仍在发布页面后更新。"}</p> : null}
               {publishWorkflow?.status === "review-blocked" ? <p>请完成下面的必要修改，再重新检查并发布。</p> : null}
               {publishWorkflow?.status === "review-stale" ? <p>本次检查已过期，请重新检查。已审阅快照不会被当前新输入替换。</p> : null}
               {publishWorkflow?.status === "saving-reviewed-snapshot" ? <p>正在保存本次已审阅快照；保存成功后才会发布同一版本。</p> : null}
@@ -2019,9 +2052,11 @@ export default function DynamicTemplateInspectorPanel({
                   ? "模板已发布，目录尚未同步。只能重试目录读取，不会重复发布。"
                   : publishWorkflow.reason === "draft-save-verification-conflict"
                     ? "保存结果与服务端草稿不一致。当前输入仍保留，未继续发布。"
+                    : unchangedPublishedContent
+                    ? unchangedPublishedCopy
                     : "草稿已保存，模板未发布。当前输入与正式版本事实均未被覆盖。"}</p>
               ) : null}
-              {publishWorkflow?.status === "published" ? <p>{describePublishedTemplateAvailability(publishWorkflow.published.version, publishWorkflow.catalogStatus)}</p> : null}
+              {publishWorkflow?.status === "published" ? <p>{describePublishedTemplateAvailability(publishWorkflow.published.version, publishWorkflow.catalogStatus, publishWorkflow.published.pageAdoption)}</p> : null}
               {publishFailureText ? <p className="template-editor__publish-failure-copy">{publishFailureText}</p> : null}
               {publishedDraftAvailability?.templateId === publishReview.templateId && publishedDraftAvailability.status === "checking" ? <p>正式版本已确认，正在重新读取可编辑草稿…</p> : null}
               {publishedDraftAvailability?.templateId === publishReview.templateId && publishedDraftAvailability.status === "unavailable" ? (
@@ -2035,14 +2070,14 @@ export default function DynamicTemplateInspectorPanel({
                 </span>
               </> : null}
               <span className="template-editor__validation-actions template-editor__publish-review-actions">
-                {publishWorkflow?.status === "review-ready" ? (
+                {publishWorkflow?.status === "review-ready" && !unchangedPublishedContent ? (
                   <Button type="primary" onClick={onConfirmPublish}>{publishWorkflow.snapshot.targetVersion === 1 ? "保存并发布模板" : "发布模板新版本"}</Button>
                 ) : null}
                 {publishWorkflow?.status === "review-blocked" ? <Button type="primary" disabled>保存并发布模板</Button> : null}
                 {publishWorkflow?.status === "review-stale" || (publishWorkflow?.status === "partial-failure" && publishWorkflow.reason === "draft-save-verification-conflict") ? (
                   <Button type="primary" onClick={onRecheckPublishReview}>重新检查</Button>
                 ) : null}
-                {publishWorkflow?.status === "partial-failure" && publishWorkflow.reason === "draft-saved-template-unpublished" && !publishWorkflow.currentInputChanged ? (
+                {publishWorkflow?.status === "partial-failure" && publishWorkflow.reason === "draft-saved-template-unpublished" && !publishWorkflow.currentInputChanged && !unchangedPublishedContent ? (
                   <Button type="primary" onClick={onRetryFailedPublish}>重试发布</Button>
                 ) : null}
                 {publishWorkflow?.status === "verifying-uncertain" ? <Button onClick={onRetryPublishVerification}>重新核对结果</Button> : null}
@@ -2050,7 +2085,7 @@ export default function DynamicTemplateInspectorPanel({
                 {publishedDraftAvailability?.templateId === publishReview.templateId && publishedDraftAvailability.status === "unavailable" ? <>
                   <Button onClick={onReloadPublishedDraft}>重新读取草稿</Button>
                 </> : null}
-                {publishWorkflow?.status === "published" && publishWorkflow.catalogStatus === "fresh" ? <Button type="primary" onClick={onUsePublishedTemplate}>去页面装修使用</Button> : null}
+                {publishWorkflow?.status === "published" && publishWorkflow.catalogStatus === "fresh" || unchangedPublishedContent ? <Button type="primary" onClick={onUsePublishedTemplate}>去页面装修使用</Button> : null}
                 {!(["saving-reviewed-snapshot", "publishing"] as string[]).includes(publishWorkflow?.status ?? "") ? <Button onClick={onCancelPublishReview}>{publishWorkflow?.status === "published" ? "继续设计" : "返回编辑"}</Button> : null}
               </span>
             </> : null}
@@ -2990,7 +3025,7 @@ export default function DynamicTemplateInspectorPanel({
                     value={(device === "desktop" ? slot.desktopRules : slot.mobileRules).aspectRatio ?? "auto"}
                     presets={device === "desktop"
                       ? [{ value: "16:9", label: "16:9" }, { value: "3:2", label: "3:2" }, { value: "4:3", label: "4:3" }, { value: "1:1", label: "1:1" }]
-                      : [{ value: "4:3", label: "4:3" }, { value: "1:1", label: "1:1" }, { value: "4:5", label: "4:5" }, { value: "3:4", label: "3:4" }, { value: "9:16", label: "9:16" }]}
+                      : [{ value: "4:3", label: "4:3" }, { value: "1:1", label: "1:1" }, { value: "4:5", label: "4:5" }, { value: "3:4", label: "3:4" }, { value: "2:3", label: "2:3" }, { value: "9:16", label: "9:16" }]}
                     customDefault={device === "desktop" ? "4:3" : "2:3"}
                     onChange={(aspectRatio) => updateSlot((next) => { (device === "desktop" ? next.desktopRules : next.mobileRules).aspectRatio = aspectRatio === "auto" ? undefined : aspectRatio; })}
                   />
@@ -3138,6 +3173,9 @@ export default function DynamicTemplateInspectorPanel({
         </span>
         <strong className="homepage-editor__inspector-title" title={inspectorTitle}>{inspectorTitle}</strong>
         <span className="template-editor__inspector-breadcrumb" title={inspectorBreadcrumb}>{inspectorBreadcrumb}</span>
+        <span className="template-editor__inspector-device-context">
+          当前查看：{device === "mobile" ? "手机端" : "桌面端"}{inspectorTask === "page-scope" ? " · 页面规则两端共用" : ""}
+        </span>
         {isLocked ? <span className="template-editor__object-lock-status">结构已锁定 · 属性只读</span> : null}
         {Number(definition.schemaVersion) < 2 ? (
           <Alert
@@ -3151,7 +3189,7 @@ export default function DynamicTemplateInspectorPanel({
       {selectedRoleObject && !selectedRoleApplicable ? (
         <span className="homepage-editor__inspector-device is-inapplicable">当前画布不显示</span>
       ) : null}
-      <button
+      {!isRoot ? <button
         type="button"
         className="template-editor__inspector-delete"
         onClick={() => {
@@ -3187,7 +3225,7 @@ export default function DynamicTemplateInspectorPanel({
           }
           requestDeleteTemplateNode(activeNodeId, ui);
         }}
-      >{isRoot && !selectedRoleObject ? "移入回收站" : selectedRoleObject ? "移出" : "删除"}</button>
+      >{isRoot && !selectedRoleObject ? "移入回收站" : selectedRoleObject ? "移出" : "删除"}</button> : null}
     </header>
   );
   const inspectorTaskTabs = (
@@ -3297,9 +3335,9 @@ export default function DynamicTemplateInspectorPanel({
           aria-label="页面开放范围"
         >
           <div className="template-editor__page-scope-intro">
-            <strong>交付给页面装修的字段</strong>
+            <strong>页面使用规则</strong>
             <p>{pageField && inspectorView === "context"
-              ? `${pageField.editable ? "运营可以填写内容" : "运营不能修改内容"}，${pageField.hideable ? "可以隐藏此字段" : "此字段固定显示"}。${describePageFieldOverrides(pageField)}。`
+              ? `${publicationPromiseLabel(pageField, definition.schemaVersion)} · ${pageField.editable ? "页面可填写" : "内容只读"} · ${pageField.hideable ? "页面可隐藏" : "固定显示"}`
               : `${scopedPageFields.length} 个字段 · ${scopedPageFields.filter((field) => field.required).length} 项公开时必须有内容 · ${scopedPageFields.filter((field) => field.required && (field.hideable || (!field.editable && !hasLegalFixedPublicContent(field.slotType, definition.slots[field.slotId]?.semanticRole, definition.defaultContent[field.slotId], definition.schemaVersion)))).length} 项规则冲突`}</p>
           </div>
           {validation.issues.some((issue) => issue.level === "error") ? (
@@ -3320,6 +3358,7 @@ export default function DynamicTemplateInspectorPanel({
                 <Button size="small" onClick={() => {
                   if (!focusFirstInvalidNumberField()) setInspectorView("page-fields");
                 }}>返回当前结构全部字段</Button>
+                <Button size="small" type="link" disabled={Boolean(publishReview)} onClick={() => switchInspectorTask("design")}>调整此对象的设计</Button>
               </div>
               {isLocked ? (
                 <Alert
@@ -3511,19 +3550,19 @@ export default function DynamicTemplateInspectorPanel({
             </section>
           ) : (
             <section className="template-editor__page-field-list" aria-label="当前结构页面字段">
-              {scopedPageFields.length ? <PageFieldFormPreview fields={scopedPageFields} schemaVersion={definition.schemaVersion} onLocate={activatePageField} /> : null}
               {scopedPageFields.length ? scopedPageFields.map((field) => (
                 <button
                   key={field.slotId}
                   type="button"
+                  className="template-editor__page-field-row"
+                  data-template-page-rule-row={field.slotId}
+                  aria-label={`编辑${field.label}的页面使用规则`}
                   onClick={() => activatePageField(field.nodeId)}
                   {...getDynamicTemplatePageFieldDataAttributes(field, "full")}
                 >
-                  <span><strong>{field.label}</strong><small>{field.slotTypeLabel}</small></span>
-                  <span>{publicationPromiseLabel(field, definition.schemaVersion)} · {field.editable ? "可填写" : "只读"} · {field.hideable ? "可隐藏" : "固定显示"}</span>
-                  <span>控件：{PAGE_FIELD_CONTROL_KIND_LABELS[field.controlKind]}</span>
-                  <span>限制：{describePageFieldValidation(field)}</span>
-                  <span>页面设计覆盖：{describePageFieldOverrides(field)}</span>
+                  <span className="template-editor__page-field-row-identity"><strong>{field.label}</strong><small>{field.slotTypeLabel}</small></span>
+                  <span className="template-editor__page-field-row-action" aria-hidden="true">编辑规则</span>
+                  <span className="template-editor__page-field-row-status">{publicationPromiseLabel(field, definition.schemaVersion)} · {field.editable ? "可填写" : "只读"} · {field.hideable ? "可隐藏" : "固定显示"}</span>
                   {field.required && (field.hideable || (!field.editable && !hasLegalFixedPublicContent(field.slotType, definition.slots[field.slotId]?.semanticRole, definition.defaultContent[field.slotId], definition.schemaVersion))) ? <strong className="template-editor__page-field-conflict">规则冲突 · 点击修复</strong> : null}
                 </button>
               )) : (
@@ -3534,6 +3573,7 @@ export default function DynamicTemplateInspectorPanel({
                   description="从结构区添加图片、文字等内容元素后，会自动生成对应页面字段；再在这里设置名称与填写规则，无需另建字段。"
                 />
               )}
+              {scopedPageFields.length ? <PageFieldFormPreview fields={scopedPageFields} schemaVersion={definition.schemaVersion} onLocate={activatePageField} /> : null}
             </section>
           )}
         </div>

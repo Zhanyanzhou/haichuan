@@ -1,0 +1,41 @@
+{
+  "mcpServers": {
+    "context7": {
+      "command": "cmd.exe",
+      "args": ["/d", "/c", "npx.cmd", "-y", "@upstash/context7-mcp@4.0.4"]
+    },
+    "playwright": {
+      "command": "cmd.exe",
+      "args": [
+        "/d",
+        "/c",
+        "npx.cmd",
+        "-y",
+        "@playwright/mcp@0.0.79",
+        "--browser",
+        "msedge",
+        "--isolated",
+        "--headless",
+        "--output-dir",
+        ".codex-tmp/cursor-playwright"
+      ]
+    },
+    "chrome-devtools": {
+      "command": "cmd.exe",
+      "args": [
+        "/d",
+        "/c",
+        "npx.cmd",
+        "-y",
+        "chrome-devtools-mcp@1.12.0",
+        "--headless",
+        "--isolated",
+        "--no-usage-statistics",
+        "--no-performance-crux",
+        "--redactNetworkHeaders",
+        "--workspace",
+        ".codex-tmp/cursor-devtools"
+      ]
+    }
+  }
+}

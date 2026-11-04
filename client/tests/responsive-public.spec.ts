@@ -375,7 +375,8 @@ test.describe("公开页面导航一致性", () => {
     await contact.click();
     await expect(page).toHaveURL(/\/contact$/);
     const main = page.getByRole("main");
-    await expect(main.getByRole("heading", { name: "联系海川", exact: true })).toBeVisible();
+    await expect(main.getByRole("heading", { name: "联系海川", exact: true })).toHaveCount(0);
+    await expect(main.getByRole("heading", { name: "微信咨询", exact: true })).toBeVisible();
     await expect(main.getByRole("heading", { name: "预约咨询", exact: true })).toBeVisible();
     await expect(main.locator("form")).toHaveCount(1);
     await expect(main.getByRole("link", { name: "拨打电话", exact: true })).toHaveAttribute("href", "tel:00000000000");
@@ -790,8 +791,22 @@ test.describe("公开页面导航一致性", () => {
       expect(box.height).toBeGreaterThanOrEqual(44);
     }
     const headerActions = page.getByRole("banner").getByRole("navigation", { name: "菜单与搜索" });
+    const headerSearch = headerActions.getByRole("button", { name: "搜索" });
     await expect(headerActions).toBeVisible();
-    await expect(headerActions.getByRole("button", { name: "搜索" })).toBeHidden();
+    await expect(headerSearch).toBeVisible();
+    const searchBox = await headerSearch.boundingBox();
+    expect(searchBox).not.toBeNull();
+    expect(searchBox!.width).toBeGreaterThanOrEqual(44);
+    expect(searchBox!.height).toBeGreaterThanOrEqual(44);
+    expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(searchBox!.x + 1);
+    expect(searchBox!.x + searchBox!.width).toBeLessThanOrEqual(brandBox!.x + 1);
+    const alignment = await page.evaluate(() => {
+      const brand = document.querySelector<HTMLElement>(".site-header__brand");
+      if (!brand) throw new Error("缺少品牌字标");
+      const box = brand.getBoundingClientRect();
+      return { brandCenter: box.left + box.width / 2, viewportCenter: window.innerWidth / 2 };
+    });
+    expect(Math.abs(alignment.brandCenter - alignment.viewportCenter)).toBeLessThanOrEqual(1);
     await expectNoHorizontalOverflow(page);
   });
 

@@ -113,7 +113,10 @@ for (const device of ["desktop", "mobile"] as const) {
 }
 definition.nodes[locked].authoring = { structureLocked: true };
 definition.nodes[hidden].hidden = true;
-definition.metadata.previewDesktopWidth = 900;
+// 尺寸场景显式区分保存坐标基准与 900px 观察宽度，其他交互场景保留原夹具。
+const sizePreviewParams = new URLSearchParams(window.location.search);
+const explicitSizePreview = ["root-ratio", "root-auto", "fixed"].some((key) => sizePreviewParams.has(key));
+definition.metadata.previewDesktopWidth = explicitSizePreview ? 1440 : 900;
 if (new URLSearchParams(window.location.search).has("legacy")) definition.schemaVersion = 1;
 if (new URLSearchParams(window.location.search).has("schema3")) {
   definition.schemaVersion = 3;
@@ -122,6 +125,7 @@ if (new URLSearchParams(window.location.search).has("schema3")) {
 }
 draft.definition = definition;
 useTemplateEditorSession.getState().open(draft);
+if (explicitSizePreview) useTemplateEditorSession.getState().setPreviewWidth(900);
 const initialZoom = Number(new URLSearchParams(window.location.search).get("zoom"));
 if (initialZoom) useTemplateEditorSession.getState().setCanvasZoom(initialZoom);
 

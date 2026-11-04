@@ -11,7 +11,8 @@ import {
   App as AntdApp,
 } from "antd";
 import { SaveOutlined, UploadOutlined } from "@ant-design/icons";
-import { settingsApi, uploadApi } from "@/services/api";
+import { settingsApi, uploadApi, type PageMediaAsset, type StoredPageMediaAsset } from "@/services/api";
+import { useAuthStore } from "@/store/authStore";
 import type { SitePublicationReadiness } from "@/services/clients/settingsClient";
 import { unwrapResponse } from "@/utils/unwrap";
 import AdminPageHeader from "@/components/common/AdminPageHeader";
@@ -146,13 +147,19 @@ function readSiteContentResponse(response: unknown): SiteContentValues {
 }
 
 export default function SiteContent() {
-  const { message } = AntdApp.useApp();
+  const { message, modal } = AntdApp.useApp();
+  const role = useAuthStore((state) => state.user?.role);
   const [form] = Form.useForm();
   const defaultLocale = Form.useWatch("defaultLocale", form);
   const publishedLocales = Form.useWatch("publishedLocales", form);
   const wechatQrCode = Form.useWatch("contactWechatQrCode", form) as string | undefined;
   const [qrUploading, setQrUploading] = useState(false);
   const [qrPreviewFailed, setQrPreviewFailed] = useState(false);
+  const [qrAssetId, setQrAssetId] = useState<number | null>(null);
+  const [qrPublic, setQrPublic] = useState<boolean | null>(null);
+  const [qrLookupState, setQrLookupState] = useState<"idle" | "loading" | "missing">("idle");
+  const [authorizingQr, setAuthorizingQr] = useState(false);
+  const qrLookupSeq = useRef(0);
   const [searchParams] = useSearchParams();
   const [loadState, setLoadState] = useState<SiteContentLoadState>("loading");
   const [loadError, setLoadError] = useState<unknown>(null);
@@ -353,6 +360,80 @@ export default function SiteContent() {
     return false; // 阻止默认上传行为
   };
 
+  useEffect(() => {
+    if (!wechatQrCode || !isContactQrCodeReference(wechatQrCode)) {
+      setQrAssetId(null);
+      setQrPublic(null);
+      setQrLookupState("idle");
+      return;
+    }
+    const publicMediaId = /^\/api\/upload\/public-media\/([1-9]\d*)$/.exec(wechatQrCode);
+    if (publicMediaId) {
+      setQrAssetId(Number(publicMediaId[1]));
+      setQrPublic(true);
+      setQrLookupState("idle");
+      return;
+    }
+    const requestId = qrLookupSeq.current + 1;
+    qrLookupSeq.current = requestId;
+    setQrLookupState("loading");
+    void (async () => {
+      try {
+        let match: PageMediaAsset | undefined;
+        let page = 1;
+        let total = 0;
+        do {
+          const response = await uploadApi.listPageMedia({ page, pageSize: 100, type: "image" });
+          const data = unwrapResponse<{ list?: PageMediaAsset[]; total?: number }>(response);
+          if (qrLookupSeq.current !== requestId) return;
+          const batch = data.list ?? [];
+          total = data.total ?? 0;
+          match = batch.find((item) => item.url === wechatQrCode);
+          if (match || batch.length === 0) break;
+          page += 1;
+        } while ((page - 1) * 100 < total && page <= 5);
+        if (!match?.id) {
+          setQrAssetId(null);
+          setQrPublic(false);
+          setQrLookupState("missing");
+          return;
+        }
+        setQrAssetId(match.id);
+        setQrPublic(match.publicEligibility?.eligible === true);
+        setQrLookupState("idle");
+      } catch {
+        if (qrLookupSeq.current !== requestId) return;
+        setQrAssetId(null);
+        setQrPublic(false);
+        setQrLookupState("missing");
+      }
+    })();
+  }, [wechatQrCode]);
+
+  const confirmQrPublicUse = () => {
+    if (!qrAssetId || authorizingQr) return;
+    modal.confirm({
+      title: "确认这张加好友码可公开使用？",
+      content: "请仅在你已核实这是公司微信的加好友码、拥有公开网站使用权，并愿意以当前账号留下审核记录时继续。确认后，刷新联系页即可看到二维码。",
+      okText: "确认并公开",
+      cancelText: "取消",
+      onOk: async () => {
+        setAuthorizingQr(true);
+        try {
+          await uploadApi.authorizeMediaPublicUse(qrAssetId, true);
+          qrLookupSeq.current += 1;
+          setQrPublic(true);
+          message.success("这张加好友码已可在联系页显示。请刷新联系页查看。");
+        } catch (error) {
+          message.error(getSafeAdminErrorMessage(error, "公开确认失败。请稍后重试，或到页面素材里完成授权。"));
+          throw error;
+        } finally {
+          setAuthorizingQr(false);
+        }
+      },
+    });
+  };
+
   const handleWechatQrUpload = async (file: File) => {
     if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(file.type) || file.size > 10 * 1024 * 1024) {
       message.error("请选择不超过 10MB 的 PNG、JPEG、WebP 或 GIF 图片。");
@@ -360,12 +441,18 @@ export default function SiteContent() {
     }
     setQrUploading(true);
     try {
-      const data = unwrapResponse<{ url?: string }>(await uploadApi.uploadImage(file));
+      const data = unwrapResponse<StoredPageMediaAsset>(await uploadApi.uploadImage(file));
       if (!data?.url || !isContactQrCodeReference(data.url)) throw new Error("二维码素材地址无效");
       form.setFieldsValue({ contactWechatQrCode: data.url });
+      qrLookupSeq.current += 1;
+      setQrAssetId(data.id);
+      setQrPublic(data.publicEligibility?.eligible === true);
+      setQrLookupState("idle");
       setQrPreviewFailed(false);
       setDirty(true);
-      message.success("微信加好友码已上传，保存资料后可供联系页使用");
+      message.success(data.publicEligibility?.eligible
+        ? "加好友码已上传。保存店铺资料后，刷新联系页即可看到。"
+        : "加好友码已上传，但还不能公开展示。请先确认可公开使用，再保存。");
     } catch (error) {
       message.error(getSafeAdminErrorMessage(error, "微信加好友码上传失败，请检查图片和网络后重试。"));
     } finally {
@@ -537,7 +624,7 @@ export default function SiteContent() {
           </Form.Item>
           <Form.Item
             label="微信加好友二维码"
-            extra="请上传公司微信提供的加好友码，非付款码。保存后立即出现在前台联系页，留空则不显示。素材公开授权沿用媒体库。"
+            extra="请上传公司微信提供的加好友码，非付款码。上传后需要先确认可公开使用，再保存；未确认前联系页不会显示这张图。"
           >
             <Form.Item name="contactWechatQrCode" noStyle rules={[{
               validator: async (_, value: unknown) => {
@@ -559,11 +646,28 @@ export default function SiteContent() {
               <Button aria-label={wechatQrCode ? "替换加好友码" : "上传加好友码"}
                 loading={qrUploading} icon={<UploadOutlined aria-hidden="true" />}>{wechatQrCode ? "替换加好友码" : "上传加好友码"}</Button>
             </Upload>
-            {wechatQrCode ? <Button disabled={qrUploading} style={{ marginLeft: 8 }} onClick={() => {
+            {wechatQrCode ? <Button disabled={qrUploading || authorizingQr} style={{ marginLeft: 8 }} onClick={() => {
               form.setFieldsValue({ contactWechatQrCode: "" });
               setDirty(true);
             }}>清空加好友码</Button> : null}
-            <Link to="/admin/media" style={{ marginLeft: 12 }}>前往媒体库</Link>
+            <Link to="/admin/media" style={{ marginLeft: 12 }}>前往页面素材</Link>
+            {wechatQrCode && isContactQrCodeReference(wechatQrCode) ? (
+              <div style={{ marginTop: 12 }}>
+                {qrLookupState === "loading" ? <p>正在核对这张图能否在联系页显示…</p> : null}
+                {qrPublic ? <p>这张图已允许在联系页公开显示。若刚刚更换过图片，请先保存，再刷新联系页。</p> : null}
+                {qrPublic === false && qrLookupState !== "loading" ? (
+                  <>
+                    <p role="status">图片已经上传，但还没有公开授权，所以联系页不会出现二维码。</p>
+                    {role === "SUPER_ADMIN" && qrAssetId ? (
+                      <Button loading={authorizingQr} onClick={confirmQrPublicUse}>确认可在联系页公开</Button>
+                    ) : (
+                      <p>请由超级管理员在本页确认公开，或前往页面素材完成授权。</p>
+                    )}
+                    {qrLookupState === "missing" ? <p>没有在最近的页面素材里找到这张图。请重新上传一次。</p> : null}
+                  </>
+                ) : null}
+              </div>
+            ) : null}
           </Form.Item>
           <Form.Item name="contactEmail" label="联系邮箱">
             <Input placeholder="name@example.com" />

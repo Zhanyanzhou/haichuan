@@ -9,6 +9,7 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from "react";
+import { formatCanvasDimension } from "./templateViewportMath";
 import type {
   EditableTargetCapability,
   EditableTargetLocatorAttribute,
@@ -213,7 +214,8 @@ function placeSelectionToolbar(
   rect: GeometryRect,
   hostWidth: number,
 ): CSSProperties {
-  const toolbarWidth = Math.min(460, Math.max(280, hostWidth - 24));
+  const narrow = hostWidth < 520;
+  const toolbarWidth = narrow ? Math.max(160, hostWidth - 16) : Math.min(460, Math.max(280, hostWidth - 24));
   const hostLeft = clampGeometryValue(
     rect.left,
     12,
@@ -221,7 +223,7 @@ function placeSelectionToolbar(
   );
   return {
     left: hostLeft - rect.left,
-    top: rect.top >= 48 ? -42 : rect.height + 8,
+    top: narrow || rect.top < 48 ? rect.height + 8 : -42,
     maxWidth: toolbarWidth,
   };
 }
@@ -1183,7 +1185,7 @@ export default function EditableTargetOverlay({
             aria-label={`${selectedBox.target.label}画布操作`}
           >
             <strong title={selectedBox.target.label}>{selectedBox.target.label}</strong>
-            <span className="template-editor__selection-toolbar-size">{Math.round(selectedBox.sourceRect.width)} × {Math.round(selectedBox.sourceRect.height)}</span>
+            <span className="template-editor__selection-toolbar-size">宽 {formatCanvasDimension(selectedBox.sourceRect.width)} px × 高 {formatCanvasDimension(selectedBox.sourceRect.height)} px</span>
             {selectedBox.target.imageEditable && !selectedBox.target.locked && !spacingEditing ? <button type="button" onClick={(event) => { event.stopPropagation(); onEnterTarget?.(selectedBox.target); }}>{selectedBox.target.imageContentEditLabel ?? "设置图片"}</button> : null}
             {selectedBox.target.imageEditable && selectedBox.target.imageHasContent !== false && !selectedBox.target.locked && !spacingEditing ? <button type="button" onClick={(event) => { event.stopPropagation(); handleImageEditingChange(true); }}>调整画面</button> : null}
             {selectedBox.target.textEditable && !selectedBox.target.locked && !inlineTextEditor ? <button type="button" onClick={(event) => { event.stopPropagation(); onEnterTarget?.(selectedBox.target); }}>{selectedBox.target.textEditLabel ?? "编辑试排文字"}</button> : null}

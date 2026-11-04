@@ -75,6 +75,7 @@ import {
   publishedVersionVerificationNotFound,
   publishReviewedSnapshotFailed,
   publishReviewedSnapshotSucceeded,
+  adoptionReportForPublishedVersion,
   retryCatalogRefresh,
   retryVerification,
   saveReviewedSnapshotFailed,
@@ -91,6 +92,7 @@ import {
   type PublishWorkflowTransition,
   type SavingReviewedSnapshotState,
 } from "./templatePublishWorkflow";
+import { templateContentMatchesPublishedVersion } from "./templatePublicationStatus";
 
 export interface PersistTemplateOptions {
   overwriteCurrent?: boolean;
@@ -426,12 +428,35 @@ function classifyPublishFailure(error: unknown): PublishFailure {
   const code = typeof (error as { code?: unknown })?.code === "string"
     ? (error as { code: string }).code
     : undefined;
+  const errorCode = typeof (error as { errorCode?: unknown }).errorCode === "string"
+    ? (error as { errorCode: string }).errorCode
+    : undefined;
+  const message = error instanceof Error ? error.message.trim() : "";
+  if (
+    errorCode === "DYNAMIC_TEMPLATE_CONTENT_UNCHANGED"
+    || message === "模板内容与当前正式版本相同，无需重复发布"
+  ) {
+    return {
+      category: "rejected",
+      ...(status ? { status } : {}),
+      code: "DYNAMIC_TEMPLATE_CONTENT_UNCHANGED",
+    };
+  }
   if (status === 403) return { category: "permission", status, ...(code ? { code } : {}) };
   if (status === 409) return { category: "conflict", status, ...(code ? { code } : {}) };
   if (status && status >= 500) return { category: "server", status, ...(code ? { code } : {}) };
   if (code === "ECONNABORTED" || code === "ETIMEDOUT") return { category: "timeout", ...(code ? { code } : {}) };
   if (!status) return { category: "network", ...(code ? { code } : {}) };
-  return { category: "rejected", status, ...(code ? { code } : {}) };
+  const apiCode = errorCode && errorCode !== "VALIDATION_ERROR" ? errorCode : code;
+  const safeMessage = message.length > 0 && message.length <= 240 && !/[\r\n]/.test(message)
+    ? message
+    : undefined;
+  return {
+    category: "rejected",
+    status,
+    ...(apiCode ? { code: apiCode } : {}),
+    ...(safeMessage ? { message: safeMessage } : {}),
+  };
 }
 
 function throwMalformedPublishResponse(code: string): never {
@@ -1584,12 +1609,14 @@ export function useTemplateWorkspaceController({
           || !isCurrentPublishOperation(latest, effect.operation)
         ) return;
         const liveAtResponse = currentLivePublishContext();
+        const pageAdoption = adoptionReportForPublishedVersion(result.version, result.pageAdoption);
         applyPublishTransition(publishReviewedSnapshotSucceeded(latest, {
           operation: effect.operation,
           templateId: result.templateId,
           version: result.version,
           checksum: asDefinitionChecksum(result.published.definitionChecksum),
           outcome: result.outcome,
+          ...(pageAdoption ? { pageAdoption } : {}),
           live: liveAtResponse,
         }));
         if (returnedDraftResource) {
@@ -1673,6 +1700,7 @@ export function useTemplateWorkspaceController({
           checksum: asDefinitionChecksum(version.definitionChecksum),
           outcome: "already-published",
           live: currentLivePublishContext(),
+          pageAdoption: adoptionReportForPublishedVersion(version.version, version.pageAdoption),
         }));
         void recoverPublishedDraft(effect.operation, effect.templateId, version.definitionChecksum);
       } catch (error) {
@@ -1865,6 +1893,13 @@ export function useTemplateWorkspaceController({
     const current = publishWorkflowRef.current;
     const session = useTemplateEditorSession.getState();
     if (current.status !== "review-ready" || !session.draft || !session.sessionId) return;
+    const remote = session.draft.remote;
+    if (remote && templateContentMatchesPublishedVersion({
+      dirty: session.dirty,
+      publishedDefinitionChecksum: remote.publishedDefinitionChecksum,
+      draftDefinitionChecksum: remote.draftDefinitionChecksum,
+      reviewedBaselineChecksum: current.snapshot.baseline?.checksum,
+    })) return;
     const operationId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
       : `publish-${Date.now()}`;
@@ -1917,6 +1952,15 @@ export function useTemplateWorkspaceController({
       || !current.saved
       || current.currentInputChanged
     ) return;
+    const remote = useTemplateEditorSession.getState().draft?.remote;
+    if (remote && templateContentMatchesPublishedVersion({
+      dirty: useTemplateEditorSession.getState().dirty,
+      currentInputChanged: current.currentInputChanged,
+      publishedDefinitionChecksum: remote.publishedDefinitionChecksum,
+      draftDefinitionChecksum: remote.draftDefinitionChecksum,
+      reviewedBaselineChecksum: current.snapshot.baseline?.checksum,
+      savedChecksum: current.saved.checksum,
+    })) return;
     const saving: SavingReviewedSnapshotState<TemplateDefinitionV2> = {
       status: "saving-reviewed-snapshot",
       snapshot: current.snapshot,
@@ -1946,12 +1990,33 @@ export function useTemplateWorkspaceController({
   }, [recoverPublishedDraft]);
   const usePublishedTemplateInPage = useCallback(() => {
     const current = publishWorkflowRef.current;
-    if (current.status !== "published" || current.catalogStatus !== "fresh") return;
-    const publishedName = current.snapshot.reviewedDefinition.name.trim() || "未命名模板";
+    if (current.status === "published" && current.catalogStatus === "fresh") {
+      const publishedName = current.snapshot.reviewedDefinition.name.trim() || "未命名模板";
+      notifyPageTemplateLibraryHandoff({
+        templateId: current.published.templateId,
+        version: current.published.version,
+        name: publishedName,
+      });
+      useVisualEditorSession.getState().activateWorkspace("page");
+      notifyDynamicTemplateCatalogChanged();
+      onReturnPage();
+      return;
+    }
+    if (current.status === "editing") return;
+    const session = useTemplateEditorSession.getState();
+    const remote = session.draft?.remote;
+    if (!remote || !templateContentMatchesPublishedVersion({
+      dirty: session.dirty,
+      currentInputChanged: "currentInputChanged" in current ? current.currentInputChanged : false,
+      publishedDefinitionChecksum: remote.publishedDefinitionChecksum,
+      draftDefinitionChecksum: remote.draftDefinitionChecksum,
+      reviewedBaselineChecksum: current.snapshot.baseline?.checksum,
+      savedChecksum: "saved" in current ? current.saved?.checksum : undefined,
+    })) return;
     notifyPageTemplateLibraryHandoff({
-      templateId: current.published.templateId,
-      version: current.published.version,
-      name: publishedName,
+      templateId: current.snapshot.templateId,
+      version: remote.publishedVersion,
+      name: current.snapshot.reviewedDefinition.name.trim() || "未命名模板",
     });
     useVisualEditorSession.getState().activateWorkspace("page");
     notifyDynamicTemplateCatalogChanged();

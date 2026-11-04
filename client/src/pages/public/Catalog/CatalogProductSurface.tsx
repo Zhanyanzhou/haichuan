@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Link } from "react-router-dom";
 import type { CatalogProduct } from "@/data/catalogData";
 import { useSelectionStore } from "@/store/selectionStore";
@@ -9,6 +9,11 @@ import { SecureImage } from "@/components/common/SecureImage";
 import { trackAddToSelection, trackRemoveFromSelection } from "@/hooks/useAnalytics";
 import { salesModeCta } from "@/store/featureFlags";
 import { productPathWithCatalogReturn, recordCatalogDeparture } from "./catalogReturnContext";
+import {
+  catalogImageSwipeDelta,
+  catalogImageSwipeEnabled,
+  nextCatalogImageIndex,
+} from "./catalogImageSwipe";
 import { App as AntdApp } from "antd";
 
 function rememberDetailEntry(
@@ -27,6 +32,74 @@ function rememberDetailEntry(
     scrollY: window.scrollY,
   });
 }
+function useCatalogImageSwipe(
+  imageCount: number,
+  setImgIdx: (update: (index: number) => number) => void,
+) {
+  const suppressClick = useRef(false);
+  const stopGesture = useRef<(() => void) | null>(null);
+
+  useEffect(() => () => stopGesture.current?.(), []);
+
+  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    suppressClick.current = false;
+    if (imageCount < 2 || !catalogImageSwipeEnabled()) return;
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    const target = event.target;
+    if (target instanceof Element && target.closest("button")) return;
+
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const pointerId = event.pointerId;
+    let axis: "x" | "y" | null = null;
+
+    const end = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+      if (stopGesture.current === end) stopGesture.current = null;
+    };
+    const move = (pointerEvent: PointerEvent) => {
+      if (pointerEvent.pointerId !== pointerId || axis) return;
+      const dx = pointerEvent.clientX - startX;
+      const dy = pointerEvent.clientY - startY;
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+    };
+    const up = (pointerEvent: PointerEvent) => {
+      const locked = axis;
+      end();
+      if (pointerEvent.pointerId !== pointerId || locked !== "x") return;
+      const delta = catalogImageSwipeDelta(
+        pointerEvent.clientX - startX,
+        pointerEvent.clientY - startY,
+      );
+      if (delta === 0) return;
+      suppressClick.current = true;
+      setImgIdx((index) => nextCatalogImageIndex(index, imageCount, delta));
+    };
+    const cancel = (pointerEvent: PointerEvent) => {
+      if (pointerEvent.pointerId !== pointerId) return;
+      end();
+    };
+
+    stopGesture.current?.();
+    stopGesture.current = end;
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+  };
+
+  const onClickCapture = (event: ReactMouseEvent) => {
+    if (!suppressClick.current) return;
+    suppressClick.current = false;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  return { onPointerDown, onClickCapture };
+}
+
 /* ══════════════════════════════════════
    组件：产品卡片（梵克雅宝矩阵风格）
    ══════════════════════════════════════ */
@@ -113,6 +186,7 @@ function ProductCard({
   const [imgIdx, setImgIdx] = useState(0);
   const allImages = (product.images || []).filter(Boolean);
   const currentImg = allImages[imgIdx] || allImages[0] || getListingImage(product);
+  const swipe = useCatalogImageSwipe(allImages.length, setImgIdx);
 
   useEffect(() => {
     setImgIdx(0);
@@ -124,7 +198,16 @@ function ProductCard({
       : "价格暂不可用"
     : "";
 
-  const subInfo = [product.categoryName, product.material]
+  const fullName = product.name || product.sku;
+  const productCode = product.sku.trim();
+  const nameRemainder = fullName.slice(productCode.length);
+  // 只拆出与真实货号匹配的前缀；原名与货号不一致时完整保留原名。
+  const title = productCode
+    && fullName.toLocaleLowerCase().startsWith(productCode.toLocaleLowerCase())
+    && /^[\s·:：_-]*[\u3400-\u9fff]/u.test(nameRemainder)
+      ? nameRemainder.replace(/^[\s·:：_-]+/u, "")
+      : fullName;
+  const subInfo = [title === productCode ? "" : productCode, product.categoryName, product.material]
     .filter(Boolean)
     .join(" · ");
   const detailHref = productPathWithCatalogReturn(publicProductPath(product), catalogUrl);
@@ -137,12 +220,17 @@ function ProductCard({
         className="catalog-product-card__media"
         data-catalog-product-media
         data-catalog-product-media-src={currentImg}
+        data-catalog-image-index={imgIdx}
+        data-catalog-image-swipe={allImages.length > 1 ? "true" : undefined}
+        onPointerDown={swipe.onPointerDown}
+        onClickCapture={swipe.onClickCapture}
       >
         <Link
           to={detailHref}
           className="catalog-image-trigger"
           data-catalog-product-focus
-          aria-label={product.name || product.sku}
+          aria-label={fullName}
+          draggable={false}
           onClick={openDetail}
         >
           <SecureImage
@@ -165,7 +253,7 @@ function ProductCard({
           <div
             className="catalog-image-marks"
             role="group"
-            aria-label={`${product.name || product.sku} 的图片`}
+            aria-label={`${fullName} 的图片`}
           >
             {allImages.map((src, i) => (
               <button
@@ -189,8 +277,8 @@ function ProductCard({
 
       <div className="catalog-product-card__copy">
         <h3 className="catalog-product-card__title">
-          <Link to={detailHref} onClick={openDetail}>
-            {product.name || product.sku}
+          <Link to={detailHref} onClick={openDetail} aria-label={fullName}>
+            {title}
           </Link>
         </h3>
         <p className="catalog-product-card__facts">{subInfo}</p>

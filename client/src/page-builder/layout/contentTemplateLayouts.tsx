@@ -116,6 +116,16 @@ export function getContentTemplateLayout(moduleType: string) {
 
 type TemplateStyle = CSSProperties & Record<`--hc-${string}`, string | number>;
 
+/**
+ * 公开首屏图片框的权威几何。CSS 与选图 sizes 共用这一处：
+ * 宽屏铺满视口；768–1023 只改成桌面比例框；767 及以下用手机比例框。
+ * 这里不新增内容端点，也不改变裁切。
+ */
+export const HERO_PUBLIC_IMAGE_FRAME = {
+  desktopMinHeight: "max(620px, 100svh)",
+  compactMaxWidth: 1023,
+} as const;
+
 export function templateLayoutVars(
   layout: ContentTemplateLayout,
   /**
@@ -200,7 +210,7 @@ const LAYOUT_CSS = `
 
 /* 首屏：桌面与视口等高，导航悬浮在影像上，不在首屏底部留下工具栏高度的空带。 */
 .hc-phase1-hero {
-  min-height: max(620px, 100svh);
+  min-height: ${HERO_PUBLIC_IMAGE_FRAME.desktopMinHeight};
 }
 /* 编辑画布内 iframe 会被整页内容撑高，svh 随之失真；编辑态改用编辑器预设的视口高度，保证比例准确。 */
 .hc-phase1-hero--edit {
@@ -311,7 +321,7 @@ const LAYOUT_CSS = `
 .hc-phase1-text[data-spacing="grand"] { padding-block: clamp(170px, 18vh, 280px); }
 
 /* 中间宽度只改变几何布局；素材、比例和阅读顺序沿用 desktop 合同。 */
-@media (min-width: 768px) and (max-width: 1023px) {
+@media (min-width: 768px) and (max-width: ${HERO_PUBLIC_IMAGE_FRAME.compactMaxWidth}px) {
   .hc-content-template { --hc-template-gutter: 28px; }
   .hc-phase1-hero { min-height: 75svh; }
   .hc-phase1-hero__media { position: relative; inset: auto; height: auto; min-height: 0; aspect-ratio: var(--hc-template-media-desktop); }

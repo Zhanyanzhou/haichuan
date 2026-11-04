@@ -99,26 +99,27 @@
   position: absolute;
   z-index: 2300;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  width: max-content;
+  width: auto;
   min-height: 34px;
   padding: 3px 5px;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid var(--adm-border-strong, #B8BEC1);
   border-radius: 5px;
   background: rgb(255 255 255 / 98%);
   box-shadow: 0 4px 14px rgb(24 26 27 / 14%);
   color: var(--adm-text, #181a1b);
   pointer-events: auto;
-  white-space: nowrap;
+  white-space: normal;
 }
 .template-editor__selection-toolbar > strong {
-  max-width: 132px;
-  overflow: hidden;
+  max-width: none;
+  overflow: visible;
   padding: 0 3px;
   font-size: 12px;
-  text-overflow: ellipsis;
+  text-overflow: clip;
 }
 .template-editor__selection-toolbar-size {
   color: var(--adm-text-secondary, #5F6568);
@@ -147,6 +148,9 @@
 }
 .template-editor__selection-toolbar .template-editor__editable-overlay-move { cursor: move; touch-action: none; }
 .template-editor__selection-toolbar .template-editor__selection-toolbar-delete {
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px solid #dde1e2;
   border-color: #D7B6B4;
   color: #8C3F3B;
 }
@@ -157,10 +161,11 @@
   color: #fff;
 }
 .template-editor__selection-toolbar-help {
-  overflow: hidden;
+  overflow: visible;
   color: var(--adm-text-secondary, #5F6568);
   font-size: 11px;
-  text-overflow: ellipsis;
+  white-space: normal;
+  text-overflow: clip;
 }
 @media (pointer: coarse) {
   .template-editor__selection-toolbar :is(button, .template-editor__editable-overlay-move) {

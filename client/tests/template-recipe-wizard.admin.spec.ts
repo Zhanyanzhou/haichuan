@@ -286,7 +286,7 @@ for (const viewport of [{ width: 1600, height: 1000 }, { width: 390, height: 844
     await expect(image).toHaveCSS("position", "absolute");
     await dialog.getByRole("button", { name: "创建模板", exact: true }).click();
     await expect(dialog).toBeHidden();
-    expect((await readSession(page)).definition!.templateRecipe!.canvas).toEqual({ width: 1080, height: 1350, aspectRatio: .8 });
+    expect((await readSession(page)).definition!.templateRecipe!.canvas).toEqual({ width: 1440, height: 1800, aspectRatio: .8 });
     expect(server.writes).toEqual([]);
   });
 }
@@ -446,7 +446,7 @@ test("自定义尺寸保留非法原输入并阻止前进，修正与锁比往�
   const dialog = await openWizard(page);
   await dialog.getByRole("button", { name: "编辑媒体", exact: true }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
-  // 锁比基数取 4:5（1080 × 1350）：本用例随后断言 3400 → 4250、以及 4250 越界禁用下一步。
+  // 锁比基数取 4:5（1440 × 1800）：先把宽度填回预设宽，高度保持 1800，再断言 3400 → 4250。
   await dialog.getByRole("button", { name: "竖向卡片 4:5", exact: true }).click();
   await dialog.getByRole("button", { name: "自定义尺寸", exact: true }).click();
   const width = dialog.getByRole("spinbutton", { name: "宽度", exact: true });
@@ -463,7 +463,7 @@ test("自定义尺寸保留非法原输入并阻止前进，修正与锁比往�
   await dialog.getByRole("button", { name: "上一步", exact: true }).click();
   await next.click();
   await expect(width).toHaveValue("Infinity");
-  await width.fill("1080");
+  await width.fill("1440");
   await dialog.getByRole("switch", { name: "锁定比例", exact: true }).click();
   await width.fill("3400");
   await expect(height).toHaveValue("4250");
@@ -944,7 +944,7 @@ test("图片重复选择、尺寸往返和自定义 Logo 往返保留配置，�
   await previous();
   await dialog.getByRole("button", { name: "方形卡片 1:1", exact: true }).click();
   await next();
-  await expectDiagramRatio(dialog.getByRole("button", { name: "左文右图", exact: true }).locator("[data-recipe-layout-diagram]"), 1080, 1080);
+  await expectDiagramRatio(dialog.getByRole("button", { name: "左文右图", exact: true }).locator("[data-recipe-layout-diagram]"), 1440, 1440);
   await previous();
   await dialog.getByRole("button", { name: "均衡横版 4:3", exact: true }).click();
   await next();

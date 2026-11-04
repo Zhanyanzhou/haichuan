@@ -39,10 +39,13 @@ export default function SelectionTray({
   products,
   lookupState,
   onRetry,
+  presentation = "tray",
 }: {
   products: CatalogProduct[];
   lookupState: SelectionLookupState;
   onRetry: () => void;
+  /** tray 是选款中心底部条；page 只提供购物袋里的「交给顾问」。 */
+  presentation?: "tray" | "page";
 }) {
   const { message } = AntdApp.useApp();
   const location = useLocation();
@@ -119,8 +122,10 @@ export default function SelectionTray({
 
   if (!ids.size) return null;
 
+  const pageMode = presentation === "page";
   const selected = products.filter((p) => ids.has(p.id));
   if (lookupState !== "ready") {
+    if (pageMode) return null;
     const failed = lookupState === "error";
     return (
       <div
@@ -335,6 +340,16 @@ export default function SelectionTray({
     <>
       {/* 底部托盘：咨询弹窗打开时卸载，避免重复行动。 */}
       {!open ? (
+        pageMode ? (
+          <button
+            ref={trayButtonRef}
+            type="button"
+            className="btn btn-primary shopping-bag__handoff"
+            onClick={() => setOpen(true)}
+          >
+            交给顾问
+          </button>
+        ) : (
         <button
           ref={trayButtonRef}
           className="catalog-selection-tray"
@@ -392,6 +407,7 @@ export default function SelectionTray({
             提交选款咨询 →
           </span>
         </button>
+        )
       ) : null}
 
       {/* 提交弹窗 */}

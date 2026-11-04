@@ -33,6 +33,7 @@ import {
 } from "@/page-builder/runtime/usePublishedPageDocument";
 import { getPublishedPageReadiness } from "@/page-builder/runtime/publishedPageReadiness";
 import { resolveSiteLogo, StorefrontMenuDrawer } from "./StorefrontNavigation";
+import ShoppingBagNavLink from "./ShoppingBagNavLink";
 import SiteContactLink from "./SiteContactLink";
 import StorefrontFooter from "./StorefrontFooter";
 import { normalizePublicProductReference } from "@/utils/publicProductPath";
@@ -45,6 +46,7 @@ import { USE_MOCK } from "@/services/mockData";
 import { unwrapResponse } from "@/utils/unwrap";
 import { useStructuredData } from "@/hooks/useStructuredData";
 import { LEGAL_ENTITY } from "@/config/legalEntity";
+import { isDialablePhone, SIGNED_PUBLIC_CONTACT } from "@/config/publicContact";
 import RouteLoading from "@/components/common/RouteLoading";
 import { clearCatalogReturnContext } from "@/pages/public/Catalog/catalogReturnContext";
 import { useDirectionalSiteHeader } from "./useDirectionalSiteHeader";
@@ -293,23 +295,6 @@ const AccountIcon = () => (
     <path d="M5 27c.8-5.2 4.2-8 10-8s9.2 2.8 10 8" />
   </svg>
 );
-const CartIcon = () => (
-  <svg
-    width="30"
-    height="30"
-    viewBox="0 0 30 30"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.4"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    aria-hidden="true"
-  >
-    <path d="M10 11V8a5 5 0 0 1 10 0v3" />
-    <path d="M7 14h16l1.5 13h-19L7 14Z" />
-  </svg>
-);
-
 export default function PublicLayout() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -444,6 +429,7 @@ export default function PublicLayout() {
   const markCustomerAnonymous = useCustomerAuthStore((state) => state.markAnonymous);
   const needsCustomerIdentity =
     contentPathname === "/catalog"
+    || contentPathname === "/cart"
     || contentPathname === "/contact"
     || /^\/products\/[^/]+$/.test(contentPathname);
   const pageMeta = usePageMetaStore((state) => state.meta);
@@ -483,7 +469,11 @@ export default function PublicLayout() {
           url: publicSiteOrigin,
           ...(organizationLogo ? { logo: organizationLogo } : {}),
           ...(siteSettings?.contactPhone?.trim()
-            ? { telephone: siteSettings.contactPhone.trim() }
+            ? {
+                telephone: isDialablePhone(siteSettings.contactPhone.trim())
+                  ? siteSettings.contactPhone.trim()
+                  : SIGNED_PUBLIC_CONTACT.phone,
+              }
             : {}),
           ...(siteSettings?.contactEmail?.trim()
             ? { email: siteSettings.contactEmail.trim() }
@@ -775,16 +765,7 @@ export default function PublicLayout() {
 
           <nav className="site-header__right" aria-label={english ? "Quick links" : "快捷入口"}>
             <SiteContactLink />
-            {!english ? <Link
-              to="/cart"
-              aria-label="购物袋"
-              className="site-header__nav-item site-header__nav-item--cart"
-            >
-              <CartIcon />
-              <span className="site-header__nav-label hidden sm:inline">
-                购物袋
-              </span>
-            </Link> : null}
+            {!english ? <ShoppingBagNavLink /> : null}
             {!english ? <Link
               to="/customer"
               aria-label="我的账户"

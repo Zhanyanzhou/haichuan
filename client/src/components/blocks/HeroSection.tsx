@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { useReducedMotion } from "framer-motion";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
@@ -11,10 +11,16 @@ import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import {
   CONTENT_TEMPLATE_LAYOUTS,
   ContentTemplateLayoutStyles,
+  HERO_PUBLIC_IMAGE_FRAME,
   templateLayoutVars,
 } from "@/page-builder/layout/contentTemplateLayouts";
 import { hasRenderableImageDimensions } from "@/utils/imageLoad";
+import {
+  heroPublicCandidateSizes,
+  parseFrameAspect,
+} from "@/page-builder/config/imageDeliveryGeometry";
 import { resolveMediaSlotImage } from "@/page-builder/config/mediaSlotContract";
+import { usePublicImageFact } from "@/page-builder/runtime/publicImageFacts";
 import {
   resolveManagedTemplateMediaPreviewUrl,
   useManagedTemplateMediaDisplayUrl,
@@ -37,6 +43,40 @@ const NON_PUBLISHABLE_SYSTEM_MEDIA = new Set([
 
 const DEFERRED_MEDIA_ROOT_MARGIN = "200px 0px";
 
+type HeroImageEndpoint = "mobile" | "desktop";
+type HeroImageLoadState = { failed: boolean; original: boolean; ready: boolean };
+const INITIAL_IMAGE_LOAD_STATE: HeroImageLoadState = { failed: false, original: false, ready: false };
+
+function subscribeHeroImageEndpoint(onChange: () => void) {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return () => {};
+  const media = window.matchMedia(RESPONSIVE_CANVAS.mobileMediaQuery);
+  media.addEventListener("change", onChange);
+  return () => media.removeEventListener("change", onChange);
+}
+
+function isHeroMobileEndpoint() {
+  return typeof window !== "undefined"
+    && typeof window.matchMedia === "function"
+    && window.matchMedia(RESPONSIVE_CANVAS.mobileMediaQuery).matches;
+}
+
+function heroCandidateSizes(
+  facts: { displayWidth: number; displayHeight: number; animated?: boolean } | null,
+  slot: "mobile" | "desktop",
+) {
+  if (!facts) return undefined;
+  const layout = CONTENT_TEMPLATE_LAYOUTS.hero;
+  return heroPublicCandidateSizes({
+    sourceWidth: facts.displayWidth,
+    sourceHeight: facts.displayHeight,
+    animated: facts.animated,
+    frameAspect: parseFrameAspect(slot === "mobile" ? layout.mobile.mediaRatio : layout.desktop.mediaRatio),
+    desktopMinHeight: HERO_PUBLIC_IMAGE_FRAME.desktopMinHeight,
+    compactMaxWidth: HERO_PUBLIC_IMAGE_FRAME.compactMaxWidth,
+    slot,
+  });
+}
+
 function publicHeroMedia(value: unknown, editMode: boolean | undefined) {
   const source = typeof value === "string" ? value.trim() : "";
   return !editMode && NON_PUBLISHABLE_SYSTEM_MEDIA.has(source) ? "" : source;
@@ -56,7 +96,17 @@ function focusInspectorField(field: string) {
   );
 }
 
-export default function HeroSection({
+export default function HeroSection(props: Props) {
+  // 来源切换即开始新加载周期；A→B→A 也不能重新启用 A 上一次的回退或失败状态。
+  const sourceKey = JSON.stringify([
+    Boolean(props.editMode),
+    publicHeroMedia(props.module?.content?.desktopImage, props.editMode),
+    publicHeroMedia(props.module?.content?.mobileImage, props.editMode),
+  ]);
+  return <HeroSectionInstance key={sourceKey} {...props} />;
+}
+
+function HeroSectionInstance({
   module,
   editMode,
   emptySlotPlacement,
@@ -76,19 +126,49 @@ export default function HeroSection({
   const desktopImg = configuredDesktopImg || configuredMobileImg;
   const mobileImg = configuredMobileImg || configuredDesktopImg;
   const imageSourceKey = `${desktopImg}\u0000${mobileImg}`;
+  // 编辑器使用本页预览字节；公开页才读取已发布的测量尺寸，避免未授权地址进入 srcset。
+  const desktopFacts = usePublicImageFact(editMode ? undefined : desktopImg);
+  const mobileFacts = usePublicImageFact(editMode ? undefined : mobileImg);
   // 固有尺寸/纵横比/加载策略由媒体槽契约统一派生，Hero 不再手写 srcset/sizes/width/height。
   const desktopMedia = resolveMediaSlotImage(
-    { ratio: IMAGE_SPECS.hero.desktop.ratio, viewport: "desktop", priority, referenceWidth: IMAGE_SPECS.hero.desktop.width },
+    {
+      ratio: IMAGE_SPECS.hero.desktop.ratio,
+      viewport: "desktop",
+      priority,
+      referenceWidth: IMAGE_SPECS.hero.desktop.width,
+      sizes: heroCandidateSizes(desktopFacts, "desktop"),
+    },
     desktopImg,
+    desktopFacts,
   );
   const mobileMedia = resolveMediaSlotImage(
-    { ratio: IMAGE_SPECS.hero.mobile.ratio, viewport: "mobile", priority, referenceWidth: IMAGE_SPECS.hero.mobile.width },
+    {
+      ratio: IMAGE_SPECS.hero.mobile.ratio,
+      viewport: "mobile",
+      priority,
+      referenceWidth: IMAGE_SPECS.hero.mobile.width,
+      sizes: heroCandidateSizes(mobileFacts, "mobile"),
+    },
     mobileImg,
+    mobileFacts,
   );
-  const [failedImageSourceKey, setFailedImageSourceKey] = useState<string | null>(null);
-  const [readyImageSourceKey, setReadyImageSourceKey] = useState<string | null>(null);
-  const imageFailed = failedImageSourceKey === imageSourceKey;
-  const imageReady = readyImageSourceKey === imageSourceKey;
+  const mobileEndpoint = useSyncExternalStore(subscribeHeroImageEndpoint, isHeroMobileEndpoint, () => false);
+  const imageEndpoint: HeroImageEndpoint = mobileEndpoint ? "mobile" : "desktop";
+  // 一端失败不能压制另一端；回到已失败端时保留终态，避免缩放窗口制造重复请求。
+  const [imageStates, setImageStates] = useState({
+    mobile: INITIAL_IMAGE_LOAD_STATE,
+    desktop: INITIAL_IMAGE_LOAD_STATE,
+  });
+  const originalFallbackAttempted = useRef(new Set<HeroImageEndpoint>());
+  const imageFailed = imageStates[imageEndpoint].failed;
+  const useOriginalFallback = !editMode && imageStates[imageEndpoint].original;
+  const imageReady = imageStates[imageEndpoint].ready;
+  const updateImageState = (patch: Partial<HeroImageLoadState>) => {
+    setImageStates((states) => ({
+      ...states,
+      [imageEndpoint]: { ...states[imageEndpoint], ...patch },
+    }));
+  };
   const mediaRef = useRef<HTMLDivElement | null>(null);
   // 编辑画布在 iframe 中。未公开的 /uploads/page-assets 会 404，失败后只会留下空占位。
   // 预览字节在这块画面所在的文档里生成 blob，替换后的图才能出现在画布上。
@@ -205,12 +285,16 @@ export default function HeroSection({
         data-content-role-mobile="mobileImage"
       >
         {desktopCanvasSrc && !imageFailed && shouldLoadImage ? (
-          <picture data-editor-field="desktopImage mobileImage">
-            {!editMode && mobileImg ? (
+          <picture
+            key={`${imageSourceKey}\u0000${imageEndpoint}\u0000${useOriginalFallback ? "original" : "primary"}`}
+            data-editor-field="desktopImage mobileImage"
+            data-hero-image-delivery={editMode ? "editor" : useOriginalFallback ? "original" : "derived"}
+          >
+            {!editMode && mobileImg && !imageStates.mobile.failed ? (
               <source
                 media={RESPONSIVE_CANVAS.mobileMediaQuery}
-                srcSet={mobileMedia.srcSet || mobileImg}
-                sizes={mobileMedia.sizes}
+                srcSet={imageStates.mobile.original ? mobileImg : (mobileMedia.srcSet || mobileImg)}
+                {...(!imageStates.mobile.original && mobileMedia.sizes ? { sizes: mobileMedia.sizes } : {})}
               />
             ) : null}
             {editMode && mobileCanvasSrc && mobileCanvasSrc !== desktopCanvasSrc ? (
@@ -220,25 +304,32 @@ export default function HeroSection({
               />
             ) : null}
             <img
-              src={desktopCanvasSrc}
+              src={!editMode && imageStates.desktop.failed ? undefined : desktopCanvasSrc}
               {...(editMode ? {} : {
-                srcSet: desktopMedia.srcSet,
-                sizes: desktopMedia.sizes,
                 width: desktopMedia.width,
                 height: desktopMedia.height,
               })}
+              {...(!editMode && !imageStates.desktop.failed && !imageStates.desktop.original ? {
+                srcSet: desktopMedia.srcSet,
+                sizes: desktopMedia.sizes,
+              } : {})}
               alt={c?.altText || title}
               loading={editMode ? "eager" : desktopMedia.loading}
               {...(!editMode && desktopMedia.fetchPriority ? { fetchpriority: desktopMedia.fetchPriority } : {})}
               decoding={desktopMedia.decoding}
               onLoad={(event) => {
                 const renderable = hasRenderableImageDimensions(event.currentTarget);
-                setFailedImageSourceKey(renderable ? null : imageSourceKey);
-                setReadyImageSourceKey(renderable ? imageSourceKey : null);
+                updateImageState({ failed: !renderable, ready: renderable });
               }}
               onError={() => {
-                setFailedImageSourceKey(imageSourceKey);
-                setReadyImageSourceKey(null);
+                // 公开页只回退一次原图。同一次派生失败可能连续触发，原图尚未装上时不能记成最终失败。
+                if (!editMode && !originalFallbackAttempted.current.has(imageEndpoint)) {
+                  originalFallbackAttempted.current.add(imageEndpoint);
+                  updateImageState({ original: true, ready: false });
+                  return;
+                }
+                if (!editMode && !useOriginalFallback) return;
+                updateImageState({ failed: true, ready: false });
               }}
               className="hc-hero__image absolute inset-0 h-full w-full object-cover"
               style={{

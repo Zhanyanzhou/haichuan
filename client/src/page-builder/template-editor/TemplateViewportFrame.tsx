@@ -18,6 +18,7 @@ import EditableTargetOverlay, {
   type OverlayInlineTextEditor,
 } from "./EditableTargetOverlay";
 import {
+  displayStandardTemplateRatio,
   formatTemplateRatio,
   type TemplateDesignHeightMode,
 } from "../template-definition";
@@ -34,6 +35,7 @@ import { findElementsByEditableTargetLocator } from "./editableTargetDomLocator"
 import { useTemplateEditorSession } from "./templateEditorSession";
 import { bindWheelToScroller } from "../workspace/iframeWheelBridge";
 import {
+  formatCanvasDimension,
   parseFiniteCanvasPadding,
   resolveFiniteCanvasScale,
 } from "./templateViewportMath";
@@ -77,8 +79,11 @@ interface TemplatePanSession {
 interface TemplateViewportMeasurement {
   fitScale: number;
   naturalHeight: number;
+  documentHeight: number;
   contentWidth: number;
   contentHeight: number;
+  /** 模板根的实际边界；预览文档还可能包含编辑提示或越界内容。 */
+  rootSize?: { width: number; height: number };
   overflowNodeId?: string;
 }
 
@@ -125,8 +130,11 @@ function fitLockedRatio(
 }
 
 function createRulerMarks(length: number, step: number) {
-  const markCount = Math.min(41, Math.floor(length / step) + 1);
-  return Array.from({ length: markCount }, (_, index) => index * step);
+  const markCount = Math.min(40, Math.floor(length / step) + 1);
+  const marks = Array.from({ length: markCount }, (_, index) => index * step);
+  const end = Math.round(length);
+  if (end > 0 && marks[marks.length - 1] !== end) marks.push(end);
+  return marks;
 }
 
 export function syncTemplateViewportStyles(targetDocument: Document, onStylesChanged: () => void) {
@@ -318,6 +326,7 @@ export default function TemplateViewportFrame({
     // 自动高度仍有当前设备的合同基线。首帧先使用该基线，避免真实
     // Renderer 尚未完成测量时把画布短暂显示成通用 240px 空画板。
     naturalHeight: autoHeight ? Math.max(AUTO_ARTBOARD_MIN_HEIGHT, fallbackHeight) : fallbackHeight,
+    documentHeight: autoHeight ? Math.max(AUTO_ARTBOARD_MIN_HEIGHT, fallbackHeight) : fallbackHeight,
     contentWidth: sourceWidth,
     contentHeight: autoHeight ? Math.max(AUTO_ARTBOARD_MIN_HEIGHT, fallbackHeight) : fallbackHeight,
   });
@@ -352,7 +361,7 @@ export default function TemplateViewportFrame({
         viewportWidth: viewport.width,
         viewportHeight: viewport.height,
         contentWidth: sourceWidth,
-        contentHeight: measurement.naturalHeight,
+        contentHeight: measurement.documentHeight,
         inset: 0,
         minimumScale: minimumFitScale,
         maximumScale: 1,
@@ -366,7 +375,7 @@ export default function TemplateViewportFrame({
     observer.observe(stage);
     measureWidth();
     return () => observer.disconnect();
-  }, [measurement.naturalHeight, minimumFitScale, sourceWidth]);
+  }, [measurement.documentHeight, minimumFitScale, sourceWidth]);
 
   useEffect(() => {
     if (directResizeRef.current) return;
@@ -389,6 +398,7 @@ export default function TemplateViewportFrame({
     ) ? current : {
       ...current,
       naturalHeight: baselineHeight,
+      documentHeight: baselineHeight,
       contentHeight: baselineHeight,
       contentWidth: sourceWidth,
       overflowNodeId: undefined,
@@ -399,7 +409,7 @@ export default function TemplateViewportFrame({
   const scale = resolveFiniteCanvasScale(directResizeRef.current?.scale, baseScale);
   const rulerStep = sourceWidth <= 480 ? 100 : 200;
   const horizontalRulerMarks = createRulerMarks(sourceWidth, rulerStep);
-  const verticalRulerMarks = createRulerMarks(measurement.naturalHeight, rulerStep);
+  const verticalRulerMarks = createRulerMarks(measurement.rootSize?.height ?? measurement.naturalHeight, rulerStep);
 
   useEffect(() => {
     onScaleChange?.(scale);
@@ -438,10 +448,14 @@ export default function TemplateViewportFrame({
       const templateRoot = rootNodeId
         ? measurableNodes.find((node) => node.getAttribute("data-template-node-id") === rootNodeId)
         : undefined;
+      const rootBounds = templateRoot?.getBoundingClientRect();
+      const rootSize = rootBounds && rootBounds.width > 0 && rootBounds.height > 0
+        ? { width: rootBounds.width, height: rootBounds.height }
+        : undefined;
       // aspect-ratio 是首选比例，内容和最大尺寸约束都可能改变实际高度。
       // 测到根以后以其边界为准；越界子项只参与提示，不能扩张根边界。
       const naturalHeight = autoHeight
-        ? Math.max(AUTO_ARTBOARD_MIN_HEIGHT, measuredContentHeight)
+        ? Math.max(AUTO_ARTBOARD_MIN_HEIGHT, rootBounds?.height ?? measuredContentHeight)
         : heightMode === "aspect-ratio"
           ? templateRoot
             ? Math.max(1, Math.ceil(templateRoot.getBoundingClientRect().height))
@@ -464,21 +478,44 @@ export default function TemplateViewportFrame({
           }
         });
       }
-      const measuredContentWidth = Math.max(
+      const geometryNodes = Array.from(content.querySelectorAll<HTMLElement>("[data-template-node-id], [data-content-role]"));
+      const geometryBounds = geometryNodes.reduce((current, node) => {
+        const rect = node.getBoundingClientRect();
+        return {
+          left: Math.min(current.left, rect.left - contentRect.left),
+          right: Math.max(current.right, rect.right - contentRect.left),
+          top: Math.min(current.top, rect.top - contentRect.top),
+          bottom: Math.max(current.bottom, rect.bottom - contentRect.top),
+        };
+      }, { left: 0, right: sourceWidth, top: 0, bottom: 0 });
+      const measuredGeometryHeight = geometryNodes.length
+        ? Math.max(naturalHeight, Math.ceil(geometryBounds.bottom - geometryBounds.top)) : measuredContentHeight;
+      const noteBottom = Array.from(content.querySelectorAll<HTMLElement>('[role="status"]'))
+        .filter((note) => !templateRoot?.contains(note))
+        .reduce((bottom, note) => Math.max(bottom, note.getBoundingClientRect().bottom - contentRect.top), 0);
+      const documentHeight = autoHeight || content.querySelector('[data-template-fixed-canvas="true"]')
+        ? Math.max(naturalHeight, measuredContentHeight)
+        : Math.max(naturalHeight, Math.ceil(noteBottom));
+      const measuredContentWidth = geometryNodes.length ? Math.max(sourceWidth, Math.ceil(geometryBounds.right - geometryBounds.left)) : Math.max(
         sourceWidth,
         content.scrollWidth,
         Math.ceil(bounds.right - Math.min(0, bounds.left)),
       );
       setMeasurement((current) => (
         Math.abs(current.naturalHeight - naturalHeight) < 1
-        && Math.abs(current.contentHeight - measuredContentHeight) < 1
+        && Math.abs(current.documentHeight - documentHeight) < 1
+        && Math.abs(current.contentHeight - measuredGeometryHeight) < 1
         && Math.abs(current.contentWidth - measuredContentWidth) < 1
+        && current.rootSize?.width === rootSize?.width
+        && current.rootSize?.height === rootSize?.height
         && current.overflowNodeId === overflowNodeId
       ) ? current : {
         ...current,
         naturalHeight,
-        contentHeight: measuredContentHeight,
+        documentHeight,
+        contentHeight: measuredGeometryHeight,
         contentWidth: measuredContentWidth,
+        rootSize,
         overflowNodeId,
       });
     };
@@ -518,7 +555,7 @@ export default function TemplateViewportFrame({
     };
   }, [autoHeight, children, contentElement, fallbackHeight, frameDocument, heightMode, sourceWidth, styleRevision]);
 
-  const scaledHeight = measurement.naturalHeight * scale;
+  const scaledHeight = measurement.documentHeight * scale;
   const setCanvasScale = (nextScale: number) => {
     const clampedScale = clampCanvasScale(
       resolveFiniteCanvasScale(nextScale, scale),
@@ -850,6 +887,15 @@ export default function TemplateViewportFrame({
     vertical: Math.max(0, Math.round(measurement.contentHeight - measurement.naturalHeight)),
     nodeId: measurement.overflowNodeId,
   };
+  // iframe 保留容纳提示的高度；区块尺寸只取根边界，不把提示算进模板。
+  const frameWidth = measurement.rootSize?.width ?? sourceWidth;
+  const frameHeight = measurement.rootSize?.height ?? measurement.naturalHeight;
+  const standardRatio = displayStandardTemplateRatio(
+    frameWidth,
+    frameHeight,
+    heightMode === "aspect-ratio" ? ratioLabel : undefined,
+  );
+  const frameSizeLabel = `宽 ${formatCanvasDimension(frameWidth)} px × 高 ${formatCanvasDimension(frameHeight)} px · 标准比例 ${standardRatio}`;
   return (
     <>
       <div className="template-editor__canvas-header">
@@ -858,7 +904,7 @@ export default function TemplateViewportFrame({
       <WorkspaceCanvasControls
         isFitView={isFitView}
         zoom={scale}
-        viewportLabel={`${sourceWidth} × ${Math.round(measurement.naturalHeight)}`}
+        viewportLabel={frameSizeLabel}
         editableSize={{
           width: sourceWidth,
           height: Math.round(measurement.naturalHeight),
@@ -920,6 +966,11 @@ export default function TemplateViewportFrame({
           data-direct-resizing={directResizeStatus?.direction}
           style={{ width: sourceWidth * scale, height: scaledHeight }}
         >
+          {directResizeStatus ? null : (
+            <output className="template-editor__canvas-proportion" aria-live="polite" aria-label={`当前画布尺寸与比例 ${frameSizeLabel}`}>
+              {frameSizeLabel}
+            </output>
+          )}
           <div className="template-editor__canvas-ruler template-editor__canvas-ruler--horizontal" aria-hidden="true">
             {horizontalRulerMarks.map((value) => (
               <span key={value} style={{ left: value * scale }}>{value}</span>
@@ -965,7 +1016,7 @@ export default function TemplateViewportFrame({
               srcDoc="<!doctype html><html><head></head><body><div id='template-viewport-root'></div></body></html>"
               style={{
                 width: sourceWidth,
-                height: measurement.naturalHeight,
+                height: measurement.documentHeight,
                 transform: `scale(${scale})`,
               }}
               onLoad={connectFrame}
@@ -1049,6 +1100,7 @@ export default function TemplateViewportFrame({
             <output className="template-editor__canvas-direct-resize-readout" aria-live="polite">
               {directResizeStatus.width} × {directResizeStatus.height}
               {directResizeStatus.direction === "horizontal"
+                || formatTemplateRatio(directResizeStatus.width, directResizeStatus.height) === "auto"
                 ? ""
                 : ` · ${formatTemplateRatio(directResizeStatus.width, directResizeStatus.height)}`}
               {` · ${directResizeStatus.heightMode === "fixed" ? "固定高度" : directResizeStatus.heightMode === "aspect-ratio" ? "固定比例" : "随内容"}`}
