@@ -63,6 +63,7 @@ import {
   renderedWidthFactor,
   resolveImageDeliveryGeometry,
   scaleSizesExpression,
+  sizesLowerBoundPx,
   type ImageDeliveryFit,
 } from "../config/imageDeliveryGeometry";
 import { buildResponsiveUploadsDerivedUrl } from "@/utils/responsiveUploadsImage";
@@ -739,6 +740,9 @@ function ManagedTemplateSlotImage({
     const commitMeasuredWidth = (next: number) => {
       // 首帧画布还没按视口撑开时，量到的窄宽不能盖过声明的 sizes。
       // 否则 1440 视口会按几百像素挑候选，比手机更窄。
+      const viewportWidth = parent.ownerDocument.defaultView?.innerWidth ?? 0;
+      const declared = sized ? sizesLowerBoundPx(sized, viewportWidth) : 0;
+      if (declared > 0 && next + 8 < declared) return;
       if (current !== 0 && next < current + 8) return;
       current = next;
       setMeasuredCssWidth((previous) => (previous !== null && next <= previous + 8 ? previous : next));
@@ -789,6 +793,7 @@ function ManagedTemplateSlotImage({
     authorScale,
     fit,
     facts,
+    sized,
   ]);
   // 公开态才接派生图与固有尺寸；后台态走 blob 预览，保持即时显示与既有会话语义。
   // 没有原图展示尺寸时不生成 srcset，避免把请求档位写成实际像素。
@@ -1609,6 +1614,7 @@ function RenderNode({
         if (element.style.getPropertyValue(property) !== value) element.style.setProperty(property, value);
       }
     };
+    measure();
     let measureTimer = 0;
     const scheduleMeasure = () => {
       if (measureTimer) return;
@@ -1617,7 +1623,6 @@ function RenderNode({
         measure();
       }, 16);
     };
-    scheduleMeasure();
     const observer = new ownerWindow.ResizeObserver(scheduleMeasure);
     observer.observe(element);
     return () => {
@@ -2081,6 +2086,10 @@ function RenderNode({
           position: "absolute" as const,
           inset: 0,
           ...(!explicitMobileLayout ? { display: "flex", flexDirection: "column" as const } : {}),
+          // 主舞台自己仍写着桌面横图比例。对换后整节已经是竖画布，舞台必须跟着铺满，
+          // 否则主图量到的还是 16:9。
+          aspectRatio: "auto",
+          maxHeight: "none",
           minHeight: 0,
           width: "100%",
           height: "100%",
@@ -2548,7 +2557,8 @@ export default function DynamicTemplateRenderer({
       return undefined;
     }
     const update = () => {
-      const height = window.innerHeight;
+      const view = rootRef.current?.ownerDocument.defaultView ?? window;
+      const height = view.innerHeight;
       const short = height > 0 && height < 480;
       const width = rootRef.current?.clientWidth ?? 0;
       const header = Number.parseFloat(
@@ -2583,6 +2593,7 @@ export default function DynamicTemplateRenderer({
       setHeroCopyBelow(short || capped || copyExceedsFrame);
       setHeroFrameCapped(capped);
     };
+    update();
     let measureTimer = 0;
     const scheduleUpdate = () => {
       if (measureTimer) return;
@@ -2591,15 +2602,21 @@ export default function DynamicTemplateRenderer({
         update();
       }, 16);
     };
-    scheduleUpdate();
     const observed = rootRef.current;
+    const view = observed?.ownerDocument.defaultView ?? window;
     const observer = observed ? new ResizeObserver(scheduleUpdate) : null;
     if (observed) observer?.observe(observed);
-    window.addEventListener("resize", scheduleUpdate);
+    const shortViewport = typeof view.matchMedia === "function"
+      ? view.matchMedia("(max-height: 479px)")
+      : null;
+    const onShortChange = () => scheduleUpdate();
+    shortViewport?.addEventListener("change", onShortChange);
+    view.addEventListener("resize", scheduleUpdate);
     return () => {
       if (measureTimer) window.clearTimeout(measureTimer);
       observer?.disconnect();
-      window.removeEventListener("resize", scheduleUpdate);
+      shortViewport?.removeEventListener("change", onShortChange);
+      view.removeEventListener("resize", scheduleUpdate);
     };
   }, [copySignature, device, heroMediaFrame, imageCarriesCopy]);
   useLayoutEffect(() => {
@@ -2628,7 +2645,10 @@ export default function DynamicTemplateRenderer({
       observer.disconnect();
     };
   }, [device, result]);
-  const [narrowSplit, setNarrowSplit] = useState(false);
+  const [desktopNarrowSplit, setNarrowSplit] = useState(false);
+  // 24em 改上下排列只用于桌面内容端点。手机画布半栏永远窄于 24em，
+  // 继续套这条规则会把作者预览的左右排列强行改回上下。
+  const narrowSplit = device === "mobile" ? false : desktopNarrowSplit;
   const [copyOverflow, setCopyOverflow] = useState("");
   const [pairedImageCompressed, setPairedImageCompressed] = useState(false);
   const [textContrastNote, setTextContrastNote] = useState<"none" | "corrected" | "low" | "both">("none");
@@ -2645,7 +2665,7 @@ export default function DynamicTemplateRenderer({
       if (!element.isConnected) return;
       const fontSize = Number.parseFloat(getComputedStyle(element).fontSize) || 16;
       const rows = [...element.querySelectorAll<HTMLElement>("[data-template-split-row='true']")];
-      const stack = rows.some((row) => {
+      const stack = device !== "mobile" && rows.some((row) => {
         const columns = Number(row.getAttribute("data-template-split-columns")) || 2;
         const gap = Number.parseFloat(getComputedStyle(row).columnGap) || 0;
         const text = row.querySelector<HTMLElement>("[data-template-node-type*='Text'], [data-template-node-type*='Heading']");

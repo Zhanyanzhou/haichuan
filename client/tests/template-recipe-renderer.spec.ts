@@ -1480,7 +1480,11 @@ test("首页首屏旧画布与新画框在指定视口分开成立", async ({ pa
     await page.evaluate((value) => (
       window as unknown as { renderHero: (options: Record<string, unknown>) => void }
     ).renderHero(value), options);
-    await expect.poll(async () => (await read()).sectionHeight).toBeGreaterThan(40);
+    await expect.poll(async () => {
+      const current = await read();
+      const titleReady = typeof options.title !== "string" || current.titleText.includes(options.title);
+      return current.sectionHeight > 40 && titleReady;
+    }).toBe(true);
   };
 
   await page.goto("/__hero-home-proof");

@@ -224,11 +224,12 @@ export default function CanvasSelectionDock({
       setDockPosition(nextPosition);
     };
 
-    let revealFrame = 0;
+    let revealTimer = 0;
     const revealDock = () => {
-      if (revealFrame) hostWindow.cancelAnimationFrame(revealFrame);
-      revealFrame = hostWindow.requestAnimationFrame(() => {
-        revealFrame = 0;
+      if (revealTimer) hostWindow.clearTimeout(revealTimer);
+      // 滚动会改画布尺寸。必须离开本轮 ResizeObserver，requestAnimationFrame 仍算同一轮。
+      revealTimer = hostWindow.setTimeout(() => {
+        revealTimer = 0;
         updatePosition();
         const dock = portalRef.current;
         if (!dock) return;
@@ -251,7 +252,7 @@ export default function CanvasSelectionDock({
         if (Math.abs(left) >= 0.5 || Math.abs(top) >= 0.5) {
           nextDockHost.scrollBy({ left, top, behavior: "auto" });
         }
-      });
+      }, 16);
     };
 
     let positionTimer = 0;
@@ -280,7 +281,7 @@ export default function CanvasSelectionDock({
       hostWindow.removeEventListener("scroll", scheduleUpdatePosition, true);
       frameWindow.removeEventListener("resize", revealDock);
       frameWindow.removeEventListener("scroll", scheduleUpdatePosition, true);
-      if (revealFrame) hostWindow.cancelAnimationFrame(revealFrame);
+      if (revealTimer) hostWindow.clearTimeout(revealTimer);
       if (positionTimer) hostWindow.clearTimeout(positionTimer);
       overlayObserver.disconnect();
       frameObserver.disconnect();

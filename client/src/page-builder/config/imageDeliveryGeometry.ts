@@ -138,6 +138,65 @@ export function scaleSizesExpression(sizes: string, factor: number): string {
   return sizes.replace(/(\d+(?:\.\d+)?)vw/g, (_match, value: string) => `calc(${value}vw * ${rounded})`);
 }
 
+function splitSizesClauses(sizes: string): string[] {
+  const clauses: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < sizes.length; index += 1) {
+    const char = sizes[index];
+    if (char === "(") depth += 1;
+    else if (char === ")") depth = Math.max(0, depth - 1);
+    else if (char === "," && depth === 0) {
+      clauses.push(sizes.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  const last = sizes.slice(start).trim();
+  if (last) clauses.push(last);
+  return clauses;
+}
+
+function activeSizesLength(sizes: string, viewportWidth: number): string {
+  const clauses = splitSizesClauses(sizes);
+  for (const clause of clauses) {
+    if (!clause.startsWith("(")) return clause;
+    let depth = 0;
+    let queryEnd = -1;
+    for (let index = 0; index < clause.length; index += 1) {
+      if (clause[index] === "(") depth += 1;
+      else if (clause[index] === ")") {
+        depth -= 1;
+        if (depth === 0) {
+          queryEnd = index;
+          break;
+        }
+      }
+    }
+    if (queryEnd < 0) return clause;
+    const query = clause.slice(1, queryEnd);
+    const maxWidth = /max-width:\s*(\d+(?:\.\d+)?)px/.exec(query);
+    const minWidth = /min-width:\s*(\d+(?:\.\d+)?)px/.exec(query);
+    const matches = (!maxWidth || viewportWidth <= Number(maxWidth[1]))
+      && (!minWidth || viewportWidth >= Number(minWidth[1]))
+      && Boolean(maxWidth || minWidth);
+    if (matches) return clause.slice(queryEnd + 1).trim();
+  }
+  return clauses[clauses.length - 1] ?? "";
+}
+
+/** 声明的 sizes 在当前视口上的下限（CSS px）。解析不了时返回 0，调用方不要用它否决测量。 */
+export function sizesLowerBoundPx(sizes: string, viewportWidth: number): number {
+  if (!(viewportWidth > 0)) return 0;
+  const length = activeSizesLength(sizes, viewportWidth).trim();
+  const calc = /^calc\(\s*(\d+(?:\.\d+)?)vw\s*\*\s*(\d+(?:\.\d+)?)\s*\)$/.exec(length);
+  if (calc) return (Number(calc[1]) / 100) * viewportWidth * Number(calc[2]);
+  const viewport = /^(\d+(?:\.\d+)?)vw$/.exec(length);
+  if (viewport) return (Number(viewport[1]) / 100) * viewportWidth;
+  const pixels = /^(\d+(?:\.\d+)?)px$/.exec(length);
+  if (pixels) return Number(pixels[1]);
+  return 0;
+}
+
 /** 首屏已知宽高表达式时，铺满宽度 = max(框宽, 框高 × 原图宽高比)。 */
 export function coverSizesFromViewportBox(input: {
   width: string;

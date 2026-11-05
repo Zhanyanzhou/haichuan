@@ -4,6 +4,7 @@ import {
   coverSizesFromViewportBox,
   describeImageSlotAdvice,
   heroPublicCandidateSizes,
+  sizesLowerBoundPx,
   designCanvasWidthOnDevice,
   referenceDeliveryFrame,
   renderedWidthFactor,
@@ -235,4 +236,14 @@ test("首屏手机和平板按比例框选图，只有更宽的桌面才按视�
     "(max-width: 1023px) 100vw, calc(max(100vw, calc(max(620px, 100svh) * 1.7778)))",
   );
   assert.equal(desktop?.includes("dpr"), false);
+});
+
+test("声明的 sizes 在当前视口上给出下限，窄测量不能把它盖掉", () => {
+  assert.equal(sizesLowerBoundPx("100vw", 1440), 1440);
+  assert.equal(sizesLowerBoundPx("100vw", 390), 390);
+  assert.equal(sizesLowerBoundPx("(max-width: 767px) 100vw, 50vw", 1440), 720);
+  assert.equal(sizesLowerBoundPx("(max-width: 767px) 100vw, 50vw", 390), 390);
+  assert.equal(sizesLowerBoundPx("calc(100vw * 1.2)", 1000), 1200);
+  assert.equal(sizesLowerBoundPx("420px", 1440), 420);
+  assert.equal(sizesLowerBoundPx("auto", 1440), 0);
 });

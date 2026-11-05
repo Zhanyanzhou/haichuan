@@ -779,6 +779,8 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       await expect(page.getByLabel("内容语言", { exact: true })).toHaveCount(0);
       const toolbar = page.locator(".homepage-editor__toolbar");
       const switcher = toolbar.locator(".homepage-editor__viewport-switcher");
+      await expect(toolbar).toBeVisible();
+      await expect(switcher).toBeVisible();
       const toolbarBox = await toolbar.boundingBox();
       const switcherBox = await switcher.boundingBox();
       if (!toolbarBox || !switcherBox) throw new Error("顶栏或设备切换缺少几何尺寸");
