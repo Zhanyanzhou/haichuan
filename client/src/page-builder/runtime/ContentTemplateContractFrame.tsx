@@ -1238,7 +1238,6 @@ function ContentTemplateReadOnlyContractFrame({
     const ownerWindow = root.ownerDocument.defaultView;
     const appliedVariables = new Set<string>();
     const frameHeight = createContractFrameHeightSync(root, contract);
-    let resizeFrame = 0;
     const resolveViewport = () => props?.__editorViewport === "mobile"
       ? "mobile" as const
       : props?.__editorViewport === "desktop"
@@ -1342,7 +1341,6 @@ function ContentTemplateReadOnlyContractFrame({
       observer?.disconnect();
       mutationObserver?.disconnect();
       if (layoutTimeoutId !== null) ownerWindow?.clearTimeout(layoutTimeoutId);
-      ownerWindow?.cancelAnimationFrame(resizeFrame);
       clearVariables();
       frameHeight.clear();
     };

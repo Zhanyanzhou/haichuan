@@ -355,7 +355,8 @@ export default function TemplateViewportFrame({
   useLayoutEffect(() => {
     const stage = stageRef.current;
     if (!stage) return undefined;
-    let animationFrameId = 0;
+    let outerFrameId = 0;
+    let innerFrameId = 0;
     const measureWidth = () => {
       const viewport = readCanvasContentBox(stage);
       const fitScale = resolveFiniteCanvasScale(calculateFitCanvasScale({
@@ -373,11 +374,13 @@ export default function TemplateViewportFrame({
         : { ...current, fitScale });
     };
     const scheduleMeasure = () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      if (outerFrameId) cancelAnimationFrame(outerFrameId);
+      if (innerFrameId) cancelAnimationFrame(innerFrameId);
       // 双帧：跳过 Chrome 对“本轮 ResizeObserver 投递里改布局”的 loop 告警。
-      animationFrameId = requestAnimationFrame(() => {
-        animationFrameId = requestAnimationFrame(() => {
-          animationFrameId = 0;
+      outerFrameId = requestAnimationFrame(() => {
+        outerFrameId = 0;
+        innerFrameId = requestAnimationFrame(() => {
+          innerFrameId = 0;
           measureWidth();
         });
       });
@@ -386,7 +389,8 @@ export default function TemplateViewportFrame({
     observer.observe(stage);
     scheduleMeasure();
     return () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      if (outerFrameId) cancelAnimationFrame(outerFrameId);
+      if (innerFrameId) cancelAnimationFrame(innerFrameId);
       observer.disconnect();
     };
   }, [measurement.documentHeight, minimumFitScale, sourceWidth]);
