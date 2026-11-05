@@ -13,7 +13,7 @@ export function useTemplateRenderedPropertyValues(nodeIds: readonly string[], br
   useEffect(() => {
     const selectedNodeIds = JSON.parse(selectionKey) as string[];
     let disposed = false;
-    let frame = 0;
+    let measureTimer = 0;
     // 每个源文档独立交付尺寸通知，不能把 iframe 后代挂到宿主 RO 深度队列。
     const observers = new Map<Document, ResizeObserver>();
     const contentObservers = new Map<Document, MutationObserver>();
@@ -64,7 +64,6 @@ export function useTemplateRenderedPropertyValues(nodeIds: readonly string[], br
       }
     };
     const measure = () => {
-      frame = 0;
       if (disposed) return;
       collectDocuments();
       const next: RenderedPropertyValues = {};
@@ -107,7 +106,14 @@ export function useTemplateRenderedPropertyValues(nodeIds: readonly string[], br
       }
       setValues((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
     };
-    function schedule() { if (!disposed && !frame) frame = window.requestAnimationFrame(measure); }
+    function schedule() {
+      if (disposed || measureTimer) return;
+      // 渲染值回写会改属性面板。必须离开本轮 ResizeObserver；requestAnimationFrame 仍算同一轮。
+      measureTimer = window.setTimeout(() => {
+        measureTimer = 0;
+        measure();
+      }, 16);
+    }
     const handleFrameLoad = () => { disconnectObservers(); schedule(); };
     frames.forEach((element) => element.addEventListener("load", handleFrameLoad));
     // 聚焦/并排切换不一定改变断点，监听帧挂载而非依赖模板写入来重新取样。
@@ -124,7 +130,7 @@ export function useTemplateRenderedPropertyValues(nodeIds: readonly string[], br
     collectDocuments();
     documents.forEach((doc) => { void doc.fonts?.ready.then(schedule); });
     schedule();
-    return () => { disposed = true; window.cancelAnimationFrame(frame); disconnectObservers(); frameObserver.disconnect(); frames.forEach((element) => element.removeEventListener("load", handleFrameLoad)); };
+    return () => { disposed = true; if (measureTimer) window.clearTimeout(measureTimer); disconnectObservers(); frameObserver.disconnect(); frames.forEach((element) => element.removeEventListener("load", handleFrameLoad)); };
   }, [selectionKey, breakpoint, definition, previewWidth]);
   return values;
 }

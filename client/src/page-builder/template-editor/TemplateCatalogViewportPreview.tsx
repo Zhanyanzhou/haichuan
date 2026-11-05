@@ -373,7 +373,7 @@ export default function TemplateCatalogViewportPreview({
       || !content.isConnected
       || frameRef.current?.contentDocument !== frameDocument
     ) return undefined;
-    let animationFrameId: number | null = null;
+    let measureTimer = 0;
     let cancelled = false;
     let lastMeasurementReady = false;
 
@@ -409,11 +409,12 @@ export default function TemplateCatalogViewportPreview({
     };
 
     const scheduleMeasurements = () => {
-      if (animationFrameId !== null) return;
-      animationFrameId = ownerWindow.requestAnimationFrame(() => {
-        animationFrameId = null;
+      if (cancelled || measureTimer) return;
+      // 缩略图高度回写会改卡片。必须离开本轮 ResizeObserver；requestAnimationFrame 仍算同一轮。
+      measureTimer = ownerWindow.setTimeout(() => {
+        measureTimer = 0;
         commitMeasurements();
-      });
+      }, 16);
     };
 
     const resizeObserver = new ownerWindow.ResizeObserver(scheduleMeasurements);
@@ -453,7 +454,7 @@ export default function TemplateCatalogViewportPreview({
       ownerWindow.removeEventListener("resize", scheduleMeasurements);
       timers.forEach((timer) => ownerWindow.clearTimeout(timer));
       ownerWindow.clearTimeout(unavailableTimer);
-      if (animationFrameId !== null) ownerWindow.cancelAnimationFrame(animationFrameId);
+      if (measureTimer) ownerWindow.clearTimeout(measureTimer);
     };
   }, [
     children,

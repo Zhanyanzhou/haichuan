@@ -565,7 +565,7 @@ function useCanvasObjectMeasurement({
 
       attachedDocument = frameDocument;
       let documentDisposed = false;
-      let animationFrameId: number | null = null;
+      let measureTimer = 0;
       let observedNode: HTMLElement | null = null;
       let observedParent: HTMLElement | null = null;
       const parentId = roleId ? activeNodeId : findDynamicTemplateParentId(definition, activeNodeId);
@@ -594,7 +594,6 @@ function useCanvasObjectMeasurement({
       }
 
       function readMeasurement() {
-        animationFrameId = null;
         if (disposed || documentDisposed || activeFrame.contentDocument !== frameDocument) return;
         const nodeElement = findElementByData(frameDocument, "data-template-node-id", activeNodeId);
         const target = roleId && nodeElement
@@ -627,8 +626,12 @@ function useCanvasObjectMeasurement({
       }
 
       function scheduleMeasurement() {
-        if (disposed || documentDisposed || animationFrameId !== null) return;
-        animationFrameId = activeWindow.requestAnimationFrame(readMeasurement);
+        if (disposed || documentDisposed || measureTimer) return;
+        // 属性回显会改面板高度。必须离开本轮 ResizeObserver；requestAnimationFrame 仍算同一轮。
+        measureTimer = activeWindow.setTimeout(() => {
+          measureTimer = 0;
+          readMeasurement();
+        }, 16);
       }
 
       // Document is a stable, valid MutationObserver target even before HTML parsing
@@ -657,7 +660,7 @@ function useCanvasObjectMeasurement({
         resizeObserver.disconnect();
         mutationObserver.disconnect();
         timers.forEach((timer) => activeWindow.clearTimeout(timer));
-        if (animationFrameId !== null) activeWindow.cancelAnimationFrame(animationFrameId);
+        if (measureTimer) activeWindow.clearTimeout(measureTimer);
         activeWindow.removeEventListener("pagehide", handlePageHide);
         observedNode = null;
         observedParent = null;

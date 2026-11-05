@@ -190,7 +190,7 @@ export function PageCanvasTemplatePreview() {
     const frameWindow = root?.ownerDocument.defaultView;
     if (!root || !preview || !frameWindow || frameWindow === window) return;
 
-    let animationFrameId = 0;
+    let reportTimeoutId = 0;
     const reportCanvasHeight = () => {
       const contentShell = root.closest<HTMLElement>(".homepage-editor__storefront-frame");
       const documentHeight = Math.ceil(Math.max(
@@ -204,18 +204,19 @@ export function PageCanvasTemplatePreview() {
       );
     };
     const scheduleReport = () => {
-      if (animationFrameId) frameWindow.cancelAnimationFrame(animationFrameId);
-      animationFrameId = frameWindow.requestAnimationFrame(() => {
-        animationFrameId = 0;
+      if (reportTimeoutId) return;
+      // 离开当前 ResizeObserver 投递再回报高度。requestAnimationFrame 仍算同一轮，会触发 loop 告警。
+      reportTimeoutId = frameWindow.setTimeout(() => {
+        reportTimeoutId = 0;
         reportCanvasHeight();
-      });
+      }, 16);
     };
     const observer = new frameWindow.ResizeObserver(scheduleReport);
     observer.observe(root);
     scheduleReport();
     const delayedReport = frameWindow.setTimeout(scheduleReport, 80);
     return () => {
-      if (animationFrameId) frameWindow.cancelAnimationFrame(animationFrameId);
+      if (reportTimeoutId) frameWindow.clearTimeout(reportTimeoutId);
       observer.disconnect();
       frameWindow.clearTimeout(delayedReport);
     };

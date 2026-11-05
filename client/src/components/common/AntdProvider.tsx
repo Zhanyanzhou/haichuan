@@ -15,10 +15,11 @@ const brandLoadingIndicator = (
  *
  * 这样纯展示型前台页面不会下载后台组件库，使用 Ant Design 的页面仍保持中文语言包与统一品牌主题。
  * 按钮和表格自带的等待也使用 H 标记，不再使用默认圆点。
+ * 点击水波在 ResizeObserver 回调里回写尺寸，会在编辑画布触发浏览器 loop 告警，因此关闭。
  */
 export default function AntdProvider({ children }: { children: ReactNode }) {
   return (
-    <ConfigProvider locale={zhCN} theme={antdTheme} spin={{ indicator: brandLoadingIndicator }}>
+    <ConfigProvider locale={zhCN} theme={antdTheme} spin={{ indicator: brandLoadingIndicator }} wave={{ disabled: true }}>
       <App component={false}>{children}</App>
     </ConfigProvider>
   );

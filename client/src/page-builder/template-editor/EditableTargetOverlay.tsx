@@ -504,10 +504,8 @@ export default function EditableTargetOverlay({
     const sourceWindow = sourceRoot.ownerDocument.defaultView;
     const hostWindow = hostRoot.ownerDocument.defaultView;
     if (!sourceWindow || !hostWindow) return undefined;
-    const requestHostFrame = hostWindow.requestAnimationFrame.bind(hostWindow);
-    const cancelHostFrame = hostWindow.cancelAnimationFrame.bind(hostWindow);
     const coarsePointer = hostWindow.matchMedia("(pointer: coarse)");
-    let frameId: number | null = null;
+    let measureTimer = 0;
     let cancelled = false;
     const observedSourceElements = new Set<Element>();
 
@@ -681,11 +679,12 @@ export default function EditableTargetOverlay({
     };
 
     function scheduleMeasure() {
-      if (frameId !== null || cancelled) return;
-      frameId = requestHostFrame(() => {
-        frameId = null;
+      if (measureTimer || cancelled) return;
+      // 选区回写会改宿主层尺寸。必须离开本轮 ResizeObserver；requestAnimationFrame 仍算同一轮。
+      measureTimer = hostWindow.setTimeout(() => {
+        measureTimer = 0;
         measure();
-      });
+      }, 16);
     }
 
     const attributeFilter = Array.from(new Set([
@@ -723,7 +722,7 @@ export default function EditableTargetOverlay({
       hostWindow.removeEventListener("resize", scheduleMeasure);
       hostWindow.removeEventListener("scroll", scheduleMeasure, true);
       coarsePointer.removeEventListener("change", scheduleMeasure);
-      if (frameId !== null) cancelHostFrame(frameId);
+      if (measureTimer) hostWindow.clearTimeout(measureTimer);
     };
   }, [hostRoot, onMeasurementChange, sourceFrame, sourceRoot, targetSignature, targets]);
 

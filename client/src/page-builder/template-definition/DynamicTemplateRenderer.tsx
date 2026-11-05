@@ -735,7 +735,9 @@ function ManagedTemplateSlotImage({
     setMeasuredCssWidth(null);
     if (hostFetch || !facts || facts.animated) return undefined;
     const parent = imageRef.current?.parentElement;
-    if (!parent || typeof ResizeObserver === "undefined") return undefined;
+    const ownerWindow = parent?.ownerDocument.defaultView;
+    // 画布由父页面渲染进 iframe。必须用元素所在窗口的观察器，跨文档观察会触发 loop。
+    if (!parent || !ownerWindow || typeof ownerWindow.ResizeObserver === "undefined") return undefined;
     let current = 0;
     const commitMeasuredWidth = (next: number) => {
       // 首帧画布还没按视口撑开时，量到的窄宽不能盖过声明的 sizes。
@@ -767,16 +769,16 @@ function ManagedTemplateSlotImage({
     let measureTimer = 0;
     const scheduleMeasure = () => {
       if (measureTimer) return;
-      measureTimer = window.setTimeout(() => {
+      measureTimer = ownerWindow.setTimeout(() => {
         measureTimer = 0;
         measure();
       }, 16);
     };
     scheduleMeasure();
-    const observer = new ResizeObserver(scheduleMeasure);
+    const observer = new ownerWindow.ResizeObserver(scheduleMeasure);
     observer.observe(parent);
     return () => {
-      if (measureTimer) window.clearTimeout(measureTimer);
+      if (measureTimer) ownerWindow.clearTimeout(measureTimer);
       observer.disconnect();
     };
   }, [
@@ -2604,7 +2606,7 @@ export default function DynamicTemplateRenderer({
     };
     const observed = rootRef.current;
     const view = observed?.ownerDocument.defaultView ?? window;
-    const observer = observed ? new ResizeObserver(scheduleUpdate) : null;
+    const observer = observed ? new view.ResizeObserver(scheduleUpdate) : null;
     if (observed) observer?.observe(observed);
     const shortViewport = typeof view.matchMedia === "function"
       ? view.matchMedia("(max-height: 479px)")
@@ -2621,7 +2623,8 @@ export default function DynamicTemplateRenderer({
   }, [copySignature, device, heroMediaFrame, imageCarriesCopy]);
   useLayoutEffect(() => {
     const element = rootRef.current;
-    if (!element || device !== "mobile") {
+    const ownerWindow = element?.ownerDocument.defaultView;
+    if (!element || !ownerWindow || device !== "mobile") {
       setLargePhone(false);
       return undefined;
     }
@@ -2638,7 +2641,7 @@ export default function DynamicTemplateRenderer({
       }, 16);
     };
     scheduleUpdate();
-    const observer = new ResizeObserver(scheduleUpdate);
+    const observer = new ownerWindow.ResizeObserver(scheduleUpdate);
     observer.observe(element);
     return () => {
       if (measureTimer) window.clearTimeout(measureTimer);
@@ -2654,7 +2657,8 @@ export default function DynamicTemplateRenderer({
   const [textContrastNote, setTextContrastNote] = useState<"none" | "corrected" | "low" | "both">("none");
   useLayoutEffect(() => {
     const element = rootRef.current;
-    if (!element || !result.ok) {
+    const ownerWindow = element?.ownerDocument.defaultView;
+    if (!element || !ownerWindow || !result.ok) {
       setNarrowSplit(false);
       setCopyOverflow("");
       setPairedImageCompressed(false);
@@ -2732,7 +2736,7 @@ export default function DynamicTemplateRenderer({
       }, 16);
     };
     scheduleUpdate();
-    const observer = new ResizeObserver(scheduleUpdate);
+    const observer = new ownerWindow.ResizeObserver(scheduleUpdate);
     observer.observe(element);
     return () => {
       if (measureTimer) window.clearTimeout(measureTimer);

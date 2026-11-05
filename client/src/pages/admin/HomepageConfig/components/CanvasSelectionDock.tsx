@@ -270,7 +270,8 @@ export default function CanvasSelectionDock({
     hostWindow.addEventListener("scroll", scheduleUpdatePosition, true);
     frameWindow.addEventListener("resize", revealDock);
     frameWindow.addEventListener("scroll", scheduleUpdatePosition, true);
-    const overlayObserver = new ResizeObserver(scheduleUpdatePosition);
+    // 选中块在 iframe 文档里。父页面的 ResizeObserver 跨文档观察会触发 loop。
+    const overlayObserver = new frameWindow.ResizeObserver(scheduleUpdatePosition);
     const frameObserver = new ResizeObserver(revealDock);
     overlayObserver.observe(selectedBlock);
     frameObserver.observe(frame);
