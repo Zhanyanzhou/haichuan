@@ -589,12 +589,14 @@ function CanvasBlockAnchor({
         "*",
       );
     };
+    let reportTimeoutId: number | null = null;
     const scheduleReport = () => {
-      if (animationFrameId) frameWindow.cancelAnimationFrame(animationFrameId);
-      animationFrameId = frameWindow.requestAnimationFrame(() => {
-        animationFrameId = 0;
+      if (reportTimeoutId !== null) return;
+      // 离开当前 ResizeObserver 投递再回报高度，避免 Chrome loop 告警。
+      reportTimeoutId = frameWindow.setTimeout(() => {
+        reportTimeoutId = null;
         reportCanvasHeight();
-      });
+      }, 16) as unknown as number;
     };
 
     // 锚点位于 Puck 的 iframe document，使用其自身的 ResizeObserver 才能稳定监听尺寸变化。
@@ -603,7 +605,7 @@ function CanvasBlockAnchor({
     scheduleReport();
     const delayedReport = frameWindow.setTimeout(scheduleReport, 80);
     return () => {
-      if (animationFrameId) frameWindow.cancelAnimationFrame(animationFrameId);
+      if (reportTimeoutId !== null) frameWindow.clearTimeout(reportTimeoutId);
       observer.disconnect();
       frameWindow.clearTimeout(delayedReport);
     };

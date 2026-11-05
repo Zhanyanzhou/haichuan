@@ -374,9 +374,12 @@ export default function TemplateViewportFrame({
     };
     const scheduleMeasure = () => {
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      // 双帧：跳过 Chrome 对“本轮 ResizeObserver 投递里改布局”的 loop 告警。
       animationFrameId = requestAnimationFrame(() => {
-        animationFrameId = 0;
-        measureWidth();
+        animationFrameId = requestAnimationFrame(() => {
+          animationFrameId = 0;
+          measureWidth();
+        });
       });
     };
     const observer = new ResizeObserver(scheduleMeasure);
@@ -537,11 +540,11 @@ export default function TemplateViewportFrame({
       }
       if (timeoutId !== null) return;
       // 观察目标尺寸变化后再改 iframe 高度，会在同帧 RO 投递里形成回写。
-      // 用 setTimeout(0) 离开当前帧的 RO 交付，而不是再叠一层 rAF。
+      // 16ms 离开当前投递，并合并紧接着的子树通知。
       timeoutId = ownerWindow.setTimeout(() => {
         timeoutId = null;
         commitMeasuredHeight();
-      }, 0) as unknown as number;
+      }, 16) as unknown as number;
     };
     // 内容属于 iframe，与 Overlay / 目录预览一致，使用源文档的观察器。
     // 只观察内容根与直接子树：逐节点 observe 会在改 iframe 高度时对每个槽位

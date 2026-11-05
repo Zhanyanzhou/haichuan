@@ -1322,24 +1322,26 @@ function ContentTemplateReadOnlyContractFrame({
 
     syncLayoutVariables();
     const ResizeObserverConstructor = ownerWindow?.ResizeObserver;
+    let layoutTimeoutId: number | null = null;
+    const scheduleLayoutSync = () => {
+      if (!ownerWindow || layoutTimeoutId !== null) return;
+      layoutTimeoutId = ownerWindow.setTimeout(() => {
+        layoutTimeoutId = null;
+        syncLayoutVariables();
+      }, 16) as unknown as number;
+    };
     const observer = ResizeObserverConstructor
-      ? new ResizeObserverConstructor(() => {
-          if (!ownerWindow) return;
-          ownerWindow.cancelAnimationFrame(resizeFrame);
-          resizeFrame = ownerWindow.requestAnimationFrame(syncLayoutVariables);
-        })
+      ? new ResizeObserverConstructor(scheduleLayoutSync)
       : undefined;
     observer?.observe(root);
     const mutationObserver = ownerWindow
-      ? new ownerWindow.MutationObserver(() => {
-          ownerWindow.cancelAnimationFrame(resizeFrame);
-          resizeFrame = ownerWindow.requestAnimationFrame(syncLayoutVariables);
-        })
+      ? new ownerWindow.MutationObserver(scheduleLayoutSync)
       : undefined;
     mutationObserver?.observe(root, { childList: true, subtree: true });
     return () => {
       observer?.disconnect();
       mutationObserver?.disconnect();
+      if (layoutTimeoutId !== null) ownerWindow?.clearTimeout(layoutTimeoutId);
       ownerWindow?.cancelAnimationFrame(resizeFrame);
       clearVariables();
       frameHeight.clear();
@@ -1944,17 +1946,17 @@ function ContentTemplateEditorContractFrame({
       scheduleGeometryReport();
     };
 
-    let resizeFrame = 0;
+    let layoutTimeoutId: number | null = null;
     const scheduleSyncLayoutVariables = () => {
       if (!ownerWindow) {
         syncLayoutVariables();
         return;
       }
-      ownerWindow.cancelAnimationFrame(resizeFrame);
-      resizeFrame = ownerWindow.requestAnimationFrame(() => {
-        resizeFrame = 0;
+      if (layoutTimeoutId !== null) return;
+      layoutTimeoutId = ownerWindow.setTimeout(() => {
+        layoutTimeoutId = null;
         syncLayoutVariables();
-      });
+      }, 16) as unknown as number;
     };
     scheduleSyncLayoutVariables();
     const ResizeObserverConstructor = ownerWindow?.ResizeObserver;
@@ -1966,7 +1968,7 @@ function ContentTemplateEditorContractFrame({
     return () => {
       observer?.disconnect();
       ownerWindow?.removeEventListener("resize", scheduleSyncLayoutVariables);
-      ownerWindow?.cancelAnimationFrame(resizeFrame);
+      if (layoutTimeoutId !== null) ownerWindow?.clearTimeout(layoutTimeoutId);
       ownerWindow?.cancelAnimationFrame(geometryFrame);
       clearVariables();
       frameHeight.clear();
