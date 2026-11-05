@@ -101,7 +101,8 @@ export default function CanvasSelectionDock({
       ".homepage-editor__canvas-scroll iframe",
     );
     const frameDocument = frame?.contentDocument;
-    const frameWindow = frame?.contentWindow;
+    // contentWindow 的类型不含 ResizeObserver。选中块属于 iframe 文档，观察器必须用该文档的窗口。
+    const frameWindow = frameDocument?.defaultView ?? null;
     const selectedBlock = findCanvasBlock(frameDocument, componentId);
     const nextDockHost = frame?.closest<HTMLElement>(
       ".homepage-editor__canvas-scroll",

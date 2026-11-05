@@ -504,6 +504,8 @@ export default function EditableTargetOverlay({
     const sourceWindow = sourceRoot.ownerDocument.defaultView;
     const hostWindow = hostRoot.ownerDocument.defaultView;
     if (!sourceWindow || !hostWindow) return undefined;
+    const scheduleHostTimer = hostWindow.setTimeout.bind(hostWindow);
+    const clearHostTimer = hostWindow.clearTimeout.bind(hostWindow);
     const coarsePointer = hostWindow.matchMedia("(pointer: coarse)");
     let measureTimer = 0;
     let cancelled = false;
@@ -681,7 +683,7 @@ export default function EditableTargetOverlay({
     function scheduleMeasure() {
       if (measureTimer || cancelled) return;
       // 选区回写会改宿主层尺寸。必须离开本轮 ResizeObserver；requestAnimationFrame 仍算同一轮。
-      measureTimer = hostWindow.setTimeout(() => {
+      measureTimer = scheduleHostTimer(() => {
         measureTimer = 0;
         measure();
       }, 16);
@@ -722,7 +724,7 @@ export default function EditableTargetOverlay({
       hostWindow.removeEventListener("resize", scheduleMeasure);
       hostWindow.removeEventListener("scroll", scheduleMeasure, true);
       coarsePointer.removeEventListener("change", scheduleMeasure);
-      if (measureTimer) hostWindow.clearTimeout(measureTimer);
+      if (measureTimer) clearHostTimer(measureTimer);
     };
   }, [hostRoot, onMeasurementChange, sourceFrame, sourceRoot, targetSignature, targets]);
 
