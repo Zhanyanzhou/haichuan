@@ -1539,6 +1539,7 @@ export const pageDocumentApi = {
   getPublished: async (
     pageKey = "home",
     locale: PublicContentLocale = getBrowserPublicContentLocale(),
+    signal?: AbortSignal,
   ) => {
     if (locale === "en") {
       throw new Error("Requested locale is not published");
@@ -1550,6 +1551,9 @@ export const pageDocumentApi = {
     }
     return api.get("/page-modules/document/published", {
       params: { pageKey, locale },
+      signal,
+      // 路由持有各自的取消信号，返回页面时不能挂接上一次导航的请求。
+      dedupe: signal ? false : undefined,
       suppressGlobalError: true,
     });
   },

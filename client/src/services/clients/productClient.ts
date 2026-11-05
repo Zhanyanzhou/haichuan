@@ -499,12 +499,15 @@ export const productApi = {
     options: {
       suppressGlobalError?: boolean;
       locale?: PublicContentLocale;
+      signal?: AbortSignal;
     } = {},
   ) => {
     const locale = options.locale ?? getBrowserPublicContentLocale();
     const requestOptions = {
       suppressGlobalError: options.suppressGlobalError,
       params: { locale },
+      signal: options.signal,
+      dedupe: options.signal ? false : undefined,
     };
     if (USE_MOCK) {
       await mockDelay();
@@ -525,7 +528,7 @@ export const productApi = {
         ...requestOptions,
       });
     } catch (error) {
-      if (requestStatus(error) !== 401) throw error;
+      if (options.signal?.aborted || requestStatus(error) !== 401) throw error;
       clearCustomerSession();
       return api.get(`/products/public/${reference}`, requestOptions);
     }

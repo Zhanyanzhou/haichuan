@@ -33,6 +33,7 @@ type SeriesLink = {
 };
 
 const WORK_LIMIT = 4;
+type LoadStatus = "loading" | "ready" | "error";
 
 function isCanceled(error: unknown): boolean {
   if (error instanceof DOMException && error.name === "AbortError") return true;
@@ -81,14 +82,48 @@ function readWorks(payload: unknown): SearchWork[] {
     ? payload
     : record && Array.isArray(record.list)
       ? record.list
-      : [];
+      : null;
+  if (!rawList) throw new Error("Invalid public search response");
   const works: SearchWork[] = [];
   for (const item of rawList) {
     const work = parseWork(item);
     if (work) works.push(work);
     if (works.length >= WORK_LIMIT) break;
   }
+  if (rawList.length && !works.length) throw new Error("Invalid public search works");
   return works;
+}
+
+function useSearchWorks(keyword: string, categoryIds: string, enabled: boolean, revision: number) {
+  const key = JSON.stringify([keyword, categoryIds, revision]);
+  const [result, setResult] = useState<{
+    key: string;
+    status: Exclude<LoadStatus, "loading">;
+    works: SearchWork[];
+  } | null>(null);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const controller = new AbortController();
+    productApi.getPublicList({
+      page: 1,
+      pageSize: WORK_LIMIT,
+      ...(keyword ? { keyword } : {}),
+      ...(categoryIds ? { categoryIds } : {}),
+    }, controller.signal).then((response) => {
+      if (controller.signal.aborted) return;
+      const works = readWorks(unwrapResponse<unknown>(response));
+      setResult({ key, status: "ready", works });
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted || isCanceled(error)) return;
+      setResult({ key, status: "error", works: [] });
+    });
+    return () => controller.abort();
+  }, [keyword, categoryIds, enabled, key]);
+
+  return enabled && result?.key === key
+    ? result
+    : { status: "loading" as const, works: [] };
 }
 
 function workPrice(work: SearchWork): string {
@@ -97,22 +132,9 @@ function workPrice(work: SearchWork): string {
 }
 
 function primaryCategoryId(tree: RealCategory[], categoryId: number): number | null {
-  const parentById = new Map<number, number | null>();
-  const visit = (nodes: RealCategory[], parentId: number | null) => {
-    for (const node of nodes) {
-      parentById.set(node.id, node.parentId ?? parentId);
-      if (node.children?.length) visit(node.children, node.id);
-    }
-  };
-  visit(tree, null);
-  if (!parentById.has(categoryId)) return null;
-  let current = categoryId;
-  let parent = parentById.get(current) ?? null;
-  while (parent) {
-    current = parent;
-    parent = parentById.get(current) ?? null;
-  }
-  return current;
+  const includesCategory = (node: RealCategory): boolean =>
+    node.id === categoryId || Boolean(node.children?.some(includesCategory));
+  return tree.find(includesCategory)?.id ?? null;
 }
 
 function categoryIdsMatching(tree: RealCategory[], needle: string): string {
@@ -164,16 +186,15 @@ export default function SiteSearchDialog({ open, onClose }: SiteSearchDialogProp
   const navigate = useNavigate();
   const [keyword, setKeyword] = useState("");
   const [debouncedKeyword, setDebouncedKeyword] = useState("");
+  const [composing, setComposing] = useState(false);
   const [categories, setCategories] = useState<RealCategory[]>([]);
-  const [categoryStatus, setCategoryStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [categoryStatus, setCategoryStatus] = useState<LoadStatus>("loading");
+  const [categoryRevision, setCategoryRevision] = useState(0);
   const [activeCategoryId, setActiveCategoryId] = useState<number | null>(null);
-  const [works, setWorks] = useState<SearchWork[]>([]);
-  const [workStatus, setWorkStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [workRevision, setWorkRevision] = useState(0);
   const panelRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const categoriesRef = useRef(categories);
   const [portalHost, setPortalHost] = useState<HTMLElement | null>(null);
-  categoriesRef.current = categories;
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -190,6 +211,7 @@ export default function SiteSearchDialog({ open, onClose }: SiteSearchDialogProp
     const previousOverflow = ownerDocument.body.style.overflow;
     ownerDocument.body.style.overflow = "hidden";
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.isComposing || event.keyCode === 229) return;
       if (event.key === "Escape") {
         event.preventDefault();
         onClose();
@@ -224,29 +246,31 @@ export default function SiteSearchDialog({ open, onClose }: SiteSearchDialogProp
     if (open) return;
     setKeyword("");
     setDebouncedKeyword("");
+    setComposing(false);
     setActiveCategoryId(null);
   }, [open]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || composing) return;
     const next = keyword.trim();
     const timer = window.setTimeout(() => {
       setDebouncedKeyword((current) => (current === next ? current : next));
     }, next ? 280 : 0);
     return () => window.clearTimeout(timer);
-  }, [keyword, open]);
+  }, [composing, keyword, open]);
 
   useEffect(() => {
     if (!open) return;
     const controller = new AbortController();
     let active = true;
-    if (categoriesRef.current.length === 0) setCategoryStatus("loading");
+    setCategoryStatus("loading");
     categoryApi
       .getTree(controller.signal)
       .then((response) => {
         if (!active) return;
         const data = unwrapResponse<unknown>(response);
-        setCategories(Array.isArray(data) ? data as RealCategory[] : []);
+        if (!Array.isArray(data)) throw new Error("Invalid public category tree");
+        setCategories(data as RealCategory[]);
         setCategoryStatus("ready");
       })
       .catch((error: unknown) => {
@@ -257,62 +281,29 @@ export default function SiteSearchDialog({ open, onClose }: SiteSearchDialogProp
       active = false;
       controller.abort();
     };
-  }, [open]);
+  }, [categoryRevision, open]);
 
-  useEffect(() => {
-    if (!open) return;
-    if (!debouncedKeyword && categoryStatus !== "ready" && categoryStatus !== "error") return;
-    const controller = new AbortController();
-    let active = true;
-    const load = async (params: { keyword?: string; categoryIds?: string }) => {
-      const response = await productApi.getPublicList(
-        { page: 1, pageSize: WORK_LIMIT, ...params },
-        controller.signal,
-      );
-      return readWorks(unwrapResponse<unknown>(response));
-    };
-    setWorkStatus((current) => (current === "ready" ? current : "loading"));
-    const run = async () => {
-      const scopedIds = !debouncedKeyword && activeCategoryId
-        ? expandCategoryIds(categories, activeCategoryId)
-        : "";
-      const matchedIds = debouncedKeyword
-        ? categoryIdsMatching(categories, debouncedKeyword)
-        : "";
-      let next: SearchWork[] = [];
-      if (debouncedKeyword) {
-        next = await load({ keyword: debouncedKeyword });
-        if (!next.length && matchedIds) next = await load({ categoryIds: matchedIds });
-      } else if (scopedIds) {
-        next = await load({ categoryIds: scopedIds });
-      } else {
-        next = await load({});
-        const primary = next[0] ? primaryCategoryId(categories, next[0].categoryId) : null;
-        const familyIds = primary ? expandCategoryIds(categories, primary) : "";
-        if (familyIds) {
-          const family = await load({ categoryIds: familyIds });
-          if (family.length) next = family;
-          if (!active) return;
-          if (primary) setActiveCategoryId(primary);
-        }
-      }
-      if (!active) return;
-      setWorks(next);
-      setWorkStatus("ready");
-    };
-    run().catch((error: unknown) => {
-      if (!active || isCanceled(error)) return;
-      setWorkStatus("error");
-    });
-    return () => {
-      active = false;
-      controller.abort();
-    };
-  }, [activeCategoryId, categories, categoryStatus, debouncedKeyword, open]);
+  const value = keyword.trim();
+  const needle = value.toLocaleLowerCase();
+  const queryCurrent = open && !composing && value === debouncedKeyword;
+  const scopedIds = !needle && activeCategoryId
+    ? expandCategoryIds(categories, activeCategoryId)
+    : "";
+  const primary = useSearchWorks(debouncedKeyword, scopedIds, queryCurrent, workRevision);
+  const keywordMiss = Boolean(needle) && primary.status === "ready" && primary.works.length === 0;
+  const matchedIds = keywordMiss && categoryStatus === "ready"
+    ? categoryIdsMatching(categories, needle)
+    : "";
+  const fallback = useSearchWorks("", matchedIds, queryCurrent && Boolean(matchedIds), workRevision);
+  const { works, status: workStatus } = keywordMiss && (matchedIds || categoryStatus === "loading")
+    ? fallback
+    : primary;
 
   if (!open) return null;
 
-  const needle = debouncedKeyword.toLocaleLowerCase();
+  const suggestedCategoryId = activeCategoryId ?? (
+    !needle && works[0] ? primaryCategoryId(categories, works[0].categoryId) : null
+  );
   const primaries = getPrimaryCats(categories);
   const categoryLinks = primaries.length > 0 ? primaries : categories;
   const visibleCategories = needle
@@ -320,18 +311,14 @@ export default function SiteSearchDialog({ open, onClose }: SiteSearchDialogProp
     : categoryLinks;
   const visibleSeries = needle
     ? seriesOf(categories, null).filter((series) => series.name.toLocaleLowerCase().includes(needle))
-    : activeCategoryId
-      ? seriesOf(categories, activeCategoryId)
+    : suggestedCategoryId
+      ? seriesOf(categories, suggestedCategoryId)
       : [];
-  const seriesPending = !needle
-    && !activeCategoryId
-    && categoryStatus !== "error"
-    && workStatus !== "ready"
-    && workStatus !== "error";
+  const seriesPending = categoryStatus === "loading" ||
+    (!needle && !suggestedCategoryId && workStatus === "loading");
 
   const submit = () => {
-    const value = keyword.trim();
-    if (!value) return;
+    if (!value || composing) return;
     onClose();
     navigate(`/catalog?query=${encodeURIComponent(value)}`);
   };
@@ -367,6 +354,8 @@ export default function SiteSearchDialog({ open, onClose }: SiteSearchDialogProp
             id="site-search-input"
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
+            onCompositionStart={() => setComposing(true)}
+            onCompositionEnd={() => setComposing(false)}
             placeholder="搜索作品、系列、货号"
             autoComplete="off"
             enterKeyHint="search"
@@ -383,7 +372,13 @@ export default function SiteSearchDialog({ open, onClose }: SiteSearchDialogProp
           <nav className="site-search__column" aria-label="类别">
             <h2 className="site-search__heading">类别</h2>
             {categoryStatus === "error" ? (
-              <p className="site-search__note">品类暂时无法读取</p>
+              <div>
+                <p className="site-search__note" role="status">品类暂时无法读取</p>
+                <button type="button" className="site-search__submit" onClick={() => {
+                  setCategoryStatus("loading");
+                  setCategoryRevision((value) => value + 1);
+                }}>重试读取品类</button>
+              </div>
             ) : visibleCategories.length === 0 ? (
               categoryStatus === "loading" ? (
                 <RouteLoading scope="inline" surface="public" label="正在读取品类" />
@@ -397,7 +392,7 @@ export default function SiteSearchDialog({ open, onClose }: SiteSearchDialogProp
                     key={category.id}
                     to={`/catalog?category=${category.id}`}
                     className={
-                      activeCategoryId === category.id
+                      suggestedCategoryId === category.id
                         ? "site-search__link is-active"
                         : "site-search__link"
                     }
@@ -441,7 +436,12 @@ export default function SiteSearchDialog({ open, onClose }: SiteSearchDialogProp
           <section className="site-search__works" aria-label="作品" aria-busy={workStatus === "loading"}>
             <h2 className="site-search__heading">作品</h2>
             {workStatus === "error" ? (
-              <p className="site-search__note">作品暂时无法读取</p>
+              <div>
+                <p className="site-search__note" role="status">作品暂时无法读取</p>
+                <button type="button" className="site-search__submit" onClick={() => {
+                  setWorkRevision((value) => value + 1);
+                }}>重试查找作品</button>
+              </div>
             ) : works.length === 0 ? (
               workStatus === "loading" ? (
                 <RouteLoading scope="inline" surface="public" label="正在查找作品" />

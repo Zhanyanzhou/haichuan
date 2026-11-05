@@ -48,6 +48,7 @@ export const categoryApi = {
     return api.get("/categories/tree", {
       params: { locale },
       signal,
+      dedupe: signal ? false : undefined,
       suppressGlobalError: true,
     });
   },

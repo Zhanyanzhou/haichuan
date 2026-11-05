@@ -88,10 +88,6 @@ export function createCsrfToken(): string {
   return randomBytes(32).toString("base64url");
 }
 
-export function sessionCookieNames(domain: SessionDomain) {
-  return { ...COOKIE_NAMES[domain], csrf: CSRF_COOKIE_NAME };
-}
-
 function wechatOAuthBindingCookieName(production: boolean): string {
   return production ? "__Host-hc_wechat_oauth" : "hc_wechat_oauth";
 }

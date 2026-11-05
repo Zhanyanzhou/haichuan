@@ -210,6 +210,13 @@ export function usePageWorkspaceController({
   const [loadAttempt, setLoadAttempt] = useState(0);
   const hasInitializedEditorRef = useRef(false);
   const workspaceKey = `${locale}:${pageKey}`;
+  const canvasInputWorkspaceRef = useRef<string | null>(null);
+  // 常驻的旧画布在切页和读取失败时不可把迟到的 onChange 写入新页面。
+  canvasInputWorkspaceRef.current = !initialLoading && !loadError
+    && loadedPageKey === pageKey && resolvedDynamicTemplatesReady
+    && !draftDiscardVerificationPending
+    ? workspaceKey
+    : null;
   const activePageKeyRef = useRef(workspaceKey);
   const latestData = useRef<PuckDocument>(data);
   const controlledCanvasStateRef = useRef<{
@@ -495,16 +502,18 @@ export function usePageWorkspaceController({
 
   const syncCanvasDataWithoutAdvancingSavedBaseline = useCallback(
     (nextData: unknown) => {
+      if (canvasInputWorkspaceRef.current !== workspaceKey) return;
       const nextDocument = getPuckDocument(nextData);
       if (!nextDocument) return;
       setData(nextDocument);
       latestData.current = nextDocument;
       setCanvasDataSyncVersion((version) => version + 1);
     },
-    [],
+    [workspaceKey],
   );
 
   const trackEditorData = useCallback((nextData: unknown) => {
+    if (canvasInputWorkspaceRef.current !== workspaceKey) return;
     const nextDocument = getPuckDocument(nextData);
     if (!nextDocument) return;
     latestData.current = nextDocument;
@@ -533,7 +542,7 @@ export function usePageWorkspaceController({
       setViewingPublished(false);
       message.info("已切换到编辑模式，当前修改将保存为草稿");
     }
-  }, [message]);
+  }, [message, workspaceKey]);
 
   useEffect(() => {
     if (initialLoading || loadError || loadedPageKey !== pageKey) return;
@@ -545,16 +554,17 @@ export function usePageWorkspaceController({
     const controller = new AbortController();
     const requestId = ++validationRequestRef.current;
     setPublishValidationStatus("validating");
-    const expectedSignature = canonicalizePageContent(
-      latestData.current,
-      latestMetadata.current,
-    );
     const timer = window.setTimeout(() => {
+      // 连续输入只做即时脏状态比较。预检真正发出时再对同一份请求快照计算
+      // 签名，避免每次按键都多遍历整页；响应仍与当前内容比较，保留迟到结果保护。
+      const requestData = latestData.current;
+      const requestMetadata = latestMetadata.current;
+      const expectedSignature = canonicalizePageContent(requestData, requestMetadata);
       void pageDocumentApi
         .validate(
           pageKey,
-          latestData.current,
-          latestMetadata.current,
+          requestData,
+          requestMetadata,
           controller.signal,
           locale,
         )

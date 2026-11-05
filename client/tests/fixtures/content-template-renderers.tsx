@@ -17,8 +17,8 @@ import "../../src/styles/globals.css";
 const TEST_HERO_UPLOAD = "/uploads/test-hero.png";
 const testHeroImageFacts = {
   [TEST_HERO_UPLOAD]: {
-    displayWidth: 2880,
-    displayHeight: 1620,
+    displayWidth: 3360,
+    displayHeight: 1890,
   },
 } as const;
 

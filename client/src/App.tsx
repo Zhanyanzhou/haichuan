@@ -2,7 +2,6 @@ import { Routes, Route, Navigate, useLocation, useParams } from "react-router-do
 import { Suspense, lazy } from "react";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { RequestErrorNotice } from "@/components/common/RequestErrorNotice";
-import ProgressBar from "@/components/common/ProgressBar";
 import RouteLoading from "@/components/common/RouteLoading";
 import { rolesForAdminRoute } from "@/config/adminRouteAccess";
 import { CONTENT_TEMPLATE_PAGE_PATHS } from "@/page-builder/generated/contentTemplates.generated";
@@ -11,7 +10,12 @@ import {
   resolveRetiredEnglishRedirect,
   withPublicLocalePath,
 } from "@/i18n/publicLocale";
-import PublicLayout from "@/components/layout/PublicLayout";
+const loadPublicLayout = () => import("@/components/layout/PublicLayout");
+const PublicLayout = lazy(loadPublicLayout);
+// 公开页提前下载壳层；后台无需为页面装修合同、公开内容和导航承担入口载荷。
+if (typeof window !== "undefined" && !/^\/admin(?:\/|$)/.test(window.location.pathname)) {
+  void loadPublicLayout().catch(() => undefined);
+}
 
 // 后台布局与后台鉴权失败页依赖 Ant Design，不应进入前台首屏依赖图。
 const AdminLayout = lazy(() => import("@/components/layout/AdminLayout"));
@@ -246,9 +250,8 @@ function publicRouteElements(locale: PublicContentLocale) {
 function App() {
   return (
     <ErrorBoundary>
-      <ProgressBar />
       <RequestErrorNotice />
-      <Suspense fallback={<RouteLoading />}>
+      <Suspense fallback={<RouteLoading routeProgress />}>
         <Routes>
           {/* Public Routes — 首页和其他页面统一使用 PublicLayout */}
           <Route element={<PublicLayout />}>

@@ -15,6 +15,7 @@ test("双图新构图在预览、编辑与公开 Renderer 一致，手机重排�
     const definition = generator.generateTemplateFromRecipe(recipe, { templateId: "dual_media" });
     const empty = structuredClone(definition);
     const images = Object.values(definition.nodes).filter((node: any) => definition.slots[node.slotId]?.type === "image") as any[];
+    images[1].instanceEditPolicy = { ...images[1].instanceEditPolicy, position: true };
     images.forEach((node, index) => { definition.defaultContent[node.slotId] = { src: "/media-layout-fixture.svg", alt: `测试图片 ${index + 1}` }; });
     // 公开 Renderer 会丢掉没有内容的文字组，这里给标题和描述真实文案，才能比对图文分区。
     Object.values(definition.slots).forEach((slot: any) => {
@@ -24,21 +25,32 @@ test("双图新构图在预览、编辑与公开 Renderer 一致，手机重排�
     const gallery = document.createElement("main");
     gallery.id = "media-gallery";
     document.body.replaceChildren(gallery);
-    for (const mode of ["preview", "editor", "public", "empty", "mobile"]) {
+    for (const mode of ["preview", "editor", "public", "empty", "mobile-editor", "mobile-preview", "mobile"]) {
       const host = document.createElement("section");
       host.dataset.surface = mode;
-      host.style.width = mode === "mobile" ? "390px" : "1200px";
+      const mobile = mode.startsWith("mobile");
+      const renderMode = mode === "mobile" ? "public" : mode === "empty" ? "preview" : mode.replace(/^mobile-/, "");
+      host.style.width = mobile ? "390px" : "1200px";
       gallery.append(host);
-      dom.default.createRoot(host).render(react.default.createElement(renderer.default, {
-        definition: mode === "empty" ? empty : definition, device: mode === "mobile" ? "mobile" : "desktop",
-        mode: mode === "empty" ? "preview" : mode === "mobile" ? "public" : mode, showEmptySlots: mode === "empty",
-        contentBySlotId: mode === "public" || mode === "mobile" ? { ...definition.defaultContent } : undefined,
+      const root = dom.default.createRoot(host);
+      const contentBySlotId = renderMode === "public" ? { ...definition.defaultContent } : undefined;
+      const render = (offsetYPercent = 0) => root.render(react.default.createElement(renderer.default, {
+        definition: mode === "empty" ? empty : definition, device: mobile ? "mobile" : "desktop",
+        mode: renderMode, showEmptySlots: mode === "empty",
+        contentBySlotId,
+        layoutOverridesByNodeId: offsetYPercent ? { [images[1].nodeId]: { mobile: { offsetYPercent } } } : undefined,
       }));
+      render();
+      if (mode === "mobile") Object.assign(window, { moveMobileImage: render });
     }
+    const next = document.createElement("section");
+    next.textContent = "下一节";
+    gallery.append(next);
     return { root: definition.rootNodeId, content: "dual_media_content", images: images.map((node) => node.nodeId) };
   });
-  for (const mode of ["preview", "editor", "public", "empty", "mobile"]) {
+  for (const mode of ["preview", "editor", "public", "empty", "mobile-editor", "mobile-preview", "mobile"]) {
     const host = page.locator(`[data-surface="${mode}"]`);
+    const mobile = mode.startsWith("mobile");
     const root = host.locator(`[data-template-node-id="${ids.root}"]`);
     await expect(root).toBeVisible();
     const first = host.locator(`[data-template-node-id="${ids.images[0]}"]`);
@@ -50,7 +62,7 @@ test("双图新构图在预览、编辑与公开 Renderer 一致，手机重排�
     const b = (await second.boundingBox())!;
     const text = (await content.boundingBox())!;
     const frame = (await root.boundingBox())!;
-    expect(a.width).toBeGreaterThan(mode === "mobile" ? 300 : 350);
+    expect(a.width).toBeGreaterThan(mobile ? 300 : 350);
     expect(a.width).toBeCloseTo(a.height, 0);
     expect(b.width).toBeCloseTo(a.width, 0);
     expect(b.y).toBeGreaterThanOrEqual(a.y + a.height + 15);
@@ -61,7 +73,7 @@ test("双图新构图在预览、编辑与公开 Renderer 一致，手机重排�
     } else {
       expect(b.y + b.height).toBeLessThanOrEqual(frame.y + frame.height + 1);
     }
-    if (mode === "mobile") expect(a.y).toBeGreaterThanOrEqual(text.y + text.height);
+    if (mobile) expect(a.y).toBeGreaterThanOrEqual(text.y + text.height);
     else expect(a.x).toBeGreaterThan(text.x + text.width);
     if (mode !== "empty") await expect(host.getByRole("img", { name: "测试图片 1" })).toHaveJSProperty("naturalWidth", 600);
     if (mode === "preview" || mode === "mobile") await host.screenshot({ path: testInfo.outputPath(`dual-media-${mode}.png`) });
@@ -1232,13 +1244,13 @@ test("新几何在指定视口里，没有手机图的首屏按桌面反比例�
       import ReactDOM from '/node_modules/.vite/deps/react-dom_client.js';
       import { findLaunchTemplateMaster } from '/src/page-builder/template-creation/launchTemplateSet.ts';
       import DynamicTemplateRenderer from '/src/page-builder/template-definition/DynamicTemplateRenderer.tsx';
-      const roles = ['page-hero', 'creation-grid', 'service-invitation', 'editorial-split'];
+      const roles = ['page-hero', 'later-page-hero', 'creation-grid', 'service-invitation', 'editorial-split'];
       const root = ReactDOM.createRoot(document.getElementById('fixture'));
       window.renderCases = (device) => {
         root.render(React.createElement(React.Fragment, null, roles.map((role) =>
           React.createElement('section', { key: role + device, 'data-case': role },
             React.createElement(DynamicTemplateRenderer, {
-              definition: findLaunchTemplateMaster(role),
+              definition: findLaunchTemplateMaster(role === 'later-page-hero' ? 'page-hero' : role),
               device,
               mode: 'editor',
               pageHeroPlacement: role === 'page-hero' ? 'primary' : 'subsequent',
@@ -1278,6 +1290,7 @@ test("新几何在指定视口里，没有手机图的首屏按桌面反比例�
         copy: section?.getAttribute("data-template-hero-copy") ?? null,
         cap: section?.getAttribute("data-template-hero-viewport-cap") ?? null,
         section: sectionBox,
+        heightMode: section?.getAttribute("data-template-root-height-mode") ?? null,
         image: imageBox,
         imageRatio: imageBox && imageBox.width ? imageBox.height / imageBox.width : 0,
         titleInside: inside(titleBox),
@@ -1286,10 +1299,12 @@ test("新几何在指定视口里，没有手机图的首屏按桌面反比例�
         imageCount: slots.length,
         rowCount: new Set(slots.map((box) => Math.round(box.top / 8))).size,
         cardRatio: slots[0] ? slots[0].height / slots[0].width : 0,
+        cardsInside: slots.every((box) => inside(box)),
       };
     };
     return {
       hero: measure("page-hero"),
+      laterHero: measure("later-page-hero"),
       grid: measure("creation-grid"),
       invitation: measure("service-invitation"),
       split: measure("editorial-split"),
@@ -1312,6 +1327,9 @@ test("新几何在指定视口里，没有手机图的首屏按桌面反比例�
   expect(phone.hero.copy === "below" || phone.hero.copy === null).toBe(true);
   expect(phone.hero.titleInside, "标题留在首屏里，装不下时排到横图下面").toBe(true);
   expect(phone.hero.actionInside).toBe(true);
+  expect(phone.laterHero.paired).toBeNull();
+  expect(phone.laterHero.imageRatio).toBeCloseTo(9 / 16, 1);
+  expect(phone.laterHero.cap).toBeNull();
   expect(phone.grid.paired).toBe("5:4");
   expect(phone.grid.imageCount).toBe(4);
   expect(phone.grid.rowCount).toBe(2);
@@ -1319,9 +1337,21 @@ test("新几何在指定视口里，没有手机图的首屏按桌面反比例�
   expect(phone.grid.cardRatio).toBeLessThan(1.35);
   // 四张 4:5 作品卡排成两行时高于横画布，外壳跟随卡片，不留空画布底色。
   expect(phone.grid.section && phone.grid.section.height / phone.grid.section.width).toBeGreaterThan(1);
+  expect(phone.grid.heightMode, "作品网格随内容增高，4:5 约束单卡").toBe("auto");
+  expect(phone.grid.cardsInside).toBe(true);
   expect(phone.invitation.paired).toBe("9:16");
   expect(phone.split.paired).toBe("2:3");
   expect(phone.invitation.section && phone.split.section).toBeTruthy();
+
+  const fixture = page.locator("#fixture");
+  await fixture.evaluate((el) => el.style.setProperty("--homepage-editor-preview-height", "844px"));
+  await page.setViewportSize({ width: 390, height: 450 });
+  await fixture.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  const simulated = await read();
+  expect(simulated.hero.cap).toBe(phone.hero.cap);
+  expect(simulated.hero.copy).toBe(phone.hero.copy);
+  expect(simulated.hero.image?.height).toBeCloseTo(phone.hero.image!.height, 1);
+  await fixture.evaluate((el) => el.style.removeProperty("--homepage-editor-preview-height"));
 
   await page.setViewportSize({ width: 320, height: 568 });
   await expect.poll(async () => (await read()).hero.cap).toBe("true");
@@ -1351,6 +1381,18 @@ test("新几何在指定视口里，没有手机图的首屏按桌面反比例�
   expect(desktop.grid.paired).toBeNull();
   expect(desktop.invitation.paired).toBeNull();
   expect(desktop.split.paired).toBeNull();
+  const split = page.locator('[data-case="editorial-split"] .hc-dynamic-template');
+  await expect(split).toHaveAttribute("data-template-narrow-split", "true");
+  const readings = await split.locator("[data-template-node-type='HeadingSlot']").first().evaluate(async (heading) => {
+    const frames: string[] = [];
+    for (let index = 0; index < 24; index += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const { width, top } = heading.getBoundingClientRect();
+      frames.push(`${Math.round(width)}:${Math.round(top)}`);
+    }
+    return frames;
+  });
+  expect(new Set(readings).size).toBe(1);
 
   await page.setViewportSize({ width: 844, height: 390 });
   await page.evaluate(() => (window as unknown as { renderCases: (device: string) => void }).renderCases("desktop"));
@@ -1371,12 +1413,17 @@ test("新几何在指定视口里，没有手机图的首屏按桌面反比例�
   expect(wide.hero.titleInside).toBe(true);
   expect(wide.grid.imageCount).toBe(4);
   expect(wide.grid.rowCount).toBe(1);
+  await expect(split).not.toHaveAttribute("data-template-narrow-split", "true");
 });
 
-test("首页首屏旧画布与新画框在指定视口分开成立", async ({ page }) => {
+test("首页首屏旧画布与新画框在指定视口分开成立", async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.route("**/api/**", (route) => route.abort());
+  await page.route("https://example.com/*.jpg", (route) => route.fulfill({
+    contentType: "image/svg+xml",
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><rect width="1600" height="900" fill="#263c42"/></svg>',
+  }));
   await page.route("**/__hero-home-proof", (route) => route.fulfill({
     contentType: "text/html; charset=utf-8",
     body: `<!doctype html><html><head><meta charset="utf-8"><style>
@@ -1389,7 +1436,7 @@ test("首页首屏旧画布与新画框在指定视口分开成立", async ({ pa
         RefreshRuntime.injectIntoGlobalHook(window);
         window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;
         window.__vite_plugin_react_preamble_installed__ = true;
-      </script></head><body><main id="fixture"></main><script type="module">
+      </script></head><body><main id="fixture"></main><section data-fixture-next-section>下一节</section><script type="module">
       import React from '/node_modules/.vite/deps/react.js';
       import ReactDOM from '/node_modules/.vite/deps/react-dom_client.js';
       import { findLaunchTemplateMaster } from '/src/page-builder/template-creation/launchTemplateSet.ts';
@@ -1440,6 +1487,8 @@ test("首页首屏旧画布与新画框在指定视口分开成立", async ({ pa
     const image = host?.querySelector("img");
     const imageBox = image?.getBoundingClientRect();
     const hostBox = host?.getBoundingClientRect();
+    const copyBox = host?.querySelector("[data-template-hero-frame-copy]")?.getBoundingClientRect();
+    const nextSection = document.querySelector("[data-fixture-next-section]")?.getBoundingClientRect();
     const title = host?.querySelector("[data-template-node-type='HeadingSlot']");
     const titleInk = title?.querySelector("h1, h2") ?? title;
     const button = host?.querySelector("[data-template-node-type='ButtonSlot'] span");
@@ -1462,6 +1511,9 @@ test("首页首屏旧画布与新画框在指定视口分开成立", async ({ pa
       imageWidth: imageBox?.width ?? 0,
       imageHeight: imageBox?.height ?? 0,
       sectionHeight: hostBox?.height ?? 0,
+      copyHeight: copyBox?.height ?? 0,
+      copyInsideFlow: Boolean(copyBox && nextSection && copyBox.bottom <= nextSection.top + 1),
+      spillBackground: host ? getComputedStyle(host, "::before").backgroundColor : null,
       titleText: title?.textContent ?? "",
       titleColor: color(titleInk),
       titleContrast: titleInk?.getAttribute("data-template-text-contrast") ?? null,
@@ -1628,6 +1680,7 @@ test("首页首屏旧画布与新画框在指定视口分开成立", async ({ pa
   expect(oldPublic.paired).toBe("9:16");
   expect(oldPublic.imageWidth / oldPublic.imageHeight).toBeCloseTo(9 / 16, 1);
   expect(oldPublic.correctedNote).toBeNull();
+  expect(oldPublic.spillBackground).toBe("rgba(0, 0, 0, 0)");
   expect(oldPublic.pairedNote).toBeNull();
 
   const shot = (name: string) => page.screenshot({

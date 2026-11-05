@@ -134,7 +134,7 @@ export function usePublishedPageDocument(
   }));
   const mountedRef = useRef(true);
   const requestIdRef = useRef(0);
-  const activeRefreshRef = useRef<{ key: string; pending: boolean } | null>(null);
+  const activeRefreshRef = useRef<{ key: string; pending: boolean; controller: AbortController } | null>(null);
   const lastValidRef = useRef<{
     key: string;
     pageKey: string;
@@ -150,10 +150,16 @@ export function usePublishedPageDocument(
     };
   }, []);
 
+  const cancelActiveRefresh = useCallback(() => {
+    const operation = activeRefreshRef.current;
+    activeRefreshRef.current = null;
+    requestIdRef.current += 1;
+    operation?.controller.abort();
+  }, []);
+
   const refresh = useCallback(async (showLoading = false): Promise<void> => {
     if (!pageKey) {
-      requestIdRef.current += 1;
-      activeRefreshRef.current = null;
+      cancelActiveRefresh();
       lastValidRef.current = null;
       setState({
         resourceKey: undefined,
@@ -166,8 +172,7 @@ export function usePublishedPageDocument(
     }
 
     if (!publishedLocaleAvailable) {
-      requestIdRef.current += 1;
-      activeRefreshRef.current = null;
+      cancelActiveRefresh();
       lastValidRef.current = null;
       setState({
         resourceKey: `${locale}:${pageKey}`,
@@ -186,7 +191,8 @@ export function usePublishedPageDocument(
       activeRefreshRef.current.pending = true;
       return;
     }
-    const operation = { key, pending: false };
+    if (activeRefreshRef.current) cancelActiveRefresh();
+    const operation = { key, pending: false, controller: new AbortController() };
     activeRefreshRef.current = operation;
     const requestId = ++requestIdRef.current;
     const lastValid = lastValidRef.current?.key === key
@@ -204,7 +210,7 @@ export function usePublishedPageDocument(
     }
 
     try {
-      const response = await pageDocumentApi.getPublished(pageKey, locale);
+      const response = await pageDocumentApi.getPublished(pageKey, locale, operation.controller.signal);
       const pageDocument = unwrapResponse<unknown>(response);
       if (!mountedRef.current || requestIdRef.current !== requestId) return;
 
@@ -290,7 +296,7 @@ export function usePublishedPageDocument(
         if (operation.pending && mountedRef.current) void refresh(false);
       }
     }
-  }, [locale, pageKey, publishedLocaleAvailable]);
+  }, [cancelActiveRefresh, locale, pageKey, publishedLocaleAvailable]);
 
   usePagePublishStream(publishedLocaleAvailable ? pageKey : undefined, () => {
     void refresh(false);
@@ -301,7 +307,8 @@ export function usePublishedPageDocument(
       lastValidRef.current = null;
     }
     void refresh(true);
-  }, [locale, pageKey, refresh]);
+    return cancelActiveRefresh;
+  }, [cancelActiveRefresh, locale, pageKey, refresh]);
 
   // 页面重新可见时主动对齐 revision，弥补断网、合盖或后台标签页期间错过的发布事件。
   useEffect(() => {

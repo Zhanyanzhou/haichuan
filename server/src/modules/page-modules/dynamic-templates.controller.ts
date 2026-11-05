@@ -44,8 +44,9 @@ export class DynamicTemplatesController {
   @Header("Vary", "Cookie, Authorization")
   @Throttle(STAFF_TEMPLATE_READ_THROTTLE)
   @ApiOperation({ summary: "获取统一母模板目录（正式版本与可编辑草稿）" })
-  async listCatalog(@Req() req: StaffRequest) {
-    return this.service.listCatalog(req.user);
+  async listCatalog(@Req() req: StaffRequest, @Query("pageKey") pageKey?: string, @Query("view") view?: string) {
+    if (view !== undefined) return this.service.listCatalog(req.user, pageKey, view);
+    return pageKey === undefined ? this.service.listCatalog(req.user) : this.service.listCatalog(req.user, pageKey);
   }
 
   @Roles("SUPER_ADMIN")
@@ -60,8 +61,8 @@ export class DynamicTemplatesController {
   @Header("Vary", "Cookie, Authorization")
   @Throttle(STAFF_TEMPLATE_READ_THROTTLE)
   @ApiOperation({ summary: "获取后台可用的母模板正式版本" })
-  listPublished(@Req() req: StaffRequest) {
-    return this.service.listPublished(req.user);
+  listPublished(@Req() req: StaffRequest, @Query("view") view?: string) {
+    return view === undefined ? this.service.listPublished(req.user) : this.service.listPublished(req.user, view);
   }
 
   @Get("published/:templateId/versions/:version")

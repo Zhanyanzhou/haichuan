@@ -2,6 +2,7 @@ import {
   lazy,
   Suspense,
   useEffect,
+  useState,
 } from "react";
 import { useOutletContext } from "react-router-dom";
 import { trackPageView } from "@/hooks/useAnalytics";
@@ -14,6 +15,10 @@ import StaleDocumentNotice from "@/page-builder/runtime/StaleDocumentNotice";
 import { PublicPageFallback } from "@/page-builder/runtime/PublishedPageDecoration";
 import { getPublishedPageReadiness } from "@/page-builder/runtime/publishedPageReadiness";
 import type { PuckDocument } from "@/page-builder/runtime/PuckDocumentRenderer";
+import RouteLoading from "@/components/common/RouteLoading";
+import { ErrorBoundary } from "@/components/common/ErrorBoundary";
+import { loadPuckDocumentRenderer } from "@/page-builder/runtime/loadPublicPageRenderer";
+import { getHomeHeroPreview } from "@/page-builder/runtime/homeHeroPreview";
 import {
   buildResponsiveUploadsDerivedUrl,
   buildResponsiveUploadsSrcSet,
@@ -27,41 +32,7 @@ import {
 } from "@/page-builder/runtime/publicImageFacts";
 
 const LG = "#F4F5F5";
-const NON_PUBLISHABLE_SYSTEM_MEDIA = new Set([
-  "/images/system/product-placeholder.svg",
-  "/images/system/launch-short-page-desktop.svg",
-  "/images/system/launch-short-page-mobile.svg",
-]);
-const PuckDocumentRenderer = lazy(() => import("@/page-builder/runtime/PuckDocumentRenderer"));
-
-type HomeHeroPreview = {
-  image: string;
-  mobileImage: string;
-  title: string;
-  subtitle: string;
-  eyebrow: string;
-};
-
-function text(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function publicHeroMedia(value: unknown) {
-  const source = text(value);
-  return NON_PUBLISHABLE_SYSTEM_MEDIA.has(source) ? "" : source;
-}
-
-function isHeroRoleEnabled(content: Record<string, unknown>, roleId: string) {
-  const overrides = content.__instanceOverrides;
-  if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) return true;
-  const record = overrides as Record<string, unknown>;
-  const collectionKey = record.version === 2 ? "nodes" : "textRoles";
-  const collection = record[collectionKey];
-  if (!collection || typeof collection !== "object" || Array.isArray(collection)) return true;
-  const node = (collection as Record<string, unknown>)[roleId];
-  return !node || typeof node !== "object" || Array.isArray(node)
-    || (node as Record<string, unknown>).enabled !== false;
-}
+const PuckDocumentRenderer = lazy(loadPuckDocumentRenderer);
 
 function heroDelivery(source: string, facts: PublicImageSourceFacts | null) {
   const srcSet = facts ? buildResponsiveUploadsSrcSet(source, facts) : undefined;
@@ -86,47 +57,18 @@ function heroDelivery(source: string, facts: PublicImageSourceFacts | null) {
  * 这不是第二套内容：同一份 PageDocument 仍是唯一输入，只是先稳定呈现
  * 首屏的图片、标题和空间，避免访客看到技术性的全屏加载页。
  */
-function getHomeHeroPreview(data?: PuckDocument | null): HomeHeroPreview {
-  const blocks = Array.isArray(data?.content) ? data.content : [];
-  const literalHero = blocks.find((block) => block?.type === "首屏主视觉" && block.props?.isVisible !== false);
-  const dynamicHero = blocks.find((block) => {
-    if (block?.type !== "动态模板实例" || block.props?.isVisible === false) return false;
-    return block.props?.templateId === "hcHomeHero";
-  });
-  const dynamicImage = (() => {
-    const slots = dynamicHero?.props?.contentBySlotId;
-    if (!slots || typeof slots !== "object" || Array.isArray(slots)) return "";
-    for (const slot of Object.values(slots)) {
-      if (!slot || typeof slot !== "object" || Array.isArray(slot)) continue;
-      const source = publicHeroMedia((slot as { src?: unknown }).src);
-      if (source.startsWith("/uploads/")) return source;
-    }
-    return "";
-  })();
-  const hero = literalHero;
-  // Puck 的已发布首屏字段直接位于 block.props；此处必须与公开 Renderer、
-  // 发布校验和初始模板保持同一数据结构，不能再造嵌套 content 副本。
-  const content = hero?.props && typeof hero.props === "object" && !Array.isArray(hero.props)
-    ? hero.props as Record<string, unknown>
-    : {};
-  const desktopImage = isHeroRoleEnabled(content, "desktopImage")
-    ? publicHeroMedia(content.desktopImage)
-    : "";
-  const mobileImage = isHeroRoleEnabled(content, "mobileImage")
-    ? publicHeroMedia(content.mobileImage)
-    : "";
-  const image = desktopImage || mobileImage || dynamicImage;
-  const mobile = mobileImage || desktopImage || dynamicImage;
-  return {
-    image,
-    mobileImage: mobile,
-    title: isHeroRoleEnabled(content, "title") ? text(content.title) : "",
-    subtitle: isHeroRoleEnabled(content, "subtitle") ? text(content.subtitle) : "",
-    eyebrow: isHeroRoleEnabled(content, "eyebrow") ? text(content.eyebrow) : "",
-  };
-}
 export function HomeFirstFold({ data }: { data?: PuckDocument | null }) {
-  const hero = getHomeHeroPreview(data);
+  const [device, setDevice] = useState<"desktop" | "mobile">(() => (
+    typeof window !== "undefined" && window.innerWidth < 768 ? "mobile" : "desktop"
+  ));
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 767px)");
+    const update = () => setDevice(media.matches ? "mobile" : "desktop");
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  const hero = getHomeHeroPreview(data, device);
   const desktopFacts = usePublicImageFact(hero.image);
   const mobileFacts = usePublicImageFact(hero.mobileImage);
   const desktop = heroDelivery(hero.image, desktopFacts);
@@ -212,36 +154,12 @@ export function HomeFirstFold({ data }: { data?: PuckDocument | null }) {
           </div>
         </div>
       ) : hero.image ? null : (
-        <div
+        <RouteLoading
           data-home-loading-status="true"
-          role="status"
-          aria-live="polite"
-          style={{
-            display: "grid",
-            minHeight: "max(620px, 100svh)",
-            placeItems: "center",
-            padding: "clamp(112px, 14vw, 180px) 24px 72px",
-          }}
-        >
-          <div
-            style={{
-              display: "grid",
-              justifyItems: "center",
-              gap: 18,
-              color: "#5F6568",
-            }}
-          >
-            <span
-              style={{
-                fontSize: 12,
-                fontWeight: 400,
-                lineHeight: 1.7,
-              }}
-            >
-              首页内容正在准备
-            </span>
-          </div>
-        </div>
+          scope="region"
+          surface="public"
+          label="首页内容正在准备"
+        />
       )}
     </section>
   );
@@ -338,14 +256,29 @@ export default function Home() {
   return (
     <PublicImageFactsProvider facts={readPublicImageFacts(pageDocument)}>
     <div data-page-document-state="published" style={{ background: LG }}>
-      <Suspense fallback={<HomeFirstFold data={readiness.data as PuckDocument} />}>
-        <PuckDocumentRenderer
-          data={readiness.data as PuckDocument}
-          surface="home"
+      <ErrorBoundary fallback={(
+        <PublicPageFallback
           pageKey="home"
-          primaryHeading="海川珠宝"
+          pageLabel="首页暂不可用"
+          status="error"
+          content={homeFallback ? {
+            ...homeFallback,
+            title: "首页暂不可用",
+            description: "首页暂时无法显示。您可以重新载入，或先进入选款中心。",
+          } : undefined}
+          onRetry={() => window.location.reload()}
+          locale="zh-CN"
         />
-      </Suspense>
+      )}>
+        <Suspense fallback={<HomeFirstFold data={readiness.data as PuckDocument} />}>
+          <PuckDocumentRenderer
+            data={readiness.data as PuckDocument}
+            surface="home"
+            pageKey="home"
+            primaryHeading="海川珠宝"
+          />
+        </Suspense>
+      </ErrorBoundary>
       <StaleDocumentNotice
         visible={documentStale}
         onRefresh={() => void refreshDocument(false)}

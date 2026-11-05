@@ -31,10 +31,6 @@
 .template-recipe__ratio i { display: block; border: 1px solid var(--recipe-muted); background: var(--recipe-fill); }
 .template-recipe__layout-thumb { width: 104px; max-width: 100%; height: 82px; }
 .template-recipe__media-thumb { width: 72px; max-width: 100%; height: 36px; }
-.template-recipe__media-diagram { display: grid; place-items: center; width: 72px; max-width: 100%; height: 36px; }
-.template-recipe__media-diagram svg { overflow: visible; stroke: var(--recipe-muted); stroke-width: 1; }
-.template-recipe__media-diagram svg * { vector-effect: non-scaling-stroke; }
-.template-recipe__media-diagram .template-recipe__diagram-frame { stroke: var(--recipe-border); }
 .template-recipe__media-grid .template-recipe__card { position: relative; padding: 8px; gap: 6px; }
 .template-recipe__media-grid .template-recipe__card strong { font-size: 14px; }
 .template-recipe__media-grid .template-recipe__card .ant-tag { position: absolute; top: 5px; right: 5px; }

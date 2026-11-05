@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   HttpStatus,
   Injectable,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ApiError } from '../../common/errors/api-error';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -28,6 +29,32 @@ import {
   toCustomerInquirySubmission,
 } from './customer-inquiry.response';
 import { lockActiveCustomerForWrite } from '../customers/customer-write-gate';
+
+const MAX_IDEMPOTENT_TRANSACTION_ATTEMPTS = 3;
+
+async function retryIdempotentTransaction<T>(
+  run: () => Promise<T>,
+  readWinner?: () => Promise<T | null>,
+): Promise<T> {
+  for (let attempt = 1; attempt <= MAX_IDEMPOTENT_TRANSACTION_ATTEMPTS; attempt += 1) {
+    try {
+      return await run();
+    } catch (error) {
+      if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'P2034') {
+        throw error;
+      }
+      // P2034 已回滚整段事务；同一幂等键可以先读取赢家，再重放原短事务。
+      if (readWinner) {
+        const winner = await readWinner();
+        if (winner !== null) return winner;
+      }
+      if (attempt < MAX_IDEMPOTENT_TRANSACTION_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, 5 * attempt));
+      }
+    }
+  }
+  throw new ServiceUnavailableException('请求繁忙，请使用同一幂等键稍后重试');
+}
 
 @Injectable()
 export class InquiriesService {
@@ -156,21 +183,21 @@ export class InquiriesService {
       privacyConsentVersion: data.privacyConsentVersion,
       privacyConsentContentHash: data.privacyConsentContentHash,
     });
-
-    if (idempotency.idempotencyKeyHash) {
-      // 已提交请求的安全重放必须先于作品当前可见性校验。否则首次提交已落库、
-      // 响应丢失后作品恰好下架，客户端用同一键恢复时会被错误拒绝并失去 canonical Lead 回执。
-      // 已登录客户仍在同一事务中锁定并复核 ACTIVE/authVersion，不能借重放绕过注销。
-      const replay = await this.prisma.$transaction(async (transaction) => {
+    const keyHash = idempotency.idempotencyKeyHash;
+    const readExisting = keyHash ? () => retryIdempotentTransaction(() =>
+      this.prisma.$transaction(async (transaction) => {
         if (customer) {
           await lockActiveCustomerForWrite(transaction, customer);
         }
-        return this.findIdempotentSubmission(
-          transaction,
-          idempotency.idempotencyKeyHash as string,
-          idempotency.submissionFingerprint,
-        );
-      });
+        return this.findIdempotentSubmission(transaction, keyHash, idempotency.submissionFingerprint);
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }),
+    ) : undefined;
+
+    if (readExisting) {
+      // 已提交请求的安全重放必须先于作品当前可见性校验。否则首次提交已落库、
+      // 响应丢失后作品恰好下架，客户端用同一键恢复时会被错误拒绝并失去 canonical Lead 回执。
+      // 已登录客户仍在同一事务中锁定并复核 ACTIVE/authVersion，不能借重放绕过注销。
+      const replay = await readExisting();
       if (replay) return toCustomerInquirySubmission(replay);
     }
 
@@ -187,10 +214,10 @@ export class InquiriesService {
       const lockedCustomer = customer
         ? await lockActiveCustomerForWrite(transaction, customer)
         : undefined;
-      if (idempotency.idempotencyKeyHash) {
+      if (keyHash) {
         const existing = await this.findIdempotentSubmission(
           transaction,
-          idempotency.idempotencyKeyHash,
+          keyHash,
           idempotency.submissionFingerprint,
         );
         if (existing) return existing;
@@ -266,21 +293,13 @@ export class InquiriesService {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     try {
-      return toCustomerInquirySubmission(await create());
+      const result = await (readExisting ? retryIdempotentTransaction(create, readExisting) : create());
+      return toCustomerInquirySubmission(result);
     } catch (error) {
-      if (!idempotency.idempotencyKeyHash || !isUniqueConstraintError(error)) {
+      if (!readExisting || !isUniqueConstraintError(error)) {
         throw error;
       }
-      const existing = await this.prisma.$transaction(async (transaction) => {
-        if (customer) {
-          await lockActiveCustomerForWrite(transaction, customer);
-        }
-        return this.findIdempotentSubmission(
-          transaction,
-          idempotency.idempotencyKeyHash as string,
-          idempotency.submissionFingerprint,
-        );
-      });
+      const existing = await readExisting();
       if (!existing) throw error;
       return toCustomerInquirySubmission(existing);
     }

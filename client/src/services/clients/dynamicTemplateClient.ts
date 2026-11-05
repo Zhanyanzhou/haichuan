@@ -83,6 +83,17 @@ export interface DynamicTemplateVersionResource {
   publishedAt: string;
 }
 
+/** 正式快照的目录投影；兼容忽略 view 参数的旧服务端返回完整定义。 */
+export type PublishedDynamicTemplateSummaryResource = Omit<PublishedDynamicTemplateResource, "definition"> & {
+  definition?: TemplateDefinitionV2;
+  sectionRole?: TemplateDefinitionV2["metadata"]["sectionRole"];
+  canvasSize?: TemplateDefinitionV2["metadata"]["canvasSize"];
+};
+
+export type TemplateCatalogSummaryItemResource =
+  | { kind: "published"; template: PublishedDynamicTemplateSummaryResource }
+  | { kind: "editable"; template: DynamicTemplateResource };
+
 export interface PublishedDynamicTemplateVersionResource extends DynamicTemplateVersionResource {
   templateId: string;
   pageAdoption?: DynamicTemplatePageAdoptionResource;
@@ -154,7 +165,7 @@ function unavailableMockWrite(): never {
 }
 
 export const dynamicTemplateApi = {
-  listCatalog: async (options: { dedupe?: boolean } = {}) => {
+  listCatalog: async (options: { dedupe?: boolean; pageKey?: string; view?: "summary" } = {}) => {
     if (USE_MOCK) {
       await mockDelay(80);
       return mockResponse({
@@ -164,6 +175,18 @@ export const dynamicTemplateApi = {
     return api.get("/page-modules/dynamic-templates/catalog", {
       suppressGlobalError: true,
       dedupe: options.dedupe,
+      ...((options.pageKey || options.view) ? { params: { pageKey: options.pageKey, view: options.view } } : {}),
+    });
+  },
+  listPublished: async (options: { dedupe?: boolean; view?: "summary" } = {}) => {
+    if (USE_MOCK) {
+      await mockDelay(80);
+      return mockResponse([] as PublishedDynamicTemplateResource[]);
+    }
+    return api.get("/page-modules/dynamic-templates/published", {
+      suppressGlobalError: true,
+      dedupe: options.dedupe,
+      ...(options.view ? { params: { view: options.view } } : {}),
     });
   },
   ensureConsultationStarters: async () => {

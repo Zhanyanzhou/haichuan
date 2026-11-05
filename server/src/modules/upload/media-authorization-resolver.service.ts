@@ -99,6 +99,9 @@ type ManagedFileVerification = {
   sourceBytes?: number;
 };
 
+/** 仅由一次页面读取持有；不得保存在服务实例或跨请求复用。 */
+export type MediaFileVerificationScope = Map<string, Promise<ManagedFileVerification>>;
+
 @Injectable()
 export class MediaAuthorizationResolverService {
   constructor(private readonly prisma: PrismaService) {}
@@ -109,6 +112,7 @@ export class MediaAuthorizationResolverService {
       transaction?: Prisma.TransactionClient;
       mode?: MediaAuthorizationResolutionMode;
       now?: Date;
+      fileVerificationScope?: MediaFileVerificationScope;
     } = {},
   ) {
     const mode = options.mode ?? 'ENFORCE';
@@ -151,7 +155,7 @@ export class MediaAuthorizationResolverService {
     });
     const byId = new Map(assets.map((asset) => [asset.id, asset]));
     const byStorageKey = new Map(assets.map((asset) => [asset.storageKey, asset]));
-    const fileVerificationByAssetId = new Map<number, Promise<ManagedFileVerification>>();
+    const fileVerificationByAssetId = options.fileVerificationScope ?? new Map<string, Promise<ManagedFileVerification>>();
 
     for (const reference of managed) {
       const asset = 'id' in reference.lookup
@@ -247,13 +251,15 @@ export class MediaAuthorizationResolverService {
   }
 
   private cachedFileVerification(
-    cache: Map<number, Promise<ManagedFileVerification>>,
-    asset: { id: number; storageKey: string; checksumSha256: string },
+    cache: MediaFileVerificationScope,
+    asset: { id: number; storageKey: string; checksumSha256: string; lifecycleRevision?: number },
   ) {
-    const cached = cache.get(asset.id);
+    // 登记文件路径或校验和变化时，即使仍在同次读取也必须重新校验。
+    const key = JSON.stringify([asset.id, asset.storageKey, asset.checksumSha256, asset.lifecycleRevision]);
+    const cached = cache.get(key);
     if (cached) return cached;
     const pending = this.verifyManagedFile(asset.storageKey, asset.checksumSha256);
-    cache.set(asset.id, pending);
+    cache.set(key, pending);
     return pending;
   }
 

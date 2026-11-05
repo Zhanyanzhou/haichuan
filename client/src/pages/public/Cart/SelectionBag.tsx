@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { App as AntdApp } from "antd";
 import AntdProvider from "@/components/common/AntdProvider";
 import { SecureImage } from "@/components/common/SecureImage";
 import SelectionTray from "@/pages/public/Catalog/SelectionTray";
 import type { SelectionLookupState } from "@/pages/public/Catalog/SelectionTray";
+import { sanitizeCatalogReturnUrl } from "@/pages/public/Catalog/catalogReturnContext";
 import { useProductData, type ProductQuery } from "@/hooks/useProductData";
 import { usePageMetaStore } from "@/store/pageMetaStore";
 import { useSelectionStore } from "@/store/selectionStore";
@@ -14,6 +15,8 @@ import { withPublicMediaWidth } from "@/utils/publicMediaWidth";
 import { clampProductTitle } from "@/utils/productTitleLength";
 
 function SelectionBagContent() {
+  const { state } = useLocation();
+  const catalogReturnUrl = sanitizeCatalogReturnUrl(state?.catalogReturnUrl) ?? "/catalog";
   const { message } = AntdApp.useApp();
   const setPageMeta = usePageMetaStore((state) => state.setMeta);
   const clearPageMeta = usePageMetaStore((state) => state.clear);
@@ -47,6 +50,7 @@ function SelectionBagContent() {
   } = useProductData(selectedQuery, {
     subscribe: false,
     loadCategories: false,
+    requireFresh: true,
   });
   const responseCurrent = dataQueryKey === queryKey;
   const responseComplete = products.length >= total;
@@ -94,12 +98,10 @@ function SelectionBagContent() {
     selectedQuery,
   ]);
 
-  const hasVisibleSelection = orderedProducts.length > 0;
-  const waitingForSelection = !ready || (
-    selectedIds.size > 0 && lookupState === "loading" && !hasVisibleSelection
-  );
+  const waitingForSelection = !ready || lookupState === "loading";
   const lookupFailed = selectedIds.size > 0 && lookupState === "error";
-  const visibleProducts = lookupFailed ? [] : orderedProducts;
+  const hasVisibleSelection = orderedProducts.length > 0;
+  const showEmptySelection = !waitingForSelection && !lookupFailed && !hasVisibleSelection;
 
   return (
     <div className="shopping-bag">
@@ -119,21 +121,17 @@ function SelectionBagContent() {
         </div>
       ) : null}
 
-      {!waitingForSelection && !lookupFailed && visibleProducts.length === 0 ? (
+      {showEmptySelection ? (
         <div className="shopping-bag__empty">
           <p>购物袋里还没有作品。</p>
-          <div className="shopping-bag__actions">
-            <Link to="/catalog" className="btn btn-primary">去选款</Link>
-            <Link to="/contact" className="shopping-bag__quiet">联系顾问</Link>
-          </div>
         </div>
       ) : null}
 
-      {visibleProducts.length > 0 ? (
+      {hasVisibleSelection ? (
         <div className="shopping-bag__filled">
-          <p className="shopping-bag__count">已选 {visibleProducts.length} 款</p>
+          <p className="shopping-bag__count">已选 {orderedProducts.length} 款</p>
           <ul className="shopping-bag__list" aria-label="购物袋中的作品">
-            {visibleProducts.map((product) => {
+            {orderedProducts.map((product) => {
               const name = clampProductTitle(product.name || product.sku);
               return (
                 <li key={product.id}>
@@ -162,23 +160,25 @@ function SelectionBagContent() {
               );
             })}
           </ul>
-          <div className="shopping-bag__actions">
-            <SelectionTray
-              products={visibleProducts}
-              lookupState="ready"
-              onRetry={() => reload()}
-              presentation="page"
-            />
-            <Link to="/catalog" className="shopping-bag__quiet">继续选款</Link>
-          </div>
         </div>
-      ) : (
-        <div className="shopping-bag__actions shopping-bag__actions--reserve">
-          {waitingForSelection || lookupFailed ? (
-            <Link to="/catalog" className="btn btn-primary">去选款</Link>
-          ) : null}
-        </div>
-      )}
+      ) : null}
+
+      <div className="shopping-bag__actions">
+        {ready ? (
+          <SelectionTray
+            products={orderedProducts}
+            lookupState={lookupState}
+            onRetry={reload}
+            presentation="page"
+          />
+        ) : null}
+        {hasVisibleSelection ? (
+          <Link to={catalogReturnUrl} className="shopping-bag__quiet">继续选款</Link>
+        ) : (
+          <Link to={catalogReturnUrl} className="btn btn-primary">去选款</Link>
+        )}
+        {showEmptySelection ? <Link to="/contact" className="shopping-bag__quiet">联系顾问</Link> : null}
+      </div>
     </div>
   );
 }

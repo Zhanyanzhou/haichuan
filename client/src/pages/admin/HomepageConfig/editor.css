@@ -563,13 +563,23 @@ body:has(.homepage-editor)
   border-inline-start: 2px solid #181A1B;
   background: #F4F5F5;
 }
-.homepage-editor > .Puck {
+.homepage-editor > .Puck,
+.homepage-editor > [data-retained-page-canvas] > .Puck {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
+
+/* 加载遮罩仍在工作区内，提示位置与整页加载共用视口中心。 */
+.homepage-editor > .site-route-loading--workspace > :is(
+  .site-route-loading__indicator,
+  .site-route-loading__text
+) {
+  position: fixed;
+}
+
 .homepage-editor__load-error {
   flex: 1;
   display: flex;
@@ -580,6 +590,18 @@ body:has(.homepage-editor)
   padding: 32px;
   color: var(--adm-text);
   text-align: center;
+}
+.homepage-editor__load-error[role="alert"] {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  box-sizing: border-box;
+  width: max-content;
+  max-width: 100%;
+  max-height: 100%;
+  overflow: auto;
+  justify-content: safe center;
 }
 .homepage-editor__load-error > .anticon {
   color: var(--adm-error);
@@ -595,7 +617,8 @@ body:has(.homepage-editor)
   font-size: 13px;
   line-height: 20px;
 }
-.homepage-editor > [class*="PuckLayout"] {
+.homepage-editor > [class*="PuckLayout"],
+.homepage-editor > [data-retained-page-canvas] > [class*="PuckLayout"] {
   flex: 1;
   min-height: 0;
   height: 100% !important;
@@ -2213,6 +2236,9 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   min-width: 0;
   display: flex;
   flex-direction: column; /* 区域标题常驻顶部(2026-08-19),Inspector 面板占满剩余高度 */
+}
+.homepage-editor__inspector-holder[hidden] {
+  display: none;
 }
 .homepage-editor__inspector-holder .homepage-editor__inspector,
 .homepage-editor__inspector-holder .homepage-editor__properties {
@@ -10914,10 +10940,15 @@ button.template-editor__toolbar-state:focus-visible {
 }
 
 @media (max-width: 1024px) {
+  .admin-header--editor:has(.homepage-editor__toolbar:not(.template-editor__toolbar)) {
+    --adm-header-h: 82px;
+    --page-toolbar-rows: 38px 34px;
+  }
+
   .admin-header__editor-slot
     .homepage-editor__toolbar:not(.template-editor__toolbar) {
     grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-rows: 28px 28px;
+    grid-template-rows: var(--page-toolbar-rows);
     align-content: center;
     column-gap: 8px;
     row-gap: 2px;
@@ -10951,16 +10982,24 @@ button.template-editor__toolbar-state:focus-visible {
     .homepage-editor__toolbar:not(.template-editor__toolbar)
     .homepage-editor__toolbar-actions {
     position: absolute;
-    inset: 2px 10px 2px auto;
+    inset: 0 10px 0 auto;
     display: grid;
     grid-template-columns: auto auto auto auto auto;
-    grid-template-rows: 26px 26px;
+    grid-template-rows: var(--page-toolbar-rows);
     align-content: center;
     align-items: center;
     justify-items: end;
     gap: 2px 4px;
     min-width: 0;
+    pointer-events: none;
     transform: none;
+  }
+
+  .admin-header__editor-slot
+    .homepage-editor__toolbar:not(.template-editor__toolbar)
+    .homepage-editor__toolbar-actions > * {
+    grid-row: 2;
+    pointer-events: auto;
   }
 
   .admin-header__editor-slot
@@ -11057,5 +11096,89 @@ button.template-editor__toolbar-state:focus-visible {
     .homepage-editor__toolbar:not(.template-editor__toolbar)
     .homepage-editor__toolbar-actions {
     right: 6px;
+  }
+}
+
+/* 窄屏覆盖式入口和缩放各占一行。滚动只发生在画布滚动层，
+ * 避免关闭面板恢复焦点时把整个工作区横向推走。 */
+@media (max-width: 1024px) {
+  .homepage-editor__body:not(.template-editor__body) {
+    --page-panel-entry-top: 12px;
+    --page-canvas-controls-top: calc(var(--page-panel-entry-top) + 48px);
+    overflow: clip;
+  }
+
+  .homepage-editor__body:not(.template-editor__body) > .homepage-editor__structure-workspace {
+    inset: var(--page-canvas-controls-top) auto 0 8px;
+    z-index: 59;
+  }
+
+  .homepage-editor__body:not(.template-editor__body)
+    > .homepage-editor__structure-workspace.is-collapsed {
+    inset: var(--page-panel-entry-top) auto auto 50%;
+    width: auto;
+    transform: translateX(-50%);
+    border: 0;
+    overflow: visible;
+    background: transparent;
+  }
+
+  .homepage-editor__body:not(.template-editor__body)
+    :is(.homepage-editor__library-expand-btn, .homepage-editor__structure-expand-btn, .homepage-editor__inspector-expand-btn).admin-panel-collapse-toggle {
+    display: inline-flex !important;
+    flex: 0 0 auto;
+    flex-direction: row;
+    gap: 6px;
+    width: auto !important;
+    min-width: 44px;
+    height: 36px !important;
+    margin: 0;
+    padding: 0 10px;
+    top: var(--page-panel-entry-top);
+    max-width: calc(100vw / 3 - 12px);
+  }
+
+  .homepage-editor__body:not(.template-editor__body) .homepage-editor__canvas-controls {
+    margin-top: var(--page-canvas-controls-top);
+  }
+
+  .admin-header--editor:has(.homepage-editor__toolbar:not(.template-editor__toolbar) .homepage-editor__preview-mode-note) {
+    --adm-header-h: 106px;
+    --page-toolbar-rows: 38px 34px 22px;
+  }
+
+  .admin-header__editor-slot
+    .homepage-editor__toolbar:not(.template-editor__toolbar)
+    .homepage-editor__toolbar-actions > .homepage-editor__preview-mode-note {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    max-width: 222px;
+  }
+}
+
+/* 手机另留一行给工作模式和当前页面。 */
+@media (max-width: 767px) {
+  .homepage-editor__toolbar:not(.template-editor__toolbar)
+    > .homepage-editor__toolbar-left-context {
+    right: 8px;
+    width: auto;
+  }
+
+  .homepage-editor__toolbar:not(.template-editor__toolbar) .template-editor__workspace-mode-switch {
+    flex: 0 0 auto;
+  }
+
+  .homepage-editor__toolbar:not(.template-editor__toolbar) .homepage-editor__workspace-status {
+    position: static;
+    max-width: none;
+    min-height: 26px;
+  }
+
+  .homepage-editor__body:not(.template-editor__body) {
+    --page-panel-entry-top: 58px;
+  }
+
+  .homepage-editor__body.is-previewing:not(.template-editor__body) > .homepage-editor__stage {
+    padding-top: var(--page-panel-entry-top);
   }
 }

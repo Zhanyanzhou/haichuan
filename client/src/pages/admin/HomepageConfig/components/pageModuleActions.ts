@@ -34,6 +34,19 @@ function pageDataMatches(left: unknown, right: unknown) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+/** 切页后只保留新页面基线，并封住 Puck 为取消旧防抖而安排的重复记录。 */
+export function resetPageModuleHistoryBaseline(getPuck: HomepagePuckGetter) {
+  const puck = getPuck();
+  const histories = [{ state: puck.appState }];
+  pendingStructureHistorySeal = {
+    setHistories: puck.history.setHistories,
+    histories,
+    data: puck.appState.data as PageModuleDocument,
+    navigationIndex: 0,
+  };
+  puck.history.setHistories(histories);
+}
+
 function resolveSelection(
   beforeData: PageModuleDocument,
   nextData: PageModuleDocument,

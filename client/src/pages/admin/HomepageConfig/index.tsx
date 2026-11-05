@@ -1,9 +1,11 @@
 import {
   cloneElement,
+  createContext,
   isValidElement,
   lazy,
   Suspense,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -14,7 +16,7 @@ import {
   type DragEvent,
   type ReactNode,
 } from "react";
-import { App as AntdApp, Button, Spin } from "antd";
+import { App as AntdApp, Button } from "antd";
 import {
   AppstoreOutlined,
   BlockOutlined,
@@ -24,6 +26,8 @@ import {
 } from "@ant-design/icons";
 import { Puck, useGetPuck, type Data, type PuckAction, type UiState } from "@puckeditor/core";
 import { useAuthStore } from "@/store/authStore";
+import { resetPageModuleHistoryBaseline } from "./components/pageModuleActions";
+import { EditorCanvasActivityContext, PageEditorMediaScaleContext, useEditorCanvasActive } from "@/page-builder/workspace/editorCanvasActivity";
 import RouteLoading from "@/components/common/RouteLoading";
 import type { PublicContentLocale } from "@/i18n/publicLocale";
 import "@puckeditor/core/no-external.css";
@@ -65,6 +69,7 @@ import {
 } from "@/page-builder/config/editorPages";
 import {
   createContentTemplateMarker,
+  getContentTemplateIssues,
   isContentTemplateAllowedForPage,
   sanitizeContentTemplateLayoutData,
 } from "@/page-builder/generated/contentTemplates.generated";
@@ -117,7 +122,8 @@ import {
   stripNonEditableSlotContentFromPageDocument,
 } from "@/page-builder/dynamic-template-instance";
 import DynamicTemplateInstanceInspector from "@/page-builder/dynamic-template-instance/DynamicTemplateInstanceInspector";
-import { planHasVisibleSlot } from "@/page-builder/dynamic-template-instance/publicVisibility";
+import { isDynamicTemplateInstancePubliclyVisible, planHasVisibleSlot } from "@/page-builder/dynamic-template-instance/publicVisibility";
+import { isVisiblePrimaryStageBlock } from "@/page-builder/utils/primaryStagePolicy";
 import { compileDynamicTemplateRenderPlan } from "@/page-builder/template-definition/renderPlan";
 import { resolveTemplateDesignFrame } from "@/page-builder/template-definition/templateDimensions";
 import { catalogCardName } from "@/page-builder/template-editor/catalogCardName";
@@ -212,6 +218,8 @@ type CanvasComponentConfig = {
   [key: string]: unknown;
 };
 
+const CanvasPrimaryStageContext = createContext<string | undefined>(undefined);
+
 function CanvasDynamicTemplateInstance({
   props,
   definition,
@@ -229,6 +237,7 @@ function CanvasDynamicTemplateInstance({
   const device = isMobileCanvasWidth(currentViewport.width)
     ? "mobile"
     : "desktop";
+  const primaryStageId = useContext(CanvasPrimaryStageContext);
 
   // 新实例不复制模板示例；保留可选择的编辑状态，避免空槽位只剩背景或零高度。
   const plan = mode === "editor" && definition?.templateId === props.templateId && props.isVisible !== false
@@ -247,6 +256,8 @@ function CanvasDynamicTemplateInstance({
   const emptyHeightMode = empty && definition
     ? resolveTemplateDesignFrame(definition, device).heightMode
     : undefined;
+  // 空模板仍展示母版画幅，但不占用页面上第一个可预览主舞台的位置。
+  const pageHeroPlacement = empty ? undefined : props.id === primaryStageId ? "primary" : "subsequent";
 
   return (
     <div
@@ -260,6 +271,7 @@ function CanvasDynamicTemplateInstance({
         deviceOverride={device}
         mode={mode}
         pageKey={pageKey}
+        pageHeroPlacement={pageHeroPlacement}
         retainEmptyFrame={empty}
       />
       {empty ? (
@@ -371,6 +383,26 @@ function EditorCanvasShell({
           [DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY]: resolvedDefinitions,
         },
   );
+  const device = isMobileCanvasWidth(currentViewport.width) ? "mobile" : "desktop";
+  const definitions = {
+    ...resolvedDefinitions,
+    ...readResolvedDynamicTemplateDefinitions(puckResolved),
+  };
+  const primaryStage = [...canvasData.content, ...Object.values(canvasData.zones ?? {}).flat()].find((block) => {
+    if (!isVisiblePrimaryStageBlock(block, definitions)) return false;
+    if (block.type !== DYNAMIC_TEMPLATE_BLOCK_TYPE) {
+      const props = block.props as PuckProps;
+      const hasImage = [props.desktopImage, props.mobileImage].some((value) => typeof value === "string" && value.trim());
+      return hasImage && !getContentTemplateIssues({
+        moduleType: block.type, props, blockId: props.id, path: "canvas",
+      }).some((issue) => issue.severity === "error");
+    }
+    const props = block.props as DynamicTemplateInstanceProps;
+    const definition = definitions[dynamicTemplateVersionKey(props.templateId, props.templateVersion)]?.definition;
+    return definition?.templateId === props.templateId && isDynamicTemplateInstancePubliclyVisible({
+      definition, contentBySlotId: props.contentBySlotId, hiddenSlotIds: props.hiddenSlotIds, breakpoint: device, pageKey,
+    });
+  });
   const businessRegionIndex = canvasData.content.findIndex(
     (block: { type?: string }) => block?.type === "业务功能区",
   );
@@ -455,7 +487,9 @@ function EditorCanvasShell({
         hasLeadingDecoration={hasLeadingDecoration}
       >
         {canvasData.content.length === 0 ? <PageCanvasTemplatePreview /> : null}
-        {children}
+        <CanvasPrimaryStageContext.Provider value={primaryStage?.props.id}>
+          {children}
+        </CanvasPrimaryStageContext.Provider>
       </BusinessRegionCanvasProvider>
       <EditorCanvasFooter />
     </div>
@@ -686,17 +720,12 @@ function CanvasPageDataSynchronizer({
 }) {
   const getPuck = useGetPuck();
   const dispatch = useHomepagePuck((state) => state.dispatch);
-  const currentData = useHomepagePuck((state) => state.appState.data);
   const appliedSignatureRef = useRef<string | null>(null);
   const appliedPageKeyRef = useRef(pageKey);
   const mountedWithInitialDataRef = useRef(false);
   const consumedCanvasDataSyncVersionRef = useRef(canvasDataSyncVersion);
   const consumedHistoryCommandIdRef = useRef<string | null>(null);
   const dataSignature = useMemo(() => JSON.stringify(data), [data]);
-  const currentDataSignature = useMemo(
-    () => JSON.stringify(currentData),
-    [currentData],
-  );
 
   useEffect(() => {
     const signature = `${pageKey}:${dataSignature}`;
@@ -744,15 +773,18 @@ function CanvasPageDataSynchronizer({
     }
     if (appliedSignatureRef.current === signature) return;
     appliedSignatureRef.current = signature;
-    // Puck 已以同一份数据挂载时不重复执行昂贵的整页替换；页面切换时
-    // currentDataSignature 与目标签名不同，仍会走 setData 完成必要同步。
-    if (currentDataSignature === dataSignature) {
+    // 只在外部数据确实变化时读取当前画布。订阅整树并在每次输入时序列化
+    // 会给普通编辑附加全文比较，这里只需要决定是否进行外部整页替换。
+    const puck = getPuck();
+    const replacementData = { ...data, zones: data.zones ?? {} } as Partial<Data>;
+    if (JSON.stringify(puck.appState.data) === dataSignature) {
       if (!isSamePage) {
+        dispatch({ type: "setData", data: replacementData, recordHistory: true });
         dispatch({ type: "setUi", ui: { itemSelector: null }, recordHistory: false });
+        resetPageModuleHistoryBaseline(getPuck);
       }
       return;
     }
-    const puck = getPuck();
     const currentSelector = puck.appState.ui.itemSelector;
     const selectedBlock = currentSelector
       ? puck.appState.data.content[currentSelector.index]
@@ -763,7 +795,7 @@ function CanvasPageDataSynchronizer({
     const stableIndex = isSamePage && selectedBlockId
       ? (data.content ?? []).findIndex((block) => block.props?.id === selectedBlockId)
       : -1;
-    dispatch({ type: "setData", data: data as Partial<Data>, recordHistory: false });
+    dispatch({ type: "setData", data: replacementData, recordHistory: !isSamePage });
     dispatch({
       type: "setUi",
       ui: {
@@ -773,9 +805,30 @@ function CanvasPageDataSynchronizer({
       },
       recordHistory: false,
     });
-  }, [canvasDataSyncVersion, currentDataSignature, data, dataSignature, dispatch, getPuck, historyCommand, onHistoryCommandCommitted, pageKey]);
+    // 常驻 Puck 不再由卸载自动清空历史；明确重置页面基线，避免撤销跨页。
+    if (!isSamePage) resetPageModuleHistoryBaseline(getPuck);
+  }, [canvasDataSyncVersion, data, dataSignature, dispatch, getPuck, historyCommand, onHistoryCommandCommitted, pageKey]);
 
   return null;
+}
+
+/** 切页期间保留就绪画布，避免重复创建 Puck、iframe 与样式上下文。 */
+function RetainedPageCanvas({ active, children }: { active: boolean; children: ReactNode }) {
+  const readyCanvas = useRef<ReactNode>(null);
+  if (active) readyCanvas.current = children;
+  return (
+    <div
+      data-retained-page-canvas
+      hidden={!active}
+      aria-hidden={!active || undefined}
+      style={{ display: active ? "contents" : "none" }}
+      {...(!active ? ({ inert: "" } as Record<string, string>) : {})}
+    >
+      <EditorCanvasActivityContext.Provider value={active}>
+        {readyCanvas.current}
+      </EditorCanvasActivityContext.Provider>
+    </div>
+  );
 }
 
 function publishedTemplateDisplayName(template: PublishedDynamicTemplateResource) {
@@ -783,6 +836,7 @@ function publishedTemplateDisplayName(template: PublishedDynamicTemplateResource
 }
 
 function PageTemplateLibraryAdapter({
+  pageKey,
   active,
   obscuredByInspector,
   onRequestCompactOpen,
@@ -791,6 +845,7 @@ function PageTemplateLibraryAdapter({
   onTemplateDragStart,
   onTemplateDragEnd,
 }: {
+  pageKey: EditorPageKey;
   active: boolean;
   obscuredByInspector: boolean;
   onRequestCompactOpen: () => void;
@@ -907,6 +962,7 @@ function PageTemplateLibraryAdapter({
   return (
     <UnifiedTemplateLibrary
       mode="page"
+      pageKey={pageKey}
       active={active}
       device={previewViewport}
       obscuredByInspector={obscuredByInspector}
@@ -1220,6 +1276,7 @@ function EditorBody({
   onAuthorizePublicMedia?: (assetIds: number[]) => void;
 }) {
   const { message } = AntdApp.useApp();
+  const canvasActive = useEditorCanvasActive();
   const appData = useHomepagePuck((state) => state.appState.data);
   const resolvedDynamicTemplateDefinitions = useResolvedDynamicTemplateDefinitions();
   const rolesByTemplateId = usePublishedTemplateSectionRoles((state) => state.rolesByTemplateId);
@@ -1550,7 +1607,7 @@ function EditorBody({
   const autoSelectedPageRef = useRef<EditorPageKey | null>(null);
   useEffect(() => {
     if (
-      !contentReady ||
+      !canvasActive || !contentReady ||
       autoSelectedPageRef.current === pageKey ||
       appData.content.length === 0
     ) {
@@ -1562,7 +1619,7 @@ function EditorBody({
       type: "setUi",
       ui: { itemSelector: { index: 0, zone: ROOT_ZONE } },
     });
-  }, [appData.content.length, contentReady, dispatch, pageKey]);
+  }, [appData.content.length, canvasActive, contentReady, dispatch, pageKey]);
   useEffect(() => {
     const collapseLayersForPrimaryNavigation = (event: Event) => {
       const detail = (event as CustomEvent<{ open?: boolean }>).detail;
@@ -1607,8 +1664,9 @@ function EditorBody({
     visualEditSourceRef.current.clear();
     visualEditFrameRef.current.forEach((frame) => window.cancelAnimationFrame(frame));
     visualEditFrameRef.current.clear();
-  }, [pageKey]);
+  }, [pageKey, canvasActive]);
   useEffect(() => {
+    if (!canvasActive) return;
     const visualEditFrames = visualEditFrameRef.current;
     const visualEditPending = visualEditPendingRef.current;
     const visualEditStarts = visualEditStartRef.current;
@@ -1725,8 +1783,9 @@ function EditorBody({
       visualEditStarts.clear();
       visualEditSources.clear();
     };
-  }, [dispatch, viewingPublished]);
+  }, [canvasActive, dispatch, viewingPublished]);
   useEffect(() => {
+    if (!canvasActive) return;
     const handleDynamicLayoutEdit = (event: MessageEvent<CanvasDynamicLayoutEditMessage>) => {
       const detail = event.data;
       if (
@@ -1814,7 +1873,7 @@ function EditorBody({
     };
     window.addEventListener("message", handleDynamicLayoutEdit);
     return () => window.removeEventListener("message", handleDynamicLayoutEdit);
-  }, [dispatch, viewingPublished]);
+  }, [canvasActive, dispatch, viewingPublished]);
   const viewportWidth =
     currentViewport.width === "100%"
       ? RESPONSIVE_CANVAS.desktop.width
@@ -1827,6 +1886,7 @@ function EditorBody({
       : "自适应";
 
   useEffect(() => {
+    if (!canvasActive) return;
     const handleNavigationState = (
       event: MessageEvent<CanvasNavigationStateMessage>,
     ) => {
@@ -1839,7 +1899,7 @@ function EditorBody({
     };
     window.addEventListener("message", handleNavigationState);
     return () => window.removeEventListener("message", handleNavigationState);
-  }, []);
+  }, [canvasActive]);
 
   const toggleNavigationPreview = useCallback(() => {
     const next = !navigationPreviewOpen;
@@ -1985,7 +2045,7 @@ function EditorBody({
   useLayoutEffect(() => {
     const stage = stageRef.current;
     const frame = previewFrameRef.current;
-    if (!stage || !frame) return;
+    if (!canvasActive || !stage || !frame) return;
     let measureTimer = 0;
     const scheduleUpdate = () => {
       // 定时器离开本轮 ResizeObserver 投递。requestAnimationFrame 仍算同一轮，会触发 loop 告警。
@@ -2004,7 +2064,7 @@ function EditorBody({
       if (measureTimer) window.clearTimeout(measureTimer);
       observer.disconnect();
     };
-  }, [updateCanvasMetrics, appData.content.length, viewportWidth]);
+  }, [canvasActive, updateCanvasMetrics, appData.content.length, viewportWidth]);
 
   // 页面内容可以随工作区缩放，编辑 HUD 则需要保持稳定的屏幕尺寸。
   // 通过同源 iframe 的 CSS 变量传入逆缩放值，避免 38% 画布下工具不可读。
@@ -2138,6 +2198,7 @@ function EditorBody({
         </aside>
       ) : (
         <PageTemplateLibraryAdapter
+          pageKey={pageKey}
           active={workspaceActive}
           obscuredByInspector={!inspectorCollapsed}
           onRequestCompactOpen={closeInspector}
@@ -2228,7 +2289,9 @@ function EditorBody({
                 transform: `scale(${canvasZoom})`,
               }}
             >
-              <CanvasPreview frameRef={previewFrameRef} />
+              <PageEditorMediaScaleContext.Provider value={canvasZoom}>
+                <CanvasPreview frameRef={previewFrameRef} />
+              </PageEditorMediaScaleContext.Provider>
             </div>
             {draggingTemplate && (
               <>
@@ -2536,6 +2599,11 @@ export default function StoreDecorationWorkbench({
   );
   const hasAnyProtectedChanges =
     hasProtectedUnsavedChanges || hasProtectedTemplateChanges;
+  const canvasReady = !initialLoading
+    && loadedPageKey === pageKey
+    && !loadError
+    && !draftDiscardVerificationPending
+    && resolvedDynamicTemplatesReady;
 
   const editorConfig = useMemo(
     () =>
@@ -2703,8 +2771,7 @@ export default function StoreDecorationWorkbench({
 
       {draftDiscardVerificationPending ? (
         <div className="homepage-editor__load-error" role="status" aria-live="polite">
-          <Spin size="large" />
-          <strong>草稿已放弃，等待重新读取当前权威状态</strong>
+          <RouteLoading scope="panel" label="草稿已放弃，等待重新读取当前权威状态" />
           <span>恢复前编辑器保持只读，避免在未确认基线上继续写入。</span>
         </div>
       ) : loadError ? (
@@ -2730,7 +2797,8 @@ export default function StoreDecorationWorkbench({
         </div>
       ) : initialLoading || loadedPageKey !== pageKey || !resolvedDynamicTemplatesReady ? (
         <RouteLoading scope="workspace" label="正在加载店铺装修…" />
-      ) : (
+      ) : null}
+      <RetainedPageCanvas active={canvasReady}>
         <Puck
           key="homepage-editor-canvas"
           config={editorConfig}
@@ -2865,7 +2933,7 @@ export default function StoreDecorationWorkbench({
             </Suspense>
           ) : null}
         </Puck>
-      )}
+      </RetainedPageCanvas>
       <UnsavedChangesGuard
         hasUnsavedChanges={hasAnyProtectedChanges}
         disabled={

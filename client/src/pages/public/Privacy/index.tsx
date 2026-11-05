@@ -1,7 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { settingsApi } from "@/services/api";
-import { unwrapResponse } from "@/utils/unwrap";
+import { usePublicContactResource } from "@/hooks/usePublicSiteSettings";
 import { usePageMetaStore } from "@/store/pageMetaStore";
 import { LEGAL_ENTITY } from "@/config/legalEntity";
 import {
@@ -80,13 +79,14 @@ export default function Privacy() {
   const location = useLocation();
   const setPageMeta = usePageMetaStore((s) => s.setMeta);
   const clearPageMeta = usePageMetaStore((s) => s.clear);
-  const [contactStatus, setContactStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [contact, setContact] = useState({
-    phone: "",
-    email: "",
-    address: "",
-    hours: "",
-  });
+  const contactResource = usePublicContactResource();
+  const contactStatus = contactResource.status === "loaded" ? "ready" : contactResource.status;
+  const contact = {
+    phone: preferSiteSetting(contactResource.settings?.contactPhone, SIGNED_PUBLIC_CONTACT.phone),
+    email: preferSiteSetting(contactResource.settings?.contactEmail, SIGNED_PUBLIC_CONTACT.email),
+    address: preferSiteSetting(contactResource.settings?.contactAddress, SIGNED_PUBLIC_CONTACT.address),
+    hours: preferSiteSetting(contactResource.settings?.businessHours, SIGNED_PUBLIC_CONTACT.hours),
+  };
 
   // SEO：隐私页独立标题与描述
   useEffect(() => {
@@ -97,35 +97,6 @@ export default function Privacy() {
     });
     return () => clearPageMeta();
   }, [setPageMeta, clearPageMeta]);
-
-  useEffect(() => {
-    let cancelled = false;
-    settingsApi
-      .getPublicSettings()
-      .then((res) => {
-        if (cancelled) return;
-        const s = unwrapResponse<{
-          contactPhone?: string | null;
-          contactEmail?: string | null;
-          contactAddress?: string | null;
-          businessHours?: string | null;
-        }>(res);
-        setContact({
-          phone: preferSiteSetting(s?.contactPhone, SIGNED_PUBLIC_CONTACT.phone),
-          email: preferSiteSetting(s?.contactEmail, SIGNED_PUBLIC_CONTACT.email),
-          address: preferSiteSetting(s?.contactAddress, SIGNED_PUBLIC_CONTACT.address),
-          hours: preferSiteSetting(s?.businessHours, SIGNED_PUBLIC_CONTACT.hours),
-        });
-        setContactStatus("ready");
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setContactStatus("error");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const locationState = typeof location.state === "object" && location.state !== null
     ? location.state as Record<string, unknown>
@@ -284,9 +255,14 @@ export default function Privacy() {
               </p>
             ) : null}
             {contactStatus === "error" ? (
-              <p role="alert" style={{ fontSize: 13, color: T.sec, lineHeight: 1.7, margin: 0 }}>
-                联系信息暂时无法加载。您仍可提交隐私与个人信息请求。
-              </p>
+              <div>
+                <p role="alert" style={{ fontSize: 13, color: T.sec, lineHeight: 1.7, margin: 0 }}>
+                  联系信息暂时无法加载。您仍可提交隐私与个人信息请求。
+                </p>
+                <button type="button" onClick={contactResource.retry} style={{ minHeight: 44, padding: "0 12px", marginTop: 8, color: T.txt, background: "transparent", border: `1px solid ${T.line}`, cursor: "pointer" }}>
+                  重新加载联系方式
+                </button>
+              </div>
             ) : null}
             {contactStatus === "ready" ? (
               <div style={{ display: "grid", gap: 6, fontSize: 14, color: T.txt }}>

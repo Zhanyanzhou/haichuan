@@ -147,9 +147,16 @@ export default function SharedPageMediaPicker({
               aria-label={item.url === currentValue ? `当前素材：${item.name}` : `使用素材：${item.name}`}
             >
               <img
-                src={resolveManagedTemplateMediaPreviewUrl(item.url)}
+                src={resolveManagedTemplateMediaPreviewUrl(item.url, 480)}
                 alt=""
                 loading="lazy"
+                onError={(event) => {
+                  // 动图或不支持转码的格式保留原素材；只回退一次，不循环请求失败图片。
+                  const original = resolveManagedTemplateMediaPreviewUrl(item.url);
+                  if (event.currentTarget.getAttribute("src") !== original) {
+                    event.currentTarget.src = original;
+                  }
+                }}
               />
             </button>
           ))}

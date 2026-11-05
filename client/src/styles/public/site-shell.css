@@ -24,6 +24,14 @@ html:has(.site-shell)::-webkit-scrollbar {
   background: var(--hc-canvas);
 }
 
+/* 首页路由和 Renderer 都可能等待分块。主区始终占住首屏，避免固定定位的
+   loading 脱离文档流后，页脚先出现在顶部，再被真正的页面内容推走。 */
+.editorial-shell > .site-main {
+  min-width: 0;
+  min-height: 100vh;
+  min-height: 100svh;
+}
+
 .site-shell,
 .editorial-shell,
 .storefront-navigation {
@@ -191,26 +199,20 @@ html:has(.site-shell)::-webkit-scrollbar {
   color: #181a1b;
 }
 
-/* Safari 把点按当成 :focus-visible，并画出 2px 外扩方框；Chrome 安卓的点按不会进入这个状态。
-   方框只在桌面键鼠下声明。不要先画上再用 :is(:focus-visible) 盖掉，WebKit 经常匹配不到那条覆盖。 */
+/* 点按不强制描边；键盘焦点在手机、触控平板及桌面都必须可见。 */
 .site-header__nav-item:focus,
 .site-header__brand:focus,
-.site-menu-toggle:focus,
-.site-header__nav-item:focus-visible,
-.site-header__brand:focus-visible,
-.site-menu-toggle:focus-visible {
+.site-menu-toggle:focus {
   outline: none;
   outline-offset: 0;
   -webkit-tap-highlight-color: transparent;
 }
 
-@media (hover: hover) and (pointer: fine) and (min-width: 768px) {
-  .site-header__nav-item:focus-visible,
-  .site-header__brand:focus-visible,
-  .site-menu-toggle:focus-visible {
-    outline: 2px solid currentColor;
-    outline-offset: 4px;
-  }
+.site-header__nav-item:focus-visible,
+.site-header__brand:focus-visible,
+.site-menu-toggle:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 4px;
 }
 
 .site-header__bag {

@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { BadRequestException, ConflictException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { CreateInquiryDto } from './dto/create-inquiry.dto';
@@ -372,6 +372,90 @@ test('相同幂等键在作品状态变化后仍恢复原 canonical Lead 且不�
   assert.equal('nextFollowUpAt' in retry, false);
   assert.equal(createCount, 1);
   assert.equal(visibilityCalls, 1, '已提交请求的安全重放不得被后续作品状态阻断');
+});
+
+function createInquiryConflictHarness(conflicts: ReadonlyMap<number, string>, hideWinnerAt?: number) {
+  const receipt = { id: 77, status: 'PENDING', createdAt: new Date(0), lead: { id: 701 } };
+  let existing: { sourceType: string; submissionFingerprint: string; inquiryId: number } | null = null;
+  let transactions = 0;
+  let creates = 0;
+  let consents = 0;
+  let customerLocked = false;
+  let customerActive = true;
+  const prisma = {
+    $transaction: async (callback: (transaction: unknown) => unknown) => {
+      transactions += 1;
+      customerLocked = false;
+      const code = conflicts.get(transactions);
+      if (code) throw Object.assign(new Error('fixture transaction conflict'), { code });
+      return callback(prisma);
+    },
+    $queryRaw: async () => {
+      customerLocked = customerActive;
+      return customerActive ? [{ id: 7, accountType: 'MEMBER', partnerStatus: null }] : [];
+    },
+    lead: { findUnique: async () => transactions === hideWinnerAt ? null : existing },
+    inquiry: {
+      create: async ({ data }: { data: { lead: { create: { sourceType: string; submissionFingerprint: string } } } }) => {
+        creates += 1;
+        existing = { ...data.lead.create, inquiryId: receipt.id };
+        return receipt;
+      },
+      findUniqueOrThrow: async () => {
+        assert.equal(customerLocked, true, '会员回执应在本次事务的身份复核之后读取');
+        return receipt;
+      },
+    },
+    consentRecord: { create: async () => { consents += 1; } },
+  };
+  return {
+    service: new InquiriesService(prisma as never, {} as never, {} as never),
+    counts: () => ({ transactions, creates, consents }),
+    revokeCustomer: () => { customerActive = false; },
+  };
+}
+
+const inquiryConflictRequest = {
+  ...validInquiry,
+  idempotencyKey: 'inquiry-conflict-0001',
+};
+
+test('普通咨询的幂等预检遇到 P2034 后恢复并只写一次咨询和同意记录', async () => {
+  const harness = createInquiryConflictHarness(new Map([[1, 'P2034']]));
+  const receipt = await harness.service.create(inquiryConflictRequest);
+  assert.equal(receipt.leadId, 701);
+  assert.deepEqual(harness.counts(), { transactions: 3, creates: 1, consents: 1 });
+});
+
+for (const code of ['P2034', 'P2002']) {
+  test(`普通咨询遇到 ${code} 后恢复原回执并重新复核会员身份`, async () => {
+    const harness = createInquiryConflictHarness(new Map([[4, code], [5, 'P2034']]), 3);
+    const request = {
+      ...inquiryConflictRequest,
+      customer: { id: 7, authVersion: 1, name: '夹具客户', phone: '13800000000', accountType: 'MEMBER' } as never,
+    };
+    const first = await harness.service.create(request);
+    const replay = await harness.service.create(request);
+    assert.deepEqual(replay, first);
+    assert.deepEqual(harness.counts(), { transactions: 6, creates: 1, consents: 1 });
+    harness.revokeCustomer();
+    await assert.rejects(harness.service.create(request), UnauthorizedException);
+    assert.deepEqual(harness.counts(), { transactions: 7, creates: 1, consents: 1 });
+  });
+}
+
+test('普通咨询仅对带幂等键的 P2034 有界重试，耗尽后提示保留原键', async () => {
+  const keyed = createInquiryConflictHarness(new Map([[2, 'P2034'], [4, 'P2034'], [6, 'P2034']]));
+  await assert.rejects(keyed.service.create(inquiryConflictRequest), (error: unknown) =>
+    error instanceof ServiceUnavailableException
+    && error.getStatus() === 503
+    && error.message.includes('同一幂等键'),
+  );
+  assert.deepEqual(keyed.counts(), { transactions: 7, creates: 0, consents: 0 });
+
+  const noKey = createInquiryConflictHarness(new Map([[1, 'P2034']]));
+  await assert.rejects(noKey.service.create(validInquiry), { code: 'P2034' });
+  assert.deepEqual(noKey.counts(), { transactions: 1, creates: 0, consents: 0 });
 });
 
 test('已提交旧隐私版本在政策更新后仍可用原幂等键恢复 canonical Lead', async () => {

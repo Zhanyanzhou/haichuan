@@ -79,7 +79,7 @@ const pageLibraryEntry = homepageConfigSource.match(/<UnifiedTemplateLibrary\b[^
 assert.ok(pageLibraryEntry, "页面必须使用统一模板库的 page 模式");
 assert.match(pageLibraryEntry[0], /onInsertPublished=\{insertPublishedDynamicTemplate\}/, "页面必须走已发布版本插入链");
 assert.doesNotMatch(pageLibraryEntry[0], /onInsertSystem|onInsertPersonal|onInsertDraft/, "页面不得提供系统旁路、个人模板或草稿插入入口");
-assert.match(pageLibrarySource, /props\.mode === "page"[\s\S]*presentation\.source === "published"[\s\S]*props\.isPublishedTemplateAllowed\(presentation\.published\)/, "页面可插入目录必须过滤已发布版本");
+assert.match(pageLibrarySource, /props\.mode === "page"[\s\S]*item\.kind !== "published"\s*\|\|\s*!props\.isPublishedTemplateAllowed\(item\.template\)\) continue;/, "页面可插入目录必须过滤已发布版本");
 assert.doesNotMatch(pageLibrarySource, /pageHasPrimaryStage|当前页面已有主舞台|不能重复添加此主舞台模板/, "页面模板目录不得按已有首屏数量禁用模板");
 assert.doesNotMatch(homepageConfigSource, /isPrimaryStageInsertionBlocked|首屏主舞台全页只能有一个/, "页面插入命令不得限制首屏数量");
 assert.match(homepageConfigSource, /createDynamicTemplateInstanceProps\(\{\s*templateId: template\.templateId,\s*version: template\.version,/, "页面实例必须钉住所选模板的精确版本");

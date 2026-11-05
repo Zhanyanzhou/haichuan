@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type FormEvent } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, type FormEvent } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { inquiriesApi } from "@/services/api";
 import { requestErrorCode, requestStatus } from "@/services/httpClient";
@@ -24,13 +24,14 @@ import {
   type ConsultationSubmissionReceipt,
 } from "@/services/clients/consultationSubmissionReceipt";
 import {
+  activateContactSubmissionContext,
   clearContactConsultationDraft,
   clearConsultationSubmissionAttempt,
   consultationDraftOwner,
   createConsultationSubmissionFingerprint,
   readContactConsultationDraft,
-  readConsultationSubmissionAttempt,
   reserveConsultationSubmissionAttempt,
+  runConsultationSubmission,
   saveContactConsultationDraft,
 } from "@/utils/consultationJourneyState";
 
@@ -223,7 +224,7 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
   const savedCustomer = editorPreview ? null : authenticatedCustomer;
   const draftOwner = consultationDraftOwner(savedCustomer?.id);
   const [restoredDraft] = useState(() => (
-    editorPreview ? null : readContactConsultationDraft(draftOwner)
+    editorPreview ? null : readContactConsultationDraft(draftOwner, productRef ?? "")
   ));
   const [form, setForm] = useState(() => {
     const restored = restoredDraft;
@@ -257,21 +258,30 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
   const submitPendingRef = useRef(false);
   const submitOperationRef = useRef(0);
   const formOwnerRef = useRef(draftOwner);
+  const draftEditedRef = useRef(Boolean(restoredDraft));
   const inquiryContextRef = useRef({ sourceType, rawProductRef });
-  const [pendingSubmission, setPendingSubmission] = useState(() => (
-    editorPreview
-      ? false
-      : Boolean(readConsultationSubmissionAttempt("contact", draftOwner))
-  ));
+  const [pendingSubmission, setPendingSubmission] = useState(false);
 
-  useEffect(() => {
-    if (restoredDraft) clearContactConsultationDraft();
-  }, [restoredDraft]);
+  useLayoutEffect(() => {
+    if (!editorPreview) {
+      setPendingSubmission(Boolean(activateContactSubmissionContext(draftOwner, productRef ?? "")));
+    }
+  }, [draftOwner, editorPreview, productRef]);
+
+  useLayoutEffect(() => {
+    if (
+      editorPreview || submitted || !draftEditedRef.current || formOwnerRef.current !== draftOwner
+      || inquiryContextRef.current.rawProductRef !== rawProductRef
+    ) return;
+    const { privacyConsent, ...draft } = form;
+    saveContactConsultationDraft(draftOwner, draft, productRef ?? "");
+  }, [draftOwner, editorPreview, form, productRef, rawProductRef, submitted]);
 
   useEffect(() => {
     if (editorPreview || formOwnerRef.current === draftOwner) return;
     submitOperationRef.current += 1;
     formOwnerRef.current = draftOwner;
+    draftEditedRef.current = false;
     clearContactConsultationDraft();
     submitPendingRef.current = false;
     setSubmitting(false);
@@ -279,9 +289,6 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
     setReceipt(null);
     setSubmitError("");
     setErrors({});
-    setPendingSubmission(Boolean(
-      readConsultationSubmissionAttempt("contact", draftOwner),
-    ));
     setForm({
       name: savedCustomer?.name || "",
       phone: savedCustomer?.phone || "",
@@ -321,15 +328,14 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
     setReceipt(null);
     setSubmitError("");
     setErrors({});
-    // 仅在来源作品变化时作废旧上下文的结果待确认预约：换作品意味着用户明确
-    // 转向新咨询对象，旧预约不应拦截新作品的首次提交；业务类型切换（如定制
-    // 转预约）保留草稿内容，旧预约必须继续参与内容冲突校验，防止在结果待确认
-    // 期间以不同内容重复提交。
     if (previous.rawProductRef !== rawProductRef) {
-      clearConsultationSubmissionAttempt("contact", formOwnerRef.current);
-      setPendingSubmission(false);
+      const draft = readContactConsultationDraft(formOwnerRef.current, productRef ?? "");
+      draftEditedRef.current = Boolean(draft);
+      if (draft) {
+        setForm({ ...draft, privacyConsent: false });
+        return;
+      }
     }
-
     if (previous.sourceType !== sourceType) {
       setForm((current) => ({
         ...current,
@@ -345,6 +351,7 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
     editorPreview,
     isPrivacyRequest,
     preselectedConsultationType,
+    productRef,
     rawProductRef,
     sourceType,
   ]);
@@ -431,6 +438,7 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
     key: Key,
     value: (typeof form)[Key],
   ) => {
+    if (key !== "privacyConsent") draftEditedRef.current = true;
     setForm((f) => ({ ...f, [key]: value }));
     if (errors[key])
       setErrors((e) => {
@@ -534,9 +542,13 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
     if (!validate()) return;
     const operationId = ++submitOperationRef.current;
     const requestOwner = formOwnerRef.current;
+    const requestLocation = `${location.pathname}${location.search}`;
     const isCurrentOperation = () =>
       submitOperationRef.current === operationId
-      && formOwnerRef.current === requestOwner;
+      && formOwnerRef.current === requestOwner
+      && consultationDraftOwner(useCustomerAuthStore.getState().customer?.id) === requestOwner;
+    const canSend = () => isCurrentOperation()
+      && `${window.location.pathname}${window.location.search}` === requestLocation;
     submitPendingRef.current = true;
     setSubmitting(true);
     setSubmitError("");
@@ -570,6 +582,8 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
         privacyConsentVersion: PRIVACY_CONSENT_VERSION,
         privacyConsentContentHash: PRIVACY_CONSENT_CONTENT_HASH,
       });
+      // 摘要计算期间可能已经切换咨询对象、身份或离开页面；失效操作不能再预约或发送。
+      if (!canSend()) return;
       const reservation = reserveConsultationSubmissionAttempt(
         "contact",
         requestOwner,
@@ -584,23 +598,23 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
       }
       attemptReserved = true;
       if (reservation.recovered) setPendingSubmission(true);
-      const response = await inquiriesApi.submit(
-        submission,
-        reservation.attempt.key,
-      );
-      if (!isCurrentOperation()) return;
-      const nextReceipt = parseConsultationSubmissionReceipt(
-        unwrapResponse<unknown>(response),
-      );
-      if (!nextReceipt) throw new Error("咨询回执响应不完整");
+      if (!canSend()) return;
+      const nextReceipt = await runConsultationSubmission(reservation.attempt, async (key) => {
+        const response = await inquiriesApi.submit(submission, key);
+        const confirmed = parseConsultationSubmissionReceipt(unwrapResponse<unknown>(response));
+        if (!confirmed) throw new Error("咨询回执响应不完整");
+        return confirmed;
+      });
+      if (!isCurrentOperation() || `${window.location.pathname}${window.location.search}` !== requestLocation) return;
       clearConsultationSubmissionAttempt("contact", requestOwner);
       setPendingSubmission(false);
       trackSubmitInquiry();
-      clearContactConsultationDraft();
+      draftEditedRef.current = false;
+      clearContactConsultationDraft(productRef ?? "");
       setReceipt(nextReceipt);
       setSubmitted(true);
     } catch (error) {
-      if (!isCurrentOperation() || isStaleSessionResponseError(error)) return;
+      if (!canSend() || isStaleSessionResponseError(error)) return;
       const status = requestStatus(error);
       if (!attemptReserved) {
         setPendingSubmission(false);
@@ -945,6 +959,7 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
             <form
               ref={formRef}
               className={embedded ? "contact-form contact-form--quiet" : "contact-form"}
+              aria-busy={submitting}
               onSubmit={handleSubmit}
               noValidate
               style={embedded ? undefined : {
@@ -953,6 +968,7 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
                 border: `1px solid ${T.line}`,
               }}
             >
+              <fieldset disabled={submitting} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <div
                 className="contact-row"
                 style={{
@@ -1269,7 +1285,7 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
                           preferredTime: form.preferredTime,
                           budgetRange: form.budgetRange,
                           message: form.message,
-                        });
+                        }, productRef ?? "");
                       }}
                       style={{ color: T.txt, textDecoration: "underline" }}
                     >
@@ -1355,6 +1371,7 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
                       ? "请先处理来源作品"
                       : "提交需求"}
               </button>
+              </fieldset>
             </form>
           </div>
 

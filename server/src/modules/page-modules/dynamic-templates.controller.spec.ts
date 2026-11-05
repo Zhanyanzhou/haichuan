@@ -534,6 +534,16 @@ test("ADMIN 目录不读取 SUPER_ADMIN 私有草稿", async () => {
   ]);
 });
 
+test("summary 查询连同页面和原始员工身份传入 service，保留旧无参调用", async () => {
+  const harness = createHarness();
+  await harness.controller.listCatalog(staffRequest(63, "ADMIN"), "home", "summary");
+  await harness.controller.listPublished(staffRequest(63, "ADMIN"), "summary");
+  assert.deepEqual(harness.calls, [
+    { method: "listCatalog", args: [staffPrincipal(63, "ADMIN"), "home", "summary"] },
+    { method: "listPublished", args: [staffPrincipal(63, "ADMIN"), "summary"] },
+  ]);
+});
+
 test("published/exact-version/mine/draft 保留 service 返回的精确资源身份", async () => {
   const published = [{
     definition: { templateId: "tpl_precise" },

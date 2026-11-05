@@ -107,11 +107,14 @@ test("超长手机模板卡片显示整节，不裁掉下半段，放大预览�
 });
 
 test("已上传的预览图替换卡片，未上传时仍是中性图", async ({ page }) => {
-  await page.route("**/api/upload/media/preview-by-storage-key**", (route) => route.fulfill({
-    contentType: "image/svg+xml",
-    body: "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"800\" height=\"450\"><rect width=\"800\" height=\"450\" fill=\"#d9d9d9\"/></svg>",
-  }));
   const server = await installNewTemplateServer(page);
+  await page.route("**/api/upload/media/preview-by-storage-key**", (route) => {
+    const width = Number(new URL(route.request().url()).searchParams.get("width")) || 3200;
+    return route.fulfill({
+      contentType: "image/svg+xml",
+      body: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${width * 9 / 16}"><rect width="100%" height="100%" fill="#d9d9d9"/></svg>`,
+    });
+  });
   await page.setViewportSize({ width: 1600, height: 1000 });
   await openTemplateDesignWithoutDraft(page);
   const definition = await sourceDefinition(page);
@@ -120,10 +123,20 @@ test("已上传的预览图替换卡片，未上传时仍是中性图", async ({
   const card = page.locator(`[data-template-name="${definition.templateId}"]`);
   await expect(card).toBeVisible();
   await expect(card.locator("[data-catalog-cover]")).toBeVisible();
+  await expect(card.locator("[data-catalog-cover] img")).toHaveAttribute("src", /[?&]width=800(?:&|$)/);
   await expect(card.locator('[data-preview-art-direction="neutral-template-preview-v1"]')).toHaveCount(0);
   await card.getByRole("button", { name: /更多模板操作/ }).click();
-  await expect(page.getByRole("menuitem", { name: "更换预览图" })).toBeVisible();
-  await page.keyboard.press("Escape");
+  await page.getByRole("menuitem", { name: "更换预览图" }).click();
+  const coverEditor = page.getByRole("dialog", { name: `组件库预览图：${definition.name}` });
+  await coverEditor.getByRole("button", { name: /图片链接$/ }).click();
+  const sourceInput = coverEditor.getByPlaceholder("输入图片 URL；清空后确认 = 删除图片");
+  await sourceInput.fill("/uploads/page-assets/crop-original.jpg");
+  await sourceInput.press("Enter");
+  const cropImage = coverEditor.locator("[data-catalog-cover-cropper] img");
+  await expect(cropImage).toHaveAttribute("src", /storageKey=page-assets%2Fcrop-original\.jpg$/);
+  await expect.poll(() => cropImage.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(3200);
+  await coverEditor.getByRole("button", { name: /取\s*消/ }).click();
+  await expect(coverEditor).toHaveCount(0);
   await card.getByRole("button", { name: `放大预览：${definition.name}` }).click();
   const preview = page.getByRole("dialog", { name: `放大预览：${definition.name}` });
   await expect(preview).toBeVisible();
@@ -131,6 +144,33 @@ test("已上传的预览图替换卡片，未上传时仍是中性图", async ({
   expect(server.persisted?.catalogCoverUrl).toBe(COVER_URL);
   expect(server.writes).toEqual([]);
   await preview.getByRole("button", { name: "关闭预览", exact: true }).click();
+});
+
+test("目录封面派生图失败只回退一次原图，原图失败再显示中性结构", async ({ page }) => {
+  const server = await installNewTemplateServer(page);
+  const requests: Array<string | null> = [];
+  let originalFails = false;
+  await page.route("**/api/upload/media/preview-by-storage-key**", async (route) => {
+    const width = new URL(route.request().url()).searchParams.get("width");
+    requests.push(width);
+    if (width || originalFails) return route.fulfill({ status: 404, body: "missing preview" });
+    return route.fulfill({ contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450"><rect width="800" height="450" fill="#ddd"/></svg>' });
+  });
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await openTemplateDesignWithoutDraft(page);
+  const definition = await sourceDefinition(page);
+  server.persisted = { ...makeResource(definition, 3), catalogCoverUrl: COVER_URL };
+  await openTemplateDesignWithoutDraft(page);
+  const card = page.locator(`[data-template-name="${definition.templateId}"]`);
+  await expect(card.locator("[data-catalog-cover] img")).toHaveAttribute("src", /preview-by-storage-key\?storageKey=[^&]+$/);
+  await expect.poll(() => card.locator("[data-catalog-cover] img").evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  expect(requests).toEqual(["800", null]);
+  originalFails = true;
+  server.persisted = { ...server.persisted!, catalogCoverUrl: "/uploads/page-assets/broken-cover.jpg" };
+  await openTemplateDesignWithoutDraft(page);
+  await expect(card.locator('[data-preview-art-direction="neutral-template-preview-v1"]')).toBeVisible();
+  expect(requests).toEqual(["800", null, "800", null]);
+  expect(server.writes).toEqual([]);
 });
 
 test("目录跟随当前设备，放大预览可只读切换真实内容与中性结构", async ({ page }) => {

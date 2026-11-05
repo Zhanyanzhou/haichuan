@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { App as AntdApp } from "antd";
 import { useSelectionStore } from "@/store/selectionStore";
@@ -21,58 +21,66 @@ import {
 import {
   getConsultationSubmissionStatusCopy,
   parseConsultationSubmissionReceipt,
-  type ConsultationSubmissionReceipt,
 } from "@/services/clients/consultationSubmissionReceipt";
 import {
   clearConsultationSubmissionAttempt,
   clearSelectionConsultationDraft,
+  clearSelectionConsultationReceipt,
   consultationDraftOwner,
   createConsultationSubmissionFingerprint,
   readSelectionConsultationDraft,
+  readSelectionConsultationReceipt,
   readConsultationSubmissionAttempt,
   reserveConsultationSubmissionAttempt,
+  runConsultationSubmission,
   saveSelectionConsultationDraft,
+  saveSelectionConsultationReceipt,
+  subscribeSelectionConsultationReceipt,
 } from "@/utils/consultationJourneyState";
 export type SelectionLookupState = "loading" | "error" | "ready";
 
-export default function SelectionTray({
-  products,
-  lookupState,
-  onRetry,
-  presentation = "tray",
-}: {
+type SelectionTrayProps = {
   products: CatalogProduct[];
   lookupState: SelectionLookupState;
   onRetry: () => void;
   /** tray 是选款中心底部条；page 只提供购物袋里的「交给顾问」。 */
   presentation?: "tray" | "page";
-}) {
+};
+
+export default function SelectionTray(props: SelectionTrayProps) {
+  const activeOwner = useSelectionStore((state) => state.activeOwner);
+  const customer = useCustomerAuthStore((state) => state.customer);
+  const authStatus = useCustomerAuthStore((state) => state.status);
+  const owner = consultationDraftOwner(customer?.id);
+  if (authStatus === "unknown" || activeOwner !== owner) return null;
+  return <SelectionTrayContent key={owner} {...props} />;
+}
+
+function SelectionTrayContent({ products, lookupState, onRetry, presentation = "tray" }: SelectionTrayProps) {
   const { message } = AntdApp.useApp();
   const location = useLocation();
   const ids = useSelectionStore((s) => s.selectedIds);
-  const clear = useSelectionStore((s) => s.clear);
   const removeMany = useSelectionStore((s) => s.removeMany);
   const account = useCustomerAuthStore((state) => state.customer);
   const isSignedIn = useCustomerAuthStore((state) => state.isLoggedIn);
   const draftOwner = consultationDraftOwner(account?.id);
   const [restoredDraft] = useState(() => readSelectionConsultationDraft(draftOwner));
-  const [open, setOpen] = useState(Boolean(restoredDraft));
+  const savedReceipt = useSyncExternalStore(
+    subscribeSelectionConsultationReceipt,
+    () => readSelectionConsultationReceipt(draftOwner),
+    () => null,
+  );
+  const receipt = savedReceipt?.receipt ?? null;
+  const [open, setOpen] = useState(Boolean(restoredDraft || savedReceipt));
   const trayButtonRef = useRef<HTMLButtonElement>(null);
   const closeDialog = useCallback(() => setOpen(false), []);
   const resolveTrayButton = useCallback(() => trayButtonRef.current, []);
-  const { dialogRef, initialFocusRef } = useCatalogDialog(
-    closeDialog,
-    trayButtonRef,
-    open,
-    resolveTrayButton,
-  );
   const [submitting, setSubmitting] = useState(false);
-  const [receipt, setReceipt] = useState<ConsultationSubmissionReceipt | null>(null);
+  const [submittedProducts, setSubmittedProducts] = useState<CatalogProduct[] | null>(null);
   const receiptHeadingRef = useRef<HTMLHeadingElement>(null);
   const [submitError, setSubmitError] = useState("");
   const submitPendingRef = useRef(false);
   const submitOperationRef = useRef(0);
-  const formOwnerRef = useRef(draftOwner);
   const [pendingSubmission, setPendingSubmission] = useState(() => Boolean(
     readConsultationSubmissionAttempt("selection", draftOwner),
   ));
@@ -85,46 +93,44 @@ export default function SelectionTray({
     privacyConsent: false,
   }));
 
+  // 请求和回执消费同一份快照，不受后来加入或移除的选款影响。
+  const selected = savedReceipt?.products
+    ?? (submitting && submittedProducts ? submittedProducts : products.filter((product) => ids.has(product.id)));
+  const dialogOpen = open && selected.length > 0;
+  const { dialogRef, initialFocusRef } = useCatalogDialog(
+    closeDialog,
+    trayButtonRef,
+    dialogOpen,
+    resolveTrayButton,
+  );
+
   useEffect(() => {
     if (receipt) receiptHeadingRef.current?.focus({ preventScroll: true });
   }, [receipt]);
 
   useEffect(() => {
-    if (restoredDraft) clearSelectionConsultationDraft();
-  }, [restoredDraft]);
+    // 冻结字段后，原提交按钮不再可聚焦；把键盘焦点留在仍可关闭的弹窗内。
+    if (submitting && open) initialFocusRef.current?.focus({ preventScroll: true });
+  }, [submitting, open, initialFocusRef]);
 
-  useEffect(() => {
-    if (formOwnerRef.current === draftOwner) return;
-    submitOperationRef.current += 1;
-    formOwnerRef.current = draftOwner;
-    clearSelectionConsultationDraft();
-    submitPendingRef.current = false;
-    setSubmitting(false);
-    setReceipt(null);
-    setSubmitError("");
-    setPendingSubmission(Boolean(
-      readConsultationSubmissionAttempt("selection", draftOwner),
-    ));
-    setForm({
-      customerName: "",
-      phone: "",
-      email: "",
-      wechat: "",
-      message: "",
-      privacyConsent: false,
-    });
-    setOpen(false);
-  }, [draftOwner]);
+  useLayoutEffect(() => {
+    if (receipt) return;
+    const { privacyConsent, ...draft } = form;
+    if (Object.values(draft).some((value) => value.trim())) {
+      saveSelectionConsultationDraft(draftOwner, draft);
+    } else {
+      clearSelectionConsultationDraft();
+    }
+  }, [draftOwner, form, receipt]);
 
   useEffect(() => () => {
     submitOperationRef.current += 1;
   }, []);
 
-  if (!ids.size) return null;
+  if (!ids.size && !submitting && !receipt) return null;
 
   const pageMode = presentation === "page";
-  const selected = products.filter((p) => ids.has(p.id));
-  if (lookupState !== "ready") {
+  if (!dialogOpen && lookupState !== "ready" && !submitting && !receipt) {
     if (pageMode) return null;
     const failed = lookupState === "error";
     return (
@@ -179,9 +185,10 @@ export default function SelectionTray({
 
   const selectedCount = selected.length;
   const thumbs = selected.slice(0, 4);
+  const submitDisabled = submitting || lookupState !== "ready" || selectedCount === 0;
 
   const handleSubmit = async () => {
-    if (submitPendingRef.current || submitting) return;
+    if (submitPendingRef.current || submitDisabled || readSelectionConsultationReceipt(draftOwner)) return;
     if (!isSignedIn && !form.customerName.trim()) {
       message.warning("请填写您的称呼");
       return;
@@ -199,11 +206,15 @@ export default function SelectionTray({
       return;
     }
     const operationId = ++submitOperationRef.current;
-    const requestOwner = formOwnerRef.current;
+    const requestOwner = draftOwner;
+    const requestLocation = `${location.pathname}${location.search}`;
     const isCurrentOperation = () =>
       submitOperationRef.current === operationId
-      && formOwnerRef.current === requestOwner;
+      && consultationDraftOwner(useCustomerAuthStore.getState().customer?.id) === requestOwner;
+    const canSend = () => isCurrentOperation()
+      && `${window.location.pathname}${window.location.search}` === requestLocation;
     submitPendingRef.current = true;
+    setSubmittedProducts([...selected]);
     setSubmitting(true);
     setSubmitError("");
     let attemptReserved = false;
@@ -239,6 +250,7 @@ export default function SelectionTray({
         privacyConsentVersion: PRIVACY_CONSENT_VERSION,
         privacyConsentContentHash: PRIVACY_CONSENT_CONTENT_HASH,
       });
+      if (!canSend()) return;
       const reservation = reserveConsultationSubmissionAttempt(
         "selection",
         requestOwner,
@@ -253,22 +265,25 @@ export default function SelectionTray({
       }
       attemptReserved = true;
       if (reservation.recovered) setPendingSubmission(true);
-      const response = await selectionInquiryApi.submit(
-        submission,
-        reservation.attempt.key,
-      );
-      if (!isCurrentOperation()) return;
-      const nextReceipt = parseConsultationSubmissionReceipt(
-        unwrapResponse<unknown>(response),
-      );
-      if (!nextReceipt) throw new Error("选款咨询回执响应不完整");
-      clearConsultationSubmissionAttempt("selection", requestOwner);
+      if (!canSend()) return;
+      const nextReceipt = await runConsultationSubmission(reservation.attempt, async (key) => {
+        const response = await selectionInquiryApi.submit(submission, key);
+        const confirmed = parseConsultationSubmissionReceipt(unwrapResponse<unknown>(response));
+        if (!confirmed) throw new Error("选款咨询回执响应不完整");
+        if (
+          consultationDraftOwner(useCustomerAuthStore.getState().customer?.id) === requestOwner
+          && readConsultationSubmissionAttempt("selection", requestOwner)?.key === key
+        ) {
+          clearSelectionConsultationDraft();
+          saveSelectionConsultationReceipt(requestOwner, { receipt: confirmed, products: [...selected] });
+          trackSubmitSelection(submission.items.length);
+        }
+        return confirmed;
+      });
+      if (!isCurrentOperation() || window.location.pathname !== location.pathname) return;
       setPendingSubmission(false);
-      trackSubmitSelection(selected.length);
-      clearSelectionConsultationDraft();
-      setReceipt(nextReceipt);
       message.success(
-        `已提交 ${selected.length} 款作品的选款咨询，回执编号 #${nextReceipt.sourceId}`,
+        `已提交 ${submission.items.length} 款作品的选款咨询，回执编号 #${nextReceipt.sourceId}`,
       );
       setSubmitError("");
     } catch (error: unknown) {
@@ -303,7 +318,7 @@ export default function SelectionTray({
   };
 
   const abandonPendingSubmission = () => {
-    clearConsultationSubmissionAttempt("selection", formOwnerRef.current);
+    clearConsultationSubmissionAttempt("selection", draftOwner);
     setPendingSubmission(false);
     setSubmitError(
       "已放弃恢复；这不会撤销服务器上可能已生效的选款咨询。确认确需新建后可再次提交。",
@@ -311,8 +326,11 @@ export default function SelectionTray({
   };
 
   const finishReceipt = () => {
-    clear();
-    setReceipt(null);
+    // 只移除这次成功提交的作品，保留等待响应期间另行加入的选款。
+    removeMany((savedReceipt?.products ?? []).map((product) => product.id));
+    clearConsultationSubmissionAttempt("selection", draftOwner);
+    clearSelectionConsultationReceipt();
+    setSubmittedProducts(null);
     setForm({
       customerName: "",
       phone: "",
@@ -339,7 +357,7 @@ export default function SelectionTray({
   return (
     <>
       {/* 底部托盘：咨询弹窗打开时卸载，避免重复行动。 */}
-      {!open ? (
+      {!dialogOpen ? (
         pageMode ? (
           <button
             ref={trayButtonRef}
@@ -347,14 +365,18 @@ export default function SelectionTray({
             className="btn btn-primary shopping-bag__handoff"
             onClick={() => setOpen(true)}
           >
-            交给顾问
+            {receipt ? "查看咨询回执" : submitting ? "查看提交进度" : "交给顾问"}
           </button>
         ) : (
         <button
           ref={trayButtonRef}
           className="catalog-selection-tray"
           type="button"
-          aria-label={`查看已选 ${selectedCount} 款并提交选款咨询`}
+          aria-label={receipt
+            ? "查看本次选款咨询回执"
+            : submitting
+              ? `查看正在提交的 ${selectedCount} 款选款咨询`
+              : `查看已选 ${selectedCount} 款并提交选款咨询`}
           onClick={() => setOpen(true)}
           style={{
             position: "fixed",
@@ -401,17 +423,17 @@ export default function SelectionTray({
             ))}
           </div>
           <span style={{ fontSize: 12, color: "#FFFFFF" }}>
-            已选 {selectedCount} 款
+            {receipt ? "已提交" : "已选"} {selectedCount} 款
           </span>
           <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>
-            提交选款咨询 →
+            {receipt ? "查看咨询回执 →" : submitting ? "正在提交…" : "提交选款咨询 →"}
           </span>
         </button>
         )
       ) : null}
 
       {/* 提交弹窗 */}
-      {open && (
+      {dialogOpen && (
         <>
           <div
             className="catalog-selection-inquiry__backdrop"
@@ -428,6 +450,7 @@ export default function SelectionTray({
             ref={dialogRef}
             role="dialog"
             aria-modal="true"
+            aria-busy={submitting}
             aria-labelledby="selection-inquiry-title"
             style={{
               position: "fixed",
@@ -535,11 +558,11 @@ export default function SelectionTray({
                       cursor: "pointer",
                     }}
                   >
-                    完成并清空选款
+                    完成并移除本次选款
                   </button>
                 </div>
               </div>
-            ) : <>
+            ) : <fieldset disabled={submitting} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
             <h2
               id="selection-inquiry-title"
               style={{
@@ -555,6 +578,17 @@ export default function SelectionTray({
               已选 {selected.length}{" "}
               款作品，请填写联系方式，珠宝顾问将为您提供一对一服务
             </p>
+            {!submitting && lookupState === "loading" ? (
+              <p role="status">正在确认已选作品</p>
+            ) : null}
+            {!submitting && lookupState === "error" ? (
+              <div role="alert">
+                <p>选款状态暂时无法确认。</p>
+                <button type="button" className="catalog-recovery-target" onClick={onRetry}>
+                  重新确认选款
+                </button>
+              </div>
+            ) : null}
 
             {/* 提交前以可识别清单核对全部作品，并允许逐项纠错。 */}
             <ul
@@ -878,14 +912,14 @@ export default function SelectionTray({
             <button
               type="button"
               onClick={handleSubmit}
-              disabled={submitting}
+              disabled={submitDisabled}
               style={{
                 width: "100%",
                 height: 44,
                 marginTop: 20,
-                background: submitting ? T.sec : T.txt,
+                background: submitDisabled ? T.sec : T.txt,
                 border: "none",
-                cursor: submitting ? "not-allowed" : "pointer",
+                cursor: submitDisabled ? "not-allowed" : "pointer",
                 fontSize: 14,
                 color: "#FFFFFF",
                 letterSpacing: "0.04em",
@@ -895,7 +929,7 @@ export default function SelectionTray({
                 ? "提交中…"
                 : `${submitError ? "重新" : ""}提交选款咨询（${selected.length} 款）`}
             </button>
-            </>}
+            </fieldset>}
           </div>
         </>
       )}

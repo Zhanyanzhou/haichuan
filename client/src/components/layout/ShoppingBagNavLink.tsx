@@ -1,5 +1,6 @@
 import type { MouseEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
+import { sanitizeCatalogReturnUrl } from "@/pages/public/Catalog/catalogReturnContext";
 import { useCommerceFlags } from "@/store/featureFlags";
 import { useSelectionStore } from "@/store/selectionStore";
 
@@ -28,16 +29,19 @@ export default function ShoppingBagNavLink({
 }: {
   onClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
 }) {
+  const location = useLocation();
   const ready = useSelectionStore((state) => state.ready);
   const selectedCount = useSelectionStore((state) => state.selectedIds.size);
   const flags = useCommerceFlags((state) => state.flags);
   const commerceCartOpen = flags?.commerceEnabled === true && flags?.cartEnabled === true;
   const count = ready && !commerceCartOpen ? selectedCount : 0;
   const label = count > 0 ? `购物袋，已选 ${count} 款` : "购物袋";
+  const catalogReturnUrl = sanitizeCatalogReturnUrl(`${location.pathname}${location.search}${location.hash}`);
 
   return (
     <Link
       to="/cart"
+      state={catalogReturnUrl ? { catalogReturnUrl } : undefined}
       aria-label={label}
       className="site-header__nav-item site-header__nav-item--cart"
       onClick={onClick}

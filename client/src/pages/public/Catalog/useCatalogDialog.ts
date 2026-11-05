@@ -32,7 +32,7 @@ export default function useCatalogDialog(
       if (event.key !== "Tab") return;
       const focusable = Array.from(
         dialog.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          'a[href], button:enabled, input:enabled, select:enabled, textarea:enabled, [tabindex]:not([tabindex="-1"]):not(:disabled)',
         ),
       ).filter((element) => element.getClientRects().length > 0);
       if (!focusable.length) return;

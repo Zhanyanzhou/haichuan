@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { gzipSync } from "node:zlib";
 import {
   BadRequestException,
   ConflictException,
@@ -835,12 +836,12 @@ function catalogVersion(
   };
 }
 
-function createPublishedCatalogService(templates: any[], versions: any[]) {
+function createPublishedCatalogService(templates: any[], versions: any[], role = "SUPER_ADMIN") {
   const calls: Array<{ operation: string; args: any }> = [];
   const prisma: any = {
     $queryRaw: async (query: { sql?: string; values?: unknown[] }) => {
       calls.push({ operation: "authorization.query", args: query });
-      return [{ id: Number(query.values?.[0]), role: "SUPER_ADMIN" }];
+      return [{ id: Number(query.values?.[0]), role }];
     },
     dynamicTemplate: {
       findMany: async (args: any) => {
@@ -3504,4 +3505,85 @@ test("组件库预览图拒绝外链、穿越路径、未入库图片和已归�
     ConflictException,
   );
   assert.equal(harness.getState().template.catalogCoverUrl ?? null, null);
+});
+
+
+test("页面装修目录沿用既有准入，省略个人草稿但不按推荐页面缩减正式模板", async () => {
+  const normal = definitionFixture();
+  normal.metadata.recommendedFor = ["about"];
+  const starterId = definitionFixture(); starterId.templateId = "hc_consult_home";
+  const starterTag = definitionFixture(); starterTag.templateId = "tpl_starter_tag"; starterTag.metadata.tags = ["consultation-starter"];
+  const starterSource = definitionFixture(); starterSource.templateId = "tpl_starter_source";
+  const heroId = definitionFixture(); heroId.templateId = "tpl_hero";
+  const heroTag = definitionFixture(); heroTag.templateId = "tpl_hero_tag"; heroTag.metadata.tags = ["hero-test-sample"];
+  const heroSource = definitionFixture(); heroSource.templateId = "tpl_hero_source";
+  const definitions = [normal, starterId, starterTag, starterSource, heroId, heroTag, heroSource];
+  const templates = definitions.map((definition, index) => ({
+    ...catalogTemplate(index + 1, 1, definition),
+    sourceReference: index === 3 ? "consultation-starter:home" : index === 6 ? "content-template:hero-test" : null,
+  }));
+  const versions = definitions.map((definition, index) => catalogVersion(index + 1, index + 1, 1, definition));
+  for (const role of ["EDITOR", "ADMIN", "SUPER_ADMIN"]) {
+    const harness = createPublishedCatalogService(templates, versions, role);
+    const result = await harness.service.listCatalog(17, "home");
+    assert.deepEqual(result.items.map((item) => [item.kind, item.template.templateId]), [["published", normal.templateId]]);
+    assert.equal(harness.calls.filter((call) => call.operation === "template.findMany").length, 1,
+      "页面模式不得再读个人草稿JSON");
+    assert.ok(harness.calls.some((call) => call.operation === "authorization.query"), "仍执行员工权限核对");
+    const unrestricted = await harness.service.listCatalog(17);
+    assert.equal(unrestricted.items.filter((item) => item.kind === "published").length, definitions.length);
+    assert.equal(unrestricted.items.filter((item) => item.kind === "editable").length, role === "SUPER_ADMIN" ? definitions.length : 0);
+  }
+});
+
+test("页面装修目录拒绝未登记、空白和非单值的pageKey，控制器传递可选查询参数", async () => {
+  const harness = createPublishedCatalogService([], []);
+  for (const pageKey of ["unknown", "", " home", "__proto__", "constructor", "toString", ["home", "about"] as unknown as string]) {
+    await assert.rejects(() => harness.service.listCatalog(17, pageKey), BadRequestException);
+  }
+  assert.equal(harness.calls.length, 0);
+  const calls: unknown[][] = [];
+  const controller = new DynamicTemplatesController({
+    listCatalog: async (...args: unknown[]) => { calls.push(args); return { items: [] }; },
+  } as unknown as DynamicTemplatesService);
+  const user = { id: 17, role: "SUPER_ADMIN", sessionFamilyId: "catalog-page-test" };
+  await controller.listCatalog({ user } as never, "home");
+  await controller.listCatalog({ user } as never);
+  assert.deepEqual(calls, [[user, "home"], [user]]);
+});
+
+test("正式目录摘要保持精确身份与准入，移除定义并减少实际JSON字节；旧目录保持完整", async () => {
+  const definition = definitionFixture();
+  for (const role of ["EDITOR", "ADMIN", "SUPER_ADMIN"]) {
+    const harness = createPublishedCatalogService(
+      [catalogTemplate(1, 1, definition)], [catalogVersion(1, 1, 1, definition)], role,
+    );
+    const full = await harness.service.listCatalog(17, "home");
+    const summary = await harness.service.listCatalog(17, "home", "summary");
+    assert.equal(summary.items.length, full.items.length);
+    const item = summary.items[0];
+    assert.equal(item.kind, "published");
+    assert.equal(Object.prototype.hasOwnProperty.call(item.template, "definition"), false);
+    assert.equal(item.template.templateId, definition.templateId);
+    const published = await harness.service.listPublished(17);
+    assert.equal(Object.prototype.hasOwnProperty.call(published[0], "definition"), true);
+    const versionSummary = await harness.service.listPublished(17, "summary");
+    assert.equal(Object.prototype.hasOwnProperty.call(versionSummary[0], "definition"), false);
+    const fullBytes = Buffer.byteLength(JSON.stringify(full));
+    const summaryBytes = Buffer.byteLength(JSON.stringify(summary));
+    assert.ok(summaryBytes < fullBytes / 2);
+    assert.ok(gzipSync(JSON.stringify(summary)).length < gzipSync(JSON.stringify(full)).length);
+    if (role === "SUPER_ADMIN") console.log(JSON.stringify({ fixture: "published-catalog-summary", fullBytes, summaryBytes,
+      fullGzip: gzipSync(JSON.stringify(full)).length, summaryGzip: gzipSync(JSON.stringify(summary)).length }));
+  }
+});
+
+test("目录摘要只接受明确view并要求页面目录范围，非法参数不读取Repository", async () => {
+  const harness = createPublishedCatalogService([], []);
+  for (const view of ["", "full", "__proto__", ["summary"] as unknown as string]) {
+    await assert.rejects(() => harness.service.listCatalog(17, "home", view), BadRequestException);
+    await assert.rejects(() => harness.service.listPublished(17, view), BadRequestException);
+  }
+  await assert.rejects(() => harness.service.listCatalog(17, undefined, "summary"), BadRequestException);
+  assert.equal(harness.calls.length, 0);
 });

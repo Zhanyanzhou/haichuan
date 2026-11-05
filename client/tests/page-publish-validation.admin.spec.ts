@@ -818,6 +818,46 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     }
   });
 
+  test("窄屏装修的设备、工作模式、面板和缩放控件可直接操作", async ({ page }) => {
+    await mockEditorApis(page, { valid: true });
+
+    for (const width of [320, 390, 768, 1024]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto("/admin/editor/home");
+      const mobile = page.getByRole("button", { name: /移动端布局/ });
+      await mobile.click();
+      await expect(mobile).toHaveAttribute("aria-pressed", "true");
+
+      const inspector = page.getByRole("dialog", { name: "属性面板" });
+      const expandInspector = page.getByRole("button", { name: "展开属性面板", exact: true });
+      if (await expandInspector.isVisible()) {
+        await expandInspector.click();
+      }
+      await inspector.getByRole("button", { name: "收起属性面板" }).click();
+      await expect(inspector).toBeHidden();
+      await expect(page.getByRole("button", { name: "收起属性面板" })).toBeHidden();
+
+      for (const name of [
+        "页面装修",
+        "模板设计",
+        "展开模板组件库",
+        "展开图层面板",
+        "展开属性面板",
+        "适应画布",
+        "缩小画布",
+        "放大画布",
+      ]) {
+        await page.getByRole("button", { name, exact: true }).click({ trial: true });
+      }
+
+      await page.getByRole("button", { name: "预览当前画布" }).click();
+      await mobile.click({ trial: true });
+      await page.getByLabel("切换装修页面").click({ trial: true });
+      await page.getByRole("button", { name: "退出当前画布预览" }).click();
+      await expectNoHorizontalOverflow(page);
+    }
+  });
+
   test("内容检查存在错误时保存草稿并展示精确清单，不调用发布接口", async ({ page }) => {
     const requests = await mockEditorApis(page, {
       valid: false,

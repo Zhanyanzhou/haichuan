@@ -14,6 +14,7 @@ import {
 } from "@ant-design/icons";
 import { App as AntdApp, Button, Dropdown, Modal, type MenuProps } from "antd";
 import RouteLoading from "@/components/common/RouteLoading";
+import { useEditorCanvasActive } from "../workspace/editorCanvasActivity";
 import {
   memo,
   useCallback,
@@ -89,8 +90,11 @@ import {
   dynamicTemplateApi,
   type DynamicTemplateResource,
   type PublishedDynamicTemplateResource,
+  type PublishedDynamicTemplateSummaryResource,
   type TemplateCatalogItemResource,
+  type TemplateCatalogSummaryItemResource,
 } from "@/services/clients/dynamicTemplateClient";
+import { CatalogDefinitionIdentityError, createPublishedCatalogDefinitionLoader, type PublishedCatalogDefinitionLoader } from "./publishedCatalogDefinitionLoader";
 import { resolveManagedTemplateMediaPreviewUrl } from "../template-definition/managedMediaPreview";
 import TemplateCatalogCoverEditor from "./TemplateCatalogCoverEditor";
 import {
@@ -154,7 +158,7 @@ interface DesignCatalogEntry extends CatalogEntryBase {
 
 interface PagePublishedCatalogEntry extends CatalogEntryBase {
   kind: "page-published";
-  template: PublishedDynamicTemplateResource;
+  template: PublishedDynamicTemplateSummaryResource;
 }
 
 interface PageDraftCatalogEntry extends CatalogEntryBase {
@@ -213,11 +217,12 @@ interface DesignModeProps {
 
 interface PageModeProps {
   mode: "page";
+  pageKey: string;
   active: boolean;
   device: "desktop" | "mobile";
   obscuredByInspector?: boolean;
   onRequestCompactOpen?: () => void;
-  isPublishedTemplateAllowed: (template: PublishedDynamicTemplateResource) => boolean;
+  isPublishedTemplateAllowed: (template: Pick<PublishedDynamicTemplateResource, "templateId" | "tags" | "sourceReference">) => boolean;
   pageHasBlocks: boolean;
   hasRootSelection: boolean;
   onInsertPublished: (template: PublishedDynamicTemplateResource) => void;
@@ -448,7 +453,11 @@ function CatalogCardPreview({
   catalogCoverUrl?: string | null;
 }) {
   const [coverFailed, setCoverFailed] = useState(false);
+  const [originalCover, setOriginalCover] = useState(false);
   const cover = catalogCoverUrl?.trim() ?? "";
+  useEffect(() => { setCoverFailed(false); setOriginalCover(false); }, [cover]);
+  const originalCoverUrl = resolveManagedTemplateMediaPreviewUrl(cover);
+  const coverUrl = originalCover ? originalCoverUrl : resolveManagedTemplateMediaPreviewUrl(cover, 800);
   const previewModel = useMemo(
     () => createTemplateCatalogPreviewModel(definition, device),
     [definition, device],
@@ -473,9 +482,12 @@ function CatalogCardPreview({
       style={ratio ? { aspectRatio: ratio } : undefined}
     >
       <img
-        src={resolveManagedTemplateMediaPreviewUrl(cover)}
+        src={coverUrl}
         alt=""
-        onError={() => setCoverFailed(true)}
+        onError={() => {
+          if (!originalCover && coverUrl !== originalCoverUrl) setOriginalCover(true);
+          else setCoverFailed(true);
+        }}
       />
     </div>
   );
@@ -1072,6 +1084,40 @@ function DesignTemplateCard({
   );
 }
 
+/** 由现有卡片的 IntersectionObserver 挂载，仅可见构图才读取精确版本。 */
+function DeferredPublishedCatalogPreview({ summary, loader, device, onResolved, onRefresh }: {
+  summary: PublishedDynamicTemplateSummaryResource;
+  loader: PublishedCatalogDefinitionLoader;
+  device: "desktop" | "mobile";
+  onResolved: (template: PublishedDynamicTemplateResource) => void;
+  onRefresh: () => void;
+}) {
+  const [template, setTemplate] = useState<PublishedDynamicTemplateResource | null>(summary.definition ? summary as PublishedDynamicTemplateResource : null);
+  const [error, setError] = useState<unknown>(null);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    setError(null);
+    setTemplate(summary.definition ? summary as PublishedDynamicTemplateResource : null);
+    void loader.read(summary).then((resolved) => {
+      if (cancelled) return;
+      setTemplate(resolved);
+      onResolved(resolved);
+    }).catch((failure) => { if (!cancelled) setError(failure); });
+    return () => { cancelled = true; };
+  }, [attempt, loader, onResolved, summary]);
+  if (error) return (
+    <span className="template-editor__catalog-preview-placeholder" role="status">
+      <button type="button" style={{ pointerEvents: "auto" }} onClick={(event) => {
+        event.stopPropagation();
+        if (error instanceof CatalogDefinitionIdentityError) onRefresh(); else setAttempt((value) => value + 1);
+      }}>{error instanceof CatalogDefinitionIdentityError ? "目录已变化，刷新目录" : "重新加载构图"}</button>
+    </span>
+  );
+  if (!template) return <span className="template-editor__catalog-preview-placeholder" role="status" aria-label="正在加载模板构图">正在加载构图</span>;
+  return renderDynamicTemplatePreview(template.definition, device, `${template.templateId}@${template.version}`).preview;
+}
+
 function PagePublishedTemplateCard({
   device,
   entry,
@@ -1082,6 +1128,8 @@ function PagePublishedTemplateCard({
   onDragEnd,
   onDragStart,
   onPreview,
+  definitionLoader,
+  onRefresh,
 }: {
   device: "desktop" | "mobile";
   entry: PagePublishedCatalogEntry;
@@ -1092,8 +1140,30 @@ function PagePublishedTemplateCard({
   onDragEnd: PageModeProps["onPublishedDragEnd"];
   onDragStart: PageModeProps["onPublishedDragStart"];
   onPreview: (template: PublishedDynamicTemplateResource) => void;
+  definitionLoader: PublishedCatalogDefinitionLoader;
+  onRefresh: () => void;
 }) {
-  const displayName = catalogCardName(entry.template.definition.metadata.sectionRole, entry.name);
+  const [resolved, setResolved] = useState<PublishedDynamicTemplateResource | null>(entry.template.definition ? entry.template as PublishedDynamicTemplateResource : null);
+  const [busy, setBusy] = useState(false);
+  const { message } = AntdApp.useApp();
+  const active = useEditorCanvasActive();
+  const owner = useRef({ active, loader: definitionLoader, summary: entry.template });
+  owner.current = { active, loader: definitionLoader, summary: entry.template };
+  useEffect(() => { setResolved(entry.template.definition ? entry.template as PublishedDynamicTemplateResource : null); }, [definitionLoader, entry.template]);
+  const perform = async (action: (template: PublishedDynamicTemplateResource) => void) => {
+    const expected = owner.current;
+    if (!expected.active || !definitionLoader.isActive()) return;
+    setBusy(true);
+    try {
+      const template = await definitionLoader.read(entry.template, true);
+      if (!owner.current.active || owner.current.loader !== expected.loader || owner.current.summary !== expected.summary) return;
+      setResolved(template);
+      action(template);
+    } catch (error) {
+      if (owner.current.active && owner.current.loader === expected.loader) message.warning(error instanceof Error ? error.message : "模板构图暂时无法加载，请重试");
+    } finally { if (owner.current.loader === expected.loader) setBusy(false); }
+  };
+  const displayName = catalogCardName(entry.template.definition?.metadata.sectionRole ?? entry.template.sectionRole, entry.name);
   const guidance = describePageTemplateHandoff({
     name: displayName,
     version: entry.template.version,
@@ -1110,20 +1180,21 @@ function PagePublishedTemplateCard({
       dataCatalogHandoff={handoff}
       dataTemplateIdentity={entry.identity}
       dataTemplateName={entry.template.templateId}
-      draggable
+      draggable={Boolean(resolved && definitionLoader.isActive())}
       name={displayName}
-      preview={entry.preview}
+      preview={<DeferredPublishedCatalogPreview summary={entry.template} loader={definitionLoader} device={device} onResolved={setResolved} onRefresh={onRefresh} />}
       statusLabel={handoff
         ? `刚发布 · 已发布 · v${entry.template.version}`
         : `已发布 · v${entry.template.version}`}
-      onClick={() => onPreview(entry.template)}
+      onClick={() => { void perform(onPreview); }}
       onDragStart={(event) => {
+        if (!active || !resolved || !definitionLoader.isActive()) { event.preventDefault(); return; }
         event.dataTransfer.effectAllowed = "copy";
         event.dataTransfer.setData(
           "application/x-haichuan-published-template",
           `${entry.template.templateId}@${entry.template.version}`,
         );
-        onDragStart(entry.template);
+        onDragStart(resolved);
       }}
       onDragEnd={onDragEnd}
       trailingAction={(
@@ -1131,7 +1202,8 @@ function PagePublishedTemplateCard({
           <button
             type="button"
             className="template-editor__catalog-preview-action"
-            onClick={() => onPreview(entry.template)}
+            disabled={busy}
+            onClick={() => { void perform(onPreview); }}
             aria-label={`放大预览：${displayName}`}
             title={`放大预览：${displayName}`}
           >
@@ -1143,7 +1215,8 @@ function PagePublishedTemplateCard({
             className="homepage-editor__template-upgrade-action"
             data-catalog-handoff-add={handoff ? "true" : undefined}
             data-catalog-action="primary"
-            onClick={() => onActivate(entry.template)}
+            disabled={busy}
+            onClick={() => { void perform(onActivate); }}
             aria-label={guidance.add.ariaLabel}
             title={guidance.add.title}
           >
@@ -1157,7 +1230,16 @@ function PagePublishedTemplateCard({
 
 /** 页面装修与模板设计唯一的模板目录本体；只有最终动作按模式区分。 */
 export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
-  const catalogActive = props.active ?? true;
+  const canvasActive = useEditorCanvasActive();
+  const canvasActiveRef = useRef(canvasActive);
+  canvasActiveRef.current = canvasActive;
+  const catalogActive = (props.active ?? true) && canvasActive;
+  const catalogPageKey = props.mode === "page" ? props.pageKey : undefined;
+  const activityOwnerRef = useRef({ active: canvasActive, pageKey: catalogPageKey, owner: Symbol() });
+  if (activityOwnerRef.current.active !== canvasActive || activityOwnerRef.current.pageKey !== catalogPageKey) {
+    activityOwnerRef.current = { active: canvasActive, pageKey: catalogPageKey, owner: Symbol() };
+  }
+  const activityOwner = activityOwnerRef.current.owner;
   const [keyword, setKeyword] = useState("");
   const [collapsed, setCollapsed] = useState(() => readInitialCollapsed(props.mode));
   const [pageLibraryOverlay, setPageLibraryOverlay] = useState(false);
@@ -1169,8 +1251,20 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
   pageLibraryOverlayRef.current = pageLibraryOverlay;
   const [designStatus, setDesignStatus] = useState<"all" | "draft" | "published">("all");
   const [designView, setDesignView] = useState<"library" | "trash">("library");
-  const [catalogItems, setCatalogItems] = useState<TemplateCatalogItemResource[]>([]);
-  const catalogItemsRef = useRef<TemplateCatalogItemResource[]>([]);
+  const [catalogItems, setCatalogItems] = useState<TemplateCatalogSummaryItemResource[]>([]);
+  const catalogItemsRef = useRef<TemplateCatalogSummaryItemResource[]>([]);
+  const [definitionLoader, setDefinitionLoader] = useState(createPublishedCatalogDefinitionLoader);
+  const definitionLoaderRef = useRef(definitionLoader);
+  const replaceDefinitionLoader = useCallback(() => {
+    definitionLoaderRef.current.dispose();
+    const next = createPublishedCatalogDefinitionLoader();
+    definitionLoaderRef.current = next;
+    setDefinitionLoader(next);
+  }, []);
+  useEffect(() => {
+    if (!catalogActive) definitionLoaderRef.current.dispose();
+    return () => definitionLoaderRef.current.dispose();
+  }, [catalogActive]);
   const catalogRequestIdRef = useRef(0);
   const detailPreviewTriggerRef = useRef<HTMLElement | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(true);
@@ -1185,6 +1279,14 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
   const { message } = AntdApp.useApp();
   const [detailPreview, setDetailPreview] = useState<TemplateCatalogDetailPreview | null>(null);
   const [launchMasterPickerOpen, setLaunchMasterPickerOpen] = useState(false);
+  useEffect(() => {
+    if (canvasActive) return;
+    // 只关闭目录的临时交互，不触及页面/模板草稿或重放已经发送的写请求。
+    setDetailPreview(null);
+    setCoverTarget(null);
+    setCoverSaving(false);
+    setLaunchMasterPickerOpen(false);
+  }, [canvasActive]);
   const [pageHandoff, setPageHandoff] = useState<PageTemplateLibraryHandoff | null>(null);
   const focusedHandoffKeyRef = useRef<string | null>(null);
   const pageHandoffRef = useRef<PageTemplateLibraryHandoff | null>(null);
@@ -1345,10 +1447,10 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
   }, []);
 
   const insertPublishedFromPageLibrary = useCallback((template: PublishedDynamicTemplateResource) => {
-    if (props.mode !== "page") return;
+    if (!canvasActiveRef.current || activityOwnerRef.current.owner !== activityOwner || props.mode !== "page") return;
     clearMatchingPageHandoff(template);
     props.onInsertPublished(template);
-  }, [clearMatchingPageHandoff, props]);
+  }, [activityOwner, clearMatchingPageHandoff, props]);
 
   useEffect(() => {
     if (props.mode !== "page") return;
@@ -1432,24 +1534,29 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
     target: TemplateEditorLibraryTarget,
     onOpened?: (draft: TemplateEditorDraft) => void,
   ) => {
-    if (props.mode !== "design") return;
+    const isCurrentOwner = () => canvasActiveRef.current
+      && activityOwnerRef.current.owner === activityOwner;
+    if (!isCurrentOwner() || props.mode !== "design") return;
     if (libraryOverlay.compact && onOpened) {
       // 紧凑宽度下模板目录是覆盖面板，收起等于整块卸载——放在选择器里的那个选择会跟着没。
       // 所以带 onOpened 的入口（首发母版选择器）要等目标真正打开之后再收：未保存确认框
       // 一旦弹出来，用户点"继续编辑"得回到原样，而不是回到一个空了的画布。
       props.onOpen(target, (draft) => {
+        if (!isCurrentOwner()) return;
         onOpened(draft);
         libraryOverlay.requestClose();
       });
       return;
     }
-    props.onOpen(target, onOpened);
-    if (libraryOverlay.compact) {
+    props.onOpen(target, onOpened ? (draft) => {
+      if (isCurrentOwner()) onOpened(draft);
+    } : undefined);
+    if (isCurrentOwner() && libraryOverlay.compact) {
       libraryOverlay.requestClose();
     }
   };
 
-  const refreshCatalog = useCallback(async () => {
+  const refreshCatalog = useCallback(async (force = true) => {
     const requestId = catalogRequestIdRef.current + 1;
     catalogRequestIdRef.current = requestId;
     setCatalogLoading(true);
@@ -1457,10 +1564,13 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
     try {
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
-          const response = await dynamicTemplateApi.listCatalog({ dedupe: false });
+          // 首次激活可共享同身份正在读取的目录；保存/发布后的显式刷新仍新读，
+          // 防止写入前发起的旧目录被误当作写入后的权威结果。
+          const response = await dynamicTemplateApi.listCatalog({ dedupe: !force, pageKey: catalogPageKey, view: catalogPageKey ? "summary" : undefined });
           if (requestId !== catalogRequestIdRef.current) return;
-          const catalog = unwrapResponse<{ items?: TemplateCatalogItemResource[] }>(response);
+          const catalog = unwrapResponse<{ items?: TemplateCatalogSummaryItemResource[] }>(response);
           const nextItems = Array.isArray(catalog?.items) ? catalog.items : [];
+          replaceDefinitionLoader();
           catalogItemsRef.current = nextItems;
           setCatalogItems(nextItems);
           rememberCatalogTemplateRoles(nextItems);
@@ -1485,32 +1595,38 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
     } finally {
       if (requestId === catalogRequestIdRef.current) setCatalogLoading(false);
     }
-  }, [localOnly]);
+  }, [catalogPageKey, localOnly, replaceDefinitionLoader]);
 
   const persistCatalogCover = useCallback(async (catalogCoverUrl: string | null) => {
-    if (!coverTarget) return;
+    const isCurrentOwner = () => canvasActiveRef.current
+      && activityOwnerRef.current.owner === activityOwner;
+    if (!isCurrentOwner() || !coverTarget) return;
     setCoverSaving(true);
     try {
       unwrapResponse(await dynamicTemplateApi.updateCatalogCover(coverTarget.templateId, { catalogCoverUrl }));
+      if (!isCurrentOwner()) return;
       setCoverTarget(null);
       await refreshCatalog();
     } catch (error) {
-      const apiMessage = getEditorApiErrorMessage(error);
-      message.error(getEditorErrorMessage(error, apiMessage || "预览图没有保存。请重试。"));
+      if (isCurrentOwner()) {
+        const apiMessage = getEditorApiErrorMessage(error);
+        message.error(getEditorErrorMessage(error, apiMessage || "预览图没有保存。请重试。"));
+      }
       throw error;
     } finally {
-      setCoverSaving(false);
+      if (isCurrentOwner()) setCoverSaving(false);
     }
-  }, [coverTarget, message, refreshCatalog]);
+  }, [activityOwner, coverTarget, message, refreshCatalog]);
 
-  const applyCatalogItems = useCallback((items: TemplateCatalogItemResource[]) => {
+  const applyCatalogItems = useCallback((items: TemplateCatalogSummaryItemResource[]) => {
     catalogRequestIdRef.current += 1;
     catalogItemsRef.current = items;
+    replaceDefinitionLoader();
     rememberCatalogTemplateRoles(items);
     setCatalogItems(items);
     setCatalogLoading(false);
     setCatalogError(null);
-  }, []);
+  }, [replaceDefinitionLoader]);
 
   const applyDynamicCatalogChange = useCallback((
     detail: DynamicTemplateCatalogChangeDetail,
@@ -1557,10 +1673,15 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
   }, [applyCatalogItems]);
 
   useEffect(() => {
-    if (catalogActive) void refreshCatalog();
+    if (catalogActive) void refreshCatalog(false);
     const handleDynamicCatalogChanged = (event: Event) => {
       // 非活跃目录（如模板设计打开时页面装修的模板库）不得消费事件载荷或改写本地状态。
       if (!catalogActive) return;
+      if (catalogPageKey) {
+        definitionLoaderRef.current.dispose();
+        void refreshCatalog();
+        return;
+      }
       const detail = readDynamicCatalogChange(event);
       if (detail && applyDynamicCatalogChange(detail)) return;
       void refreshCatalog();
@@ -1573,11 +1694,23 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
       window.removeEventListener(DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT, handleDynamicCatalogChanged);
       window.removeEventListener(DYNAMIC_TEMPLATE_LOCAL_DRAFT_CHANGED_EVENT, handleLocalChanged);
     };
-  }, [applyDynamicCatalogChange, catalogActive, localOnly, refreshCatalog]);
+  }, [applyDynamicCatalogChange, catalogActive, catalogPageKey, localOnly, refreshCatalog]);
 
-  const unifiedCatalog = useMemo(() => unifyTemplateCatalogItems(catalogItems), [catalogItems]);
+  const unifiedCatalog = useMemo(() => unifyTemplateCatalogItems(catalogItems.filter((item): item is TemplateCatalogItemResource => (
+    item.kind === "editable" || Boolean(item.template.definition)
+  ))), [catalogItems]);
   const catalogEntries = useMemo<UnifiedCatalogEntry[]>(() => {
     const entries: UnifiedCatalogEntry[] = [];
+    if (props.mode === "page") {
+      for (const item of catalogItems) {
+        if (item.kind !== "published" || !props.isPublishedTemplateAllowed(item.template)) continue;
+        const template = item.template;
+        if (!matchesKeyword(keyword, template.name, template.description, template.category, template.purpose, ...template.tags)) continue;
+        entries.push({ kind: "page-published", key: `template:${template.templateId}`, identity: `template:${template.templateId}`,
+          group: template.category, name: template.name, preview: null, template });
+      }
+      return entries;
+    }
     for (const entry of unifiedCatalog) {
       const editable = entry.editable;
       const presentation = resolveUnifiedTemplateCatalogPresentation(entry);
@@ -1593,51 +1726,6 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
           sourceReference: entry.sourceReference,
         })
       ) {
-        continue;
-      }
-
-      if (props.mode === "page") {
-        if (
-          presentation.source === "published"
-          && props.isPublishedTemplateAllowed(presentation.published)
-          && matchesKeyword(
-            keyword,
-            presentation.published.name,
-            presentation.published.description,
-            presentation.published.category,
-            presentation.published.purpose,
-            ...presentation.published.tags,
-          )
-        ) {
-          entries.push({
-            kind: "page-published",
-            key: entry.key,
-            identity: entry.key,
-            group: presentation.category,
-            name: presentation.name,
-            ...renderUnifiedTemplatePreview(
-            presentation,
-            props.device,
-            { omitCover: true },
-          ),
-            template: presentation.published,
-          });
-          continue;
-        }
-        if (presentation.source === "draft") {
-          // 回收站状态只影响新页面可选目录；历史页面继续按精确版本重放。
-          if (presentation.editable.status === "ARCHIVED") continue;
-          if (!matchesKeyword(
-            keyword,
-            presentation.name,
-            presentation.editable.description,
-            presentation.category,
-            presentation.editable.purpose,
-            ...presentation.editable.tags,
-          )) continue;
-          // 未首次发布的 CUSTOM 草稿只属于模板设计，不进入页面装修模板库。
-          continue;
-        }
         continue;
       }
 
@@ -1789,7 +1877,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
       if (entry.lifecycle === "archived") return false;
       return matchesTemplatePublicationFilter(entry.lifecycle, designStatus);
     });
-  }, [designStatus, designView, keyword, localDrafts, localOnly, props, unifiedCatalog]);
+  }, [catalogItems, designStatus, designView, keyword, localDrafts, localOnly, props, unifiedCatalog]);
 
   const groupedCatalogEntries = useMemo(
     () => groupTemplateCatalogEntries(catalogEntries, (entry) => entry.group),
@@ -1820,7 +1908,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
       name: (() => {
         const matched = catalogEntries.find((entry) => isPageHandoffEntry(entry, pageHandoff));
         return matched?.kind === "page-published"
-          ? catalogCardName(matched.template.definition.metadata.sectionRole, matched.name)
+          ? catalogCardName(matched.template.definition?.metadata.sectionRole ?? matched.template.sectionRole, matched.name)
           : pageHandoff.name;
       })(),
       version: pageHandoff.version,
@@ -2070,6 +2158,8 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
                       onDragStart={props.onPublishedDragStart}
                       onDragEnd={props.onPublishedDragEnd}
                       onPreview={openPublishedPreview}
+                      definitionLoader={definitionLoader}
+                      onRefresh={() => { void refreshCatalog(); }}
                     />
                   );
                 }
@@ -2133,7 +2223,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
         </footer>
       ) : null}
     </aside>
-    {detailPreview ? (
+    {canvasActive && detailPreview ? (
       <TemplateCatalogPreviewDialog
         preview={detailPreview}
         initialDevice={props.device}
@@ -2145,7 +2235,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
         } : undefined}
       />
     ) : null}
-    {coverTarget ? (
+    {canvasActive && coverTarget ? (
       <TemplateCatalogCoverEditor
         templateId={coverTarget.templateId}
         name={coverTarget.name}
@@ -2157,7 +2247,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
         onSaved={(catalogCoverUrl) => persistCatalogCover(catalogCoverUrl)}
       />
     ) : null}
-    {launchMasterPickerOpen ? (
+    {canvasActive && launchMasterPickerOpen ? (
       <LaunchMasterPickerModal
         onCancel={() => setLaunchMasterPickerOpen(false)}
         // 选中后不立刻收起：目标要等未保存确认框走完才真正打开，此处收起等于把用户的选择丢掉。

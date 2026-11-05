@@ -33,7 +33,7 @@ export default function ContactLanding({
   const [workRevision, setWorkRevision] = useState(0);
   const [copyStatus, setCopyStatus] = useState("");
   const recovery = !preview && authStatus !== "unknown"
-    && hasContactConsultationRecovery(consultationDraftOwner(customer?.id));
+    && hasContactConsultationRecovery(consultationDraftOwner(customer?.id), reference ?? "");
 
   useEffect(() => {
     if (preview) return;

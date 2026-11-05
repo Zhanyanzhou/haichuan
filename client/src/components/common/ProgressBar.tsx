@@ -1,64 +1,10 @@
-import { useEffect, useState, useRef } from 'react';
-import { useLocation } from 'react-router-dom';
-
-/** 路由切换时的顶部进度条（纯 CSS 替代 NProgress） */
-const ProgressBar: React.FC = () => {
-  const location = useLocation();
-  const [loading, setLoading] = useState(false);
-  const [width, setWidth] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setInterval>>();
-  const hideTimerRef = useRef<ReturnType<typeof setTimeout>>();
-
-  useEffect(() => {
-    setLoading(true);
-    setWidth(0);
-
-    // 模拟进度增长
-    let progress = 0;
-    timerRef.current = setInterval(() => {
-      progress += Math.random() * 15 + 5;
-      if (progress >= 85) {
-        progress = 85;
-        clearInterval(timerRef.current);
-      }
-      setWidth(progress);
-    }, 150);
-
-    // 路由加载完成后完成进度
-    const timeout = setTimeout(() => {
-      clearInterval(timerRef.current);
-      setWidth(100);
-      hideTimerRef.current = setTimeout(() => {
-        setLoading(false);
-        setWidth(0);
-      }, 300);
-    }, 600);
-
-    return () => {
-      clearInterval(timerRef.current);
-      clearTimeout(timeout);
-      clearTimeout(hideTimerRef.current);
-    };
-  }, [location.pathname]);
-
-  if (!loading) return null;
-
+/** 由路由加载占位控制生命周期，下载时长未知。 */
+export default function ProgressBar() {
   return (
     <div
-      className="fixed top-0 left-0 right-0 z-[9999] h-[3px]"
+      className="pointer-events-none fixed inset-x-0 top-0 z-[9999] h-[3px] bg-brand-gold motion-safe:animate-pulse"
       data-testid="route-progress"
       aria-hidden="true"
-    >
-      <div
-        className="h-full bg-brand-gold transition-all duration-300 ease-out"
-        style={{
-          width: `${width}%`,
-          opacity: width === 100 ? 0 : 1,
-          boxShadow: '0 0 10px rgba(24,26,27,0.22)',
-        }}
-      />
-    </div>
+    />
   );
-};
-
-export default ProgressBar;
+}

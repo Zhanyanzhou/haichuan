@@ -727,12 +727,7 @@ for (const viewport of [
       .getByRole("link", { name: "首页" })
       .click();
     await expect(page).toHaveURL(/\/$/);
-    if (viewport.name === "mobile") {
-      await page.getByRole("link", { name: "进入选款中心" }).click();
-    } else {
-      await page.getByRole("button", { name: "打开菜单" }).click();
-      await page.getByRole("navigation", { name: "品牌菜单" }).getByRole("link", { name: "选款中心" }).click();
-    }
+    await page.getByRole("main").getByRole("link", { name: "进入选款中心" }).click();
     await expect(page).toHaveURL(/\/catalog$/);
     await expect(page.locator(".catalog-matrix")).toBeVisible();
     await page.waitForTimeout(250);
@@ -937,6 +932,103 @@ test("ProductDetail 快速切换作品时不会被较早请求的迟到响应覆
   await expect(page.getByRole("heading", { name: second.name })).toBeVisible();
   await expect(page.getByRole("heading", { name: first.name })).toHaveCount(0);
   await expectWriteContract(writes);
+});
+
+test("ProductDetail 手机慢网快速返回同一作品时重读，并可从失败恢复", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const first = publicProduct(67, "DISPLAY_ONLY");
+  const second = publicProduct(68, "DISPLAY_ONLY");
+  const firstRead = createRouteBarrier();
+  const secondRead = createRouteBarrier();
+  const writes = await mockCatalogDetail(page, { products: [first, second] });
+  let firstReads = 0;
+
+  await page.route(/\/api\/products\/public\/67(?:\?|$)/, async (route) => {
+    firstReads += 1;
+    if (firstReads === 1) {
+      await firstRead.waitUntilReleased();
+      return route.fulfill({ json: { code: 200, data: { ...first, name: "已失效的首次作品读取" } } });
+    }
+    if (firstReads === 2) return route.fulfill({ status: 503, json: { message: "fixture unavailable" } });
+    return route.fulfill({ json: { code: 200, data: first } });
+  });
+  await page.route(/\/api\/products\/public\/68(?:\?|$)/, async (route) => {
+    await secondRead.waitUntilReleased();
+    return route.fulfill({ json: { code: 200, data: second } });
+  });
+
+  try {
+    await page.goto(`/products/${first.id}`, { waitUntil: "domcontentloaded" });
+    await firstRead.reached;
+    await expect(page.getByRole("status", { name: "正在加载作品" })).toBeVisible();
+    await page.evaluate((path) => {
+      window.history.pushState({}, "", path);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }, `/products/${second.id}`);
+    await secondRead.reached;
+    await page.goBack();
+    await expect(page.getByRole("heading", { name: "作品暂时无法加载" })).toBeVisible();
+    await expect(page.locator(".ant-message-notice")).toHaveCount(0);
+    await page.getByRole("button", { name: "重新尝试" }).click();
+    await expect(page.getByRole("heading", { name: first.name })).toBeVisible();
+    expect(firstReads).toBe(3);
+    firstRead.release();
+    secondRead.release();
+    await expect(page.getByRole("heading", { name: first.name })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "已失效的首次作品读取" })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: second.name })).toHaveCount(0);
+    await expectNoHorizontalOverflow(page);
+    await expectWriteContract(writes);
+  } finally {
+    firstRead.release();
+    secondRead.release();
+  }
+});
+
+test.describe("ProductDetail 手机图集", () => {
+  test.use({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
+
+  test("旧主图慢到达时保留当前选图，当前主图失败后原地重试", async ({ page }) => {
+    const product = publicProduct(69, "DISPLAY_ONLY", { image: "/products/public/69/media/1069" });
+    product.images.push({ ...product.images[0], id: 2069, url: "/products/public/69/media/2069", sortOrder: 1 });
+    const firstImage = createRouteBarrier();
+    const writes = await mockCatalogDetail(page, { products: [product] });
+    let secondImageAttempts = 0;
+
+    await page.route(/\/api\/products\/public\/69\/media\/(?:1069|2069)(?:\?|$)/, async (route) => {
+      const url = new URL(route.request().url());
+      if (Number(url.searchParams.get("width")) > 480) {
+        if (url.pathname.endsWith("/1069")) await firstImage.waitUntilReleased();
+        else if (++secondImageAttempts === 1) return route.abort("failed");
+      }
+      await route.fulfill({
+        contentType: "image/svg+xml",
+        body: '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600"><rect width="600" height="600" fill="#DDE1E2"/></svg>',
+      });
+    });
+
+    try {
+      await page.goto(`/products/${product.id}`, { waitUntil: "domcontentloaded" });
+      await firstImage.reached;
+      await page.getByRole("button", { name: "查看第 2 张作品图" }).tap();
+      const mainMedia = page.locator(".product-detail-page__main-media");
+      await expect(mainMedia).toHaveAttribute("data-product-main-media-id", "2069");
+      const retry = mainMedia.getByRole("button", { name: "重新加载图片" });
+      await expect(retry).toBeVisible();
+      expect(secondImageAttempts).toBe(1);
+      firstImage.release();
+      await retry.tap();
+      await expect.poll(() => mainMedia.locator("img").evaluate((image: HTMLImageElement) =>
+        image.complete && image.naturalWidth > 0 && /\/media\/2069\?/.test(image.currentSrc),
+      )).toBe(true);
+      expect(secondImageAttempts).toBe(2);
+      await expect(page.getByRole("button", { name: "查看第 2 张作品图" })).toHaveAttribute("aria-pressed", "true");
+      await expectNoHorizontalOverflow(page);
+      await expectWriteContract(writes);
+    } finally {
+      firstImage.release();
+    }
+  });
 });
 
 test("ProductDetail 切换作品与客户身份后忽略旧收藏和评价响应并重载会员投影", async ({ page }) => {

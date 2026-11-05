@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ElementType, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ElementType, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import type {
   TemplateDefinitionV2,
   DynamicTemplateLength,
@@ -68,6 +68,7 @@ import {
 } from "../config/imageDeliveryGeometry";
 import { buildResponsiveUploadsDerivedUrl } from "@/utils/responsiveUploadsImage";
 import { usePublicImageFact } from "../runtime/publicImageFacts";
+import { usePageEditorMediaVariant } from "./usePageEditorMediaVariant";
 import { RESPONSIVE_CANVAS } from "../config/blockContracts";
 import "./DynamicTemplateRenderer.css";
 
@@ -148,7 +149,7 @@ export interface DynamicTemplateRendererProps {
 
 export type PageHeroFramePlacement = "primary" | "subsequent";
 
-const HERO_FRAME_CAP = "calc(100svh - var(--site-header-height, 0px))";
+const HERO_FRAME_CAP = "max(0px, calc(var(--homepage-editor-preview-height, 100svh) - var(--site-header-height, 0px)))";
 
 const DYNAMIC_TEMPLATE_BACKGROUND_TOKENS: Record<string, string> = {
   surface: "#ffffff",
@@ -706,16 +707,28 @@ function ManagedTemplateSlotImage({
   const imageRef = useRef<HTMLImageElement>(null);
   // 只有槽位自己已经高出图片时才抽出文档流。自动高度的槽位仍要靠图片撑开。
   const [coverBrokenFrame, setCoverBrokenFrame] = useState(false);
-  const media = useManagedTemplateMediaDisplayUrl(src, hostFetch, imageRef);
+  const authorScale = authorScaleFromTransform(transform);
+  const fit = deliveryFit(objectFit);
+  const variant = usePageEditorMediaVariant(src, hostFetch, imageRef, fit, authorScale);
+  const media = useManagedTemplateMediaDisplayUrl(src, hostFetch, imageRef, variant);
   const previewUrl = hostFetch ? resolveManagedTemplateMediaPreviewUrl(src) : src;
   const displaySrc = hostFetch
-    ? (media.status === "error" ? previewUrl : media.displaySrc)
+    ? media.displaySrc || (media.status === "error" && variant.width === undefined ? previewUrl : "")
     : src;
   const facts = usePublicImageFact(hostFetch ? undefined : src);
   const [srcSetEnabled, setSrcSetEnabled] = useState(true);
+  const [failedHero, setFailedHero] = useState<{ src: string; canRetry: boolean } | null>(null);
+  const heroFailure = !hostFetch && priority && failedHero?.src === src ? failedHero : null;
+  const retryHero = useCallback(() => {
+    setSrcSetEnabled(true);
+    setFailedHero(null);
+  }, []);
+  useEffect(() => {
+    if (!heroFailure) return;
+    window.addEventListener("online", retryHero);
+    return () => window.removeEventListener("online", retryHero);
+  }, [heroFailure, retryHero]);
   const [measuredCssWidth, setMeasuredCssWidth] = useState<number | null>(null);
-  const authorScale = authorScaleFromTransform(transform);
-  const fit = deliveryFit(objectFit);
   const frame = parseFrameAspect(ratio);
   const widthFactor = facts && !facts.animated && frame
     ? renderedWidthFactor({
@@ -828,7 +841,7 @@ function ManagedTemplateSlotImage({
     facts,
     sized,
   ]);
-  // 公开态才接派生图与固有尺寸；后台态走 blob 预览，保持即时显示与既有会话语义。
+  // 公开态接 srcset 与固有尺寸；店铺装修画布按实际显示尺寸选择鉴权 blob。
   // 没有原图展示尺寸时不生成 srcset，避免把请求档位写成实际像素。
   const resolved = hostFetch || !srcSetEnabled
     ? undefined
@@ -862,6 +875,31 @@ function ManagedTemplateSlotImage({
       transform,
       transformOrigin,
     };
+  if (heroFailure) {
+    return (
+      <span
+        data-public-hero-image-error="true"
+        style={{
+          position: "absolute", inset: 0, display: "grid", placeContent: "center",
+          justifyItems: "center", gap: 8, background: "#ECEEEF", color: "#181A1B", fontSize: 14,
+        }}
+      >
+        <span role="status">图片暂不可用</span>
+        {heroFailure.canRetry ? (
+          <button
+            type="button"
+            onClick={retryHero}
+            style={{
+              minHeight: 44, padding: "0 12px", border: "1px solid currentColor",
+              background: "transparent", color: "inherit", font: "inherit", cursor: "pointer",
+            }}
+          >
+            重新加载图片
+          </button>
+        ) : null}
+      </span>
+    );
+  }
   return (
     <span
       data-template-image-frame="true"
@@ -875,8 +913,15 @@ function ManagedTemplateSlotImage({
       <img
         ref={imageRef}
         src={imgSrc || undefined}
-        onError={() => {
-          if (srcSetEnabled) setSrcSetEnabled(false);
+        onError={(event) => {
+          if (resolved?.srcSet) {
+            setSrcSetEnabled(false);
+            return;
+          }
+          if (!hostFetch && priority) {
+            const interactiveParent = event.currentTarget.parentElement?.closest('a, button, [role="button"], [role="link"]');
+            setFailedHero({ src, canRetry: !interactiveParent });
+          }
         }}
         alt={alt}
         data-template-image-fit={objectFit}
@@ -1479,7 +1524,8 @@ function renderTemplateChildren({
           width: "100%",
           minWidth: 0,
           maxWidth: "100%",
-          ...(pairedHeroFrame ? { height: "100%", flex: "1 1 auto", minHeight: 0 } : {}),
+          // 对换画布的图片占满既定画幅，流内长文案只溢出网格行，不参与它的定高。
+          ...(pairedHeroFrame ? { height: "100%", flex: "1 1 auto", minHeight: 0, gridTemplateRows: "minmax(0, 1fr)" } : {}),
           ...frameBleed,
         }}
       >
@@ -1502,7 +1548,7 @@ function renderTemplateChildren({
         <div data-template-hero-frame-copy="true" style={{
           ...(lockHeroFrame
             ? { position: "absolute", left: 0, right: 0, bottom: 0 }
-            : { gridArea: "1 / 1", alignSelf: "end" }),
+            : { gridArea: "1 / 1", alignSelf: pairedHeroFrame ? "safe end" : "end" }),
           zIndex: 2,
           display: "flex",
           flexDirection: "column",
@@ -2517,9 +2563,11 @@ export default function DynamicTemplateRenderer({
   });
   const rootRef = useRef<HTMLDivElement>(null);
   const sectionRole = definition.metadata.sectionRole ?? definition.templateRecipe?.sectionRole;
+  const usesHeroMediaFrame = definition.metadata.geometryPolicy === "hero-media-frame" && sectionRole === "page-hero";
+  const subsequentHero = usesHeroMediaFrame && pageHeroPlacement === "subsequent";
   // 桌面有可读比例时，手机整节按反比例画出，例如 16:9 对 9:16。缺手机图不能取消这次对换。
   // 没有可读桌面比例的首屏，才在没有手机图时继续沿用桌面横图。
-  const pairedCanvasRatio = device === "mobile" && result.ok ? resolvePairedMobileCanvas(definition) : null;
+  const pairedCanvasRatio = device === "mobile" && result.ok && !subsequentHero ? resolvePairedMobileCanvas(definition) : null;
   const reuseDesktopHero = !pairedCanvasRatio
     && device === "mobile"
     && result.ok
@@ -2533,16 +2581,32 @@ export default function DynamicTemplateRenderer({
       ? result.plan.root.rules.height.ratio
       : undefined);
   const [fixedCanvasOverflow, setFixedCanvasOverflow] = useState("");
+  const [fixedCanvasSpill, setFixedCanvasSpill] = useState(0);
   useLayoutEffect(() => {
     const canvas = rootRef.current;
-    if (!canvas || !explicitCanvasRatio || mode !== "editor") {
+    const owner = canvas?.ownerDocument.defaultView;
+    if (!canvas || !owner || !explicitCanvasRatio) {
       setFixedCanvasOverflow("");
+      setFixedCanvasSpill(0);
       return;
     }
-    const owner = canvas.ownerDocument.defaultView;
-    if (!owner) return;
+    // 固定根仍按比例取高。溢出的正向内容在框外占位，避免被下一节覆盖。
+    const frameRoot = canvas.firstElementChild;
+    const reserveSpill = definition.metadata.geometryPolicy !== "hero-media-frame"
+      && canvas.dataset.templateFixedCanvas === "true"
+      && frameRoot instanceof owner.HTMLElement;
+    if (!reserveSpill) setFixedCanvasSpill(0);
+    if (mode !== "editor") {
+      setFixedCanvasOverflow("");
+      if (!reserveSpill) return;
+    }
     const nodes = [...canvas.querySelectorAll<HTMLElement>("[data-template-node-id]")];
     const update = () => {
+      if (reserveSpill) {
+        const spill = frameRoot.scrollHeight - frameRoot.clientHeight;
+        setFixedCanvasSpill(spill > 2 ? spill : 0);
+      }
+      if (mode !== "editor") return;
       const frame = canvas.getBoundingClientRect();
       // 图没铺满时外壳随内容变高，不能用变高后的边框判断越界。
       // 仍按声明的双端比例画一条界，超出这条界才提示。
@@ -2562,12 +2626,12 @@ export default function DynamicTemplateRenderer({
             // 中文字形可能超出行盒 1～2px；这不等于少了一行，几何越框仍按上面的 1px 检查。
             && node.scrollHeight > node.clientHeight + 2);
         if (!past) continue;
-        const name = overflowObjectName(node);
+        const name = definition.nodes[node.dataset.templateNodeId ?? ""]?.name ?? overflowObjectName(node);
         if (!names.includes(name)) names.push(name);
       }
       const deviceLabel = device === "mobile" ? "手机" : "桌面";
       const overflow = names.length > 0
-        ? `${deviceLabel}固定画幅里，${names.join("、")}超出画框。系统没有裁掉超出内容。`
+        ? `${deviceLabel}固定画幅里，${names.join("、")}超出画框。请缩短文案或调整构图。`
         : "";
       setFixedCanvasOverflow((current) => current === overflow ? current : overflow);
     };
@@ -2591,9 +2655,7 @@ export default function DynamicTemplateRenderer({
   const [largePhone, setLargePhone] = useState(false);
   // R-2 只限制写了 hero-media-frame 的第一只全幅主视觉。
   // 未写策略或 paired-canvas 的对换画布要让图片铺满整节；把图片框压到视口高会在底下露出画布底色。
-  const heroMediaFrame = definition.metadata.geometryPolicy === "hero-media-frame"
-    && sectionRole === "page-hero"
-    && pageHeroPlacement !== "subsequent";
+  const heroMediaFrame = usesHeroMediaFrame && !subsequentHero;
   const [heroCopyBelow, setHeroCopyBelow] = useState(false);
   const [heroFrameCapped, setHeroFrameCapped] = useState(false);
   const copySignature = Object.values(contentBySlotId ?? {})
@@ -2607,29 +2669,28 @@ export default function DynamicTemplateRenderer({
     .map((slot) => `${slot.desktopRules?.color ?? ""}\u0001${slot.mobileRules?.color ?? ""}`)
     .join("\u0002");
   useLayoutEffect(() => {
-    if (!heroMediaFrame) {
+    const host = rootRef.current;
+    const owner = host?.ownerDocument.defaultView;
+    if (!heroMediaFrame || !host || !owner) {
       setHeroCopyBelow(false);
       setHeroFrameCapped(false);
       return undefined;
     }
     const update = () => {
-      const view = rootRef.current?.ownerDocument.defaultView ?? window;
-      const height = view.innerHeight;
+      const style = owner.getComputedStyle(host);
+      // 装修 iframe 的高度随内容增长。几何计算和 CSS 都读画布声明的模拟视口。
+      const height = Number.parseFloat(style.getPropertyValue("--homepage-editor-preview-height")) || owner.innerHeight;
       const short = height > 0 && height < 480;
-      const width = rootRef.current?.clientWidth ?? 0;
-      const header = Number.parseFloat(
-        getComputedStyle(document.documentElement).getPropertyValue("--site-header-height"),
-      ) || 0;
-      const capped = device === "mobile" && heroFrameExceedsViewport(width, height, header);
-      const host = rootRef.current;
+      const header = Number.parseFloat(style.getPropertyValue("--site-header-height")) || 0;
+      const capped = device === "mobile" && heroFrameExceedsViewport(host.clientWidth, height, header);
       let copyExceedsFrame = false;
-      if (!short && !capped && !imageCarriesCopy && host) {
+      if (!short && !capped && !imageCarriesCopy) {
         const frame = host.querySelector("[data-template-mobile-copy-frame]");
         const ratio = frame?.querySelector("[data-template-hero-frame-ratio]");
         const copy = frame?.querySelector("[data-template-hero-frame-copy]");
         const rawRatio = ratio?.getAttribute("data-template-hero-frame-ratio") ?? "";
         const [ratioWidth, ratioHeight] = rawRatio.split("/").map((part) => Number(part.trim()));
-        if (ratio instanceof HTMLElement && copy instanceof HTMLElement && ratioWidth > 0 && ratioHeight > 0) {
+        if (ratio instanceof owner.HTMLElement && copy instanceof owner.HTMLElement && ratioWidth > 0 && ratioHeight > 0) {
           // 首帧宽度还是 0 时不能把标题判成溢出，否则横图会把文案锁到图下。
           if (ratio.clientWidth > 0) {
             const intended = ratio.clientWidth * (ratioHeight / ratioWidth);
@@ -2638,8 +2699,8 @@ export default function DynamicTemplateRenderer({
         } else {
           const image = host.querySelector("[data-template-semantic-role='backgroundImage'], [data-template-semantic-role='heroImage']");
           const texts = [...host.querySelectorAll("[data-template-node-type='HeadingSlot'], [data-template-node-type='TextSlot'], [data-template-node-type='RichTextSlot'], [data-template-node-type='BadgeSlot']")]
-            .filter((node): node is HTMLElement => node instanceof HTMLElement && node.getAttribute("data-template-visual-collapse") !== "true");
-          if (image instanceof HTMLElement && texts.length > 0 && image.getBoundingClientRect().height > 0) {
+            .filter((node): node is HTMLElement => node instanceof owner.HTMLElement && node.getAttribute("data-template-visual-collapse") !== "true");
+          if (image instanceof owner.HTMLElement && texts.length > 0 && image.getBoundingClientRect().height > 0) {
             const top = Math.min(...texts.map((node) => node.getBoundingClientRect().top));
             const bottom = Math.max(...texts.map((node) => node.getBoundingClientRect().bottom));
             copyExceedsFrame = bottom - top + 64 > image.getBoundingClientRect().height;
@@ -2653,28 +2714,26 @@ export default function DynamicTemplateRenderer({
     let measureTimer = 0;
     const scheduleUpdate = () => {
       if (measureTimer) return;
-      measureTimer = window.setTimeout(() => {
+      measureTimer = owner.setTimeout(() => {
         measureTimer = 0;
         update();
       }, 16);
     };
-    const observed = rootRef.current;
-    const view = observed?.ownerDocument.defaultView ?? window;
-    const observer = observed ? new view.ResizeObserver(scheduleUpdate) : null;
-    if (observed) observer?.observe(observed);
-    const shortViewport = typeof view.matchMedia === "function"
-      ? view.matchMedia("(max-height: 479px)")
+    const observer = new owner.ResizeObserver(scheduleUpdate);
+    observer.observe(host);
+    const shortViewport = typeof owner.matchMedia === "function"
+      ? owner.matchMedia("(max-height: 479px)")
       : null;
     const onShortChange = () => scheduleUpdate();
     shortViewport?.addEventListener("change", onShortChange);
-    view.addEventListener("resize", scheduleUpdate);
+    owner.addEventListener("resize", scheduleUpdate);
     return () => {
-      if (measureTimer) window.clearTimeout(measureTimer);
-      observer?.disconnect();
+      if (measureTimer) owner.clearTimeout(measureTimer);
+      observer.disconnect();
       shortViewport?.removeEventListener("change", onShortChange);
-      view.removeEventListener("resize", scheduleUpdate);
+      owner.removeEventListener("resize", scheduleUpdate);
     };
-  }, [copySignature, device, heroMediaFrame, imageCarriesCopy]);
+  }, [copySignature, device, heroMediaFrame, imageCarriesCopy, result.ok]);
   useLayoutEffect(() => {
     const element = rootRef.current;
     const ownerWindow = element?.ownerDocument.defaultView;
@@ -2723,6 +2782,9 @@ export default function DynamicTemplateRenderer({
       if (!element.isConnected) return;
       const fontSize = Number.parseFloat(getComputedStyle(element).fontSize) || 16;
       const rows = [...element.querySelectorAll<HTMLElement>("[data-template-split-row='true']")];
+      // 同步量原构图，浏览器绘制前恢复堆叠样式。用堆叠后的满宽列做判定会来回跳动。
+      const wasStacked = element.hasAttribute("data-template-narrow-split");
+      if (wasStacked) element.removeAttribute("data-template-narrow-split");
       const stack = device !== "mobile" && rows.some((row) => {
         const columns = Number(row.getAttribute("data-template-split-columns")) || 2;
         const gap = Number.parseFloat(getComputedStyle(row).columnGap) || 0;
@@ -2738,6 +2800,7 @@ export default function DynamicTemplateRenderer({
           copyColumnWidth: text?.clientWidth,
         });
       });
+      if (wasStacked) element.setAttribute("data-template-narrow-split", "true");
       setNarrowSplit((current) => current === stack ? current : stack);
       if (mode === "editor") {
         const corrected = Boolean(element.querySelector("[data-template-text-contrast='corrected']"));
@@ -2851,9 +2914,10 @@ export default function DynamicTemplateRenderer({
   // 左右图文整节用对换比例，文字仍在图下，不把主图盖住文字。
   // 只有一张主图时，主图吃掉对换画布里文案下方的空白，手机槽位不再沿用桌面横图比例。
   const pairedCanvas = pairedCanvasRatio && isContentHeightSplitSection(definition) ? null : pairedCanvasRatio;
-  // 图没有铺满时，不再把外壳锁成更高的对换画布，否则底色会在照片下面留出一整条。
+  // 显式固定画幅必须锁定真实根与外壳。历史定义保留原有的铺满判定。
   const lockSwappedCanvas = Boolean(pairedCanvasRatio) && (
-    subtreeFillsPairedCanvas(result.plan.root, sectionRole)
+    definition.metadata.geometryPolicy === "paired-canvas"
+    || subtreeFillsPairedCanvas(result.plan.root, sectionRole)
     || isContentHeightSplitSection(definition)
   );
   const fillSplitRemainder = device === "mobile"
@@ -2865,7 +2929,7 @@ export default function DynamicTemplateRenderer({
   // 否则主图会先按自动高度塌成破图尺寸，轮询在布局效果清状态之前就读到了。
   const activeHeroCopyBelow = heroMediaFrame && heroCopyBelow;
   const activeHeroFrameCapped = heroMediaFrame && heroFrameCapped;
-  return (
+  const canvas = (
     <div
       ref={rootRef}
       className="hc-dynamic-template"
@@ -2886,6 +2950,7 @@ export default function DynamicTemplateRenderer({
       data-template-split-fill={fillSplitRemainder ? "true" : undefined}
       data-template-fixed-canvas={explicitCanvasRatio && (lockSwappedCanvas || !pairedCanvasRatio) ? "true" : undefined}
       data-template-fixed-canvas-overflow={fixedCanvasOverflow ? "true" : undefined}
+      data-template-hero-spill={fixedCanvasSpill && sectionRole === "page-hero" ? "true" : undefined}
       data-template-default-background-token={result.plan.metadata.defaultBackgroundToken}
       data-template-large-phone={largePhone ? "true" : undefined}
       data-template-narrow-split={narrowSplit ? "true" : undefined}
@@ -2893,6 +2958,11 @@ export default function DynamicTemplateRenderer({
       data-template-hero-viewport-cap={activeHeroFrameCapped ? "true" : undefined}
       data-image-carries-copy={imageCarriesCopy ? "true" : undefined}
       style={{
+        marginBlockEnd: fixedCanvasSpill || undefined,
+        ...(fixedCanvasSpill && sectionRole === "page-hero" ? {
+          ["--template-fixed-canvas-spill" as string]: `${fixedCanvasSpill}px`,
+          ["--template-hero-spill-background" as string]: DYNAMIC_TEMPLATE_BACKGROUND_TOKENS["brand-ink"],
+        } : {}),
         background: result.plan.metadata.defaultBackgroundToken
           ? DYNAMIC_TEMPLATE_BACKGROUND_TOKENS[result.plan.metadata.defaultBackgroundToken]
           : undefined,
@@ -2952,11 +3022,6 @@ export default function DynamicTemplateRenderer({
         fillSplitRemainder={fillSplitRemainder}
         layoutDefinition={definition}
       />
-      {fixedCanvasOverflow ? (
-        <p role="status" data-template-fixed-canvas-note="true">
-          {fixedCanvasOverflow}
-        </p>
-      ) : null}
       {narrowSplit ? (
         <style>
           {`[data-template-narrow-split="true"] [data-template-split-row="true"]{flex-direction:column !important;grid-template-columns:minmax(0,1fr) !important}[data-template-narrow-split="true"] [data-template-split-row="true"] > *{width:100% !important;max-width:100% !important;flex:1 1 auto !important;grid-column:auto !important}[data-template-narrow-split="true"] [data-template-split-row="true"][data-template-layout="free"]{display:flex !important;flex-direction:column !important;height:auto !important}[data-template-narrow-split="true"] [data-template-split-row="true"][data-template-layout="free"] > *{position:relative !important;inset:auto !important;width:100% !important;height:auto !important;transform:none !important}`}
@@ -2983,5 +3048,15 @@ export default function DynamicTemplateRenderer({
         </p>
       ) : null}
     </div>
+  );
+  return (
+    <>
+      {canvas}
+      {fixedCanvasOverflow ? (
+        <p role="status" data-template-fixed-canvas-note="true">
+          {fixedCanvasOverflow}
+        </p>
+      ) : null}
+    </>
   );
 }

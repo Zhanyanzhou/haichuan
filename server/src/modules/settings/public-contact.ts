@@ -21,15 +21,6 @@ export type PublicContactSettings = {
   businessHours: string;
 };
 
-export const EMPTY_PUBLIC_CONTACT: PublicContactSettings = {
-  contactPhone: "",
-  contactWechat: "",
-  contactWechatQrCode: "",
-  contactEmail: "",
-  contactAddress: "",
-  businessHours: "",
-};
-
 function cleanText(value: unknown, max: number): string {
   if (typeof value !== "string") return "";
   const text = value.trim();

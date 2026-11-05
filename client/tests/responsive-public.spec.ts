@@ -509,6 +509,133 @@ test.describe("公开页面导航一致性", () => {
     await expectNoHorizontalOverflow(page);
   });
 
+  test("390px 全站搜索与慢品类并行加载，失败可分别重试", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    let releaseCategories!: () => void;
+    const slowCategories = new Promise<void>((resolve) => { releaseCategories = resolve; });
+    let categoryCalls = 0;
+    let workCalls = 0;
+    await page.route("**/api/categories/tree?**", async (route) => {
+      categoryCalls += 1;
+      if (categoryCalls === 1) {
+        await slowCategories;
+        return route.fulfill({ status: 503 });
+      }
+      return route.fulfill({ body: apiResponse([
+        { id: 1, name: "戒指", level: 1, parentId: null, children: [] },
+      ]), contentType: "application/json" });
+    });
+    await page.route("**/api/products/public?**", (route) => {
+      workCalls += 1;
+      return route.fulfill({
+        body: apiResponse(workCalls === 1
+          ? { unavailable: true }
+          : { list: [{ id: 1, categoryId: 1, code: "AB123", name: "示例戒指" }] }),
+        contentType: "application/json",
+      });
+    });
+    await page.goto("/privacy");
+    await page.getByRole("button", { name: "打开菜单" }).click();
+    await page.getByRole("dialog", { name: "品牌菜单" }).getByRole("button", { name: "搜索" }).click();
+    const dialog = page.getByRole("dialog", { name: "搜索作品" });
+    try {
+      await expect(dialog.getByText("正在读取品类", { exact: true })).toBeVisible();
+      await expect(dialog.getByText("作品暂时无法读取")).toBeVisible();
+      await dialog.getByRole("button", { name: "重试查找作品" }).click();
+      await expect(dialog.getByRole("link", { name: "示例戒指" })).toBeVisible();
+    } finally {
+      releaseCategories();
+    }
+    await dialog.getByRole("button", { name: "重试读取品类" }).click();
+    await expect(dialog.getByRole("link", { name: "戒指", exact: true })).toBeVisible();
+    expect(categoryCalls).toBe(2);
+    expect(workCalls).toBe(2);
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test("390px 全站搜索代码慢时可看到加载状态并取消打开", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    let releaseModule!: () => void;
+    const slowModule = new Promise<void>((resolve) => { releaseModule = resolve; });
+    await page.route(/\/src\/components\/layout\/SiteSearchDialog\.tsx|\/assets\/SiteSearchDialog-[^/]+\.js/, async (route) => {
+      await slowModule;
+      await route.continue();
+    });
+    await page.goto("/privacy");
+    await page.getByRole("button", { name: "打开菜单" }).click();
+    await page.getByRole("dialog", { name: "品牌菜单" }).getByRole("button", { name: "搜索" }).click();
+    try {
+      await expect(page.getByText("正在打开搜索", { exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "关闭搜索" }).click();
+      await expect(page.getByText("正在打开搜索", { exact: true })).toHaveCount(0);
+    } finally {
+      releaseModule();
+    }
+    await expect(page).toHaveURL(/\/privacy$/);
+    await page.getByRole("button", { name: "打开菜单" }).click();
+    await page.getByRole("dialog", { name: "品牌菜单" }).getByRole("button", { name: "搜索" }).click();
+    await expect(page.getByRole("dialog", { name: "搜索作品" })).toBeVisible();
+  });
+
+  test("390px 快速改写全站搜索时隐藏旧结果并忽略迟到响应", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    let releaseSlowWork!: () => void;
+    const slowWork = new Promise<void>((resolve) => { releaseSlowWork = resolve; });
+    await page.route("**/api/categories/tree?**", (route) => route.fulfill({
+      body: apiResponse([]), contentType: "application/json",
+    }));
+    await page.route("**/api/products/public?**", async (route) => {
+      const keyword = new URL(route.request().url()).searchParams.get("keyword");
+      if (keyword === "戒指") await slowWork;
+      await route.fulfill({
+        body: apiResponse({ list: [{
+          id: 1, categoryId: 1, code: "AB123", name: keyword || "初始推荐作品",
+        }] }),
+        contentType: "application/json",
+      });
+    });
+    await page.goto("/contact");
+    await page.evaluate(() => {
+      window.history.pushState({}, "", "/privacy");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await page.getByRole("button", { name: "打开菜单" }).click();
+    await page.getByRole("dialog", { name: "品牌菜单" }).getByRole("button", { name: "搜索" }).click();
+    const dialog = page.getByRole("dialog", { name: "搜索作品" });
+    await expect(dialog.getByRole("link", { name: "初始推荐作品" })).toBeVisible();
+    const input = dialog.getByRole("textbox", { name: "关键词或货号" });
+    try {
+      const slowRequest = page.waitForRequest((request) =>
+        new URL(request.url()).searchParams.get("keyword") === "戒指",
+      );
+      await input.fill("戒指");
+      await expect(dialog.getByRole("link", { name: "初始推荐作品" })).toHaveCount(0);
+      await expect(dialog.getByRole("region", { name: "作品" })).toHaveAttribute("aria-busy", "true");
+      await slowRequest;
+      await input.fill("项链");
+      await expect(dialog.getByRole("link", { name: "项链" })).toBeVisible();
+    } finally {
+      releaseSlowWork();
+    }
+    await expect(dialog.getByRole("link", { name: "戒指" })).toHaveCount(0);
+    await page.goBack();
+    await expect(page).toHaveURL(/\/contact$/);
+    await expect(dialog).toHaveCount(0);
+    await expect(page.locator("body")).not.toHaveCSS("overflow", "hidden");
+  });
+
+  test("390px 全站搜索代码加载失败时仍能操作原页面", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.route(/\/src\/components\/layout\/SiteSearchDialog\.tsx|\/assets\/SiteSearchDialog-[^/]+\.js/, (route) => route.abort());
+    await page.goto("/privacy");
+    await page.getByRole("button", { name: "打开菜单" }).click();
+    await page.getByRole("dialog", { name: "品牌菜单" }).getByRole("button", { name: "搜索" }).click();
+    await expect(page.getByText("搜索暂时无法打开", { exact: false })).toBeVisible();
+    await page.getByRole("button", { name: "关闭搜索" }).click();
+    await expect(page.getByRole("heading", { name: "隐私说明", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "打开菜单" })).toBeFocused();
+  });
+
   test("商品详情不可用时返回选款中心", async ({ page }) => {
     await page.route("**/api/settings/public**", (route) => route.fulfill({
       status: 200,
@@ -1083,24 +1210,37 @@ test.describe("公开菜单键盘交互", () => {
     )).toEqual(["戒指"]);
   });
 
-  test("第三档：连续路由切换不会被上一轮清理定时器提前隐藏进度条", async ({ page }) => {
+  test("顶部加载条跟随慢路由加载，已加载页面切换不再显示", async ({ page }) => {
     await page.goto("/privacy");
     const progress = page.getByTestId("route-progress");
+    const privacyTitle = page.getByRole("heading", { name: "隐私说明", exact: true });
+    await expect(privacyTitle).toBeVisible();
     await expect(progress).toHaveCount(0);
-    await page.clock.install();
 
+    let releaseContact!: () => void;
+    const blockedContact = new Promise<void>((resolve) => { releaseContact = resolve; });
+    await page.route("**/src/pages/public/Contact/index.tsx*", async (route) => {
+      await blockedContact;
+      await route.continue();
+    });
     const navigate = (path: string) => page.evaluate((nextPath) => {
       window.history.pushState({}, "", nextPath);
       window.dispatchEvent(new PopStateEvent("popstate"));
     }, path);
-
     await navigate("/contact");
-    await expect(progress).toBeVisible();
-    await page.clock.fastForward(650);
-    await navigate("/privacy");
-    await page.clock.fastForward(350);
+    try {
+      await expect(progress).toBeVisible();
+      // 保持网络阻塞超过旧进度条的 900ms，验证它不会提前消失。
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+      await expect(progress).toBeVisible();
+    } finally {
+      releaseContact();
+    }
 
-    await expect(progress).toBeVisible();
+    await expect(progress).toHaveCount(0);
+    await navigate("/privacy");
+    await expect(privacyTitle).toBeVisible();
+    await expect(progress).toHaveCount(0);
   });
 
   test("跳至主内容链接获得焦点后进入视口", async ({ page }) => {

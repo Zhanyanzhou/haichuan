@@ -8,6 +8,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { memoryStorage } from 'multer';
 import { extname } from 'path';
 import { UploadService } from './upload.service';
+import { isResponsivePublicImageWidth } from './responsive-public-media';
 import { PageMediaQueryDto } from './dto/page-media-query.dto';
 import { AdoptDatedUploadDto } from './dto/adopt-dated-upload.dto';
 import { CropPageMediaDto } from './dto/crop-page-media.dto';
@@ -165,21 +166,27 @@ export class UploadController {
     @Query('storageKey') storageKey: string,
     @Res() response: Response,
     @Req() request?: StaffRequest,
+    @Query('width') width?: string,
   ) {
     if (typeof storageKey !== 'string' || !storageKey.trim() || storageKey.length > 512) {
       throw new BadRequestException('素材存储键无效');
     }
-    const media = await this.uploadService.getPageMediaContentByStorageKey(
-      storageKey,
-      false,
-      request?.user,
-    );
+    if (width !== undefined && (
+      typeof width !== 'string' || !/^\d+$/.test(width) || !isResponsivePublicImageWidth(Number(width))
+    )) throw new BadRequestException('图片宽度无效');
+    // 失败响应同样不可公开缓存；只有通过授权与完整性校验后才允许短时私有缓存。
+    response.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    response.setHeader('Vary', 'Cookie, Authorization');
+    const media = width === undefined
+      ? await this.uploadService.getPageMediaContentByStorageKey(storageKey, false, request?.user)
+      : await this.uploadService.getResponsiveStaffPageImage(storageKey, Number(width), request?.user);
     // 存储键按内容寻址；短时私有缓存让目录 iframe、画布和属性面板复用同一张图，避免瞬时打满连接。
     response.setHeader('Cache-Control', 'private, max-age=60');
     response.setHeader('Vary', 'Cookie, Authorization');
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Content-Length', String(media.buffer.byteLength));
     response.type(media.mimeType);
+    if ('etag' in media) response.setHeader('ETag', `"${media.etag}"`);
     if ((request?.method ?? 'GET').toUpperCase() === 'HEAD') {
       return response.end();
     }

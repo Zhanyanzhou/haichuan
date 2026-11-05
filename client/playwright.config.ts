@@ -20,6 +20,10 @@ const browserExecutablePath = process.env.PLAYWRIGHT_BROWSER_EXECUTABLE_PATH || 
 // 真实环境会话与真实接口验收另行执行，不能用这些自有 API 夹具代替。
 const testBoundaryFiles = {
   public: [
+    "public-image-recovery-fixes.spec.ts",
+    "public-catalog-runtime-fixes.spec.ts",
+    "public-renderer-loading-fixes.spec.ts",
+    "public-loading-performance.spec.ts",
     "analytics-privacy.spec.ts",
     "public-accessibility.spec.ts",
     "content-template-previews.spec.ts",
@@ -38,6 +42,7 @@ const testBoundaryFiles = {
     "unwrap-boundary.spec.ts",
   ],
   customer: [
+    "public-consultation-submit-fixes.spec.ts",
     "consultation-real-closure.spec.ts",
     "closure-locale-notifications.spec.ts",
     "customer-consultation-reply.spec.ts",
@@ -50,6 +55,11 @@ const testBoundaryFiles = {
     "trade-safety-ui.spec.ts",
   ],
   admin: [
+    "editor-canvas-responsive-media.spec.ts",
+    "media-picker-preview-performance.spec.ts",
+    "template-catalog-summary.admin.spec.ts",
+    "editor-validation-performance.spec.ts",
+    "admin-public-entry-performance.spec.ts",
     "recipe-radius-input.test.ts",
     "page-editor-workspace-tiers.spec.ts",
     "template-inline-text-guard.unit.ts",

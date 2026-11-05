@@ -17,7 +17,7 @@ import {
   type RealCategory,
 } from "@/hooks/useProductData";
 import { useAttributeDictionary } from "@/hooks/useAttributeDictionary";
-import { getMaterialCode } from "@/utils/material";
+import { getMaterialCode, materialLabels } from "@/utils/material";
 import {
   trackPageView,
   trackFilter,
@@ -59,7 +59,11 @@ import {
 } from "./catalogReturnContext";
 
 const PAGE_SIZE = 32;
-const SKU_RE = /^[A-Z]{2,3}-[A-Z]{2,3}-\d{3,4}$/i;
+// 兼容实际紧凑货号（ATP375、AA11412）和既有横杠编码；材质代码仍作为关键词。
+const SKU_RE = /^(?:[A-Z]{2,8}\d{2,12}(?:-[A-Z0-9]{1,12})?|[A-Z]{2,8}-[A-Z]{2,8}-\d{3,12}(?:-[A-Z0-9]{1,12})?)$/i;
+const MATERIAL_SEARCH_TERMS = new Set(
+  [...Object.keys(materialLabels), ...Object.values(materialLabels)].map((value) => value.toUpperCase()),
+);
 
 function namesForCategoryIds(categories: RealCategory[], ids: string): string[] {
   if (!ids) return [];
@@ -407,27 +411,27 @@ export default function Catalog({
   const catalogQuery = useMemo<ProductQuery | null>(() => {
     if (categoryTarget && categoriesLoading) return null;
     const keyword = params.query.trim();
-    const exactCode = keyword && SKU_RE.test(keyword) ? keyword : undefined;
+    const exactCode = keyword && SKU_RE.test(keyword) && !MATERIAL_SEARCH_TERMS.has(keyword.toUpperCase())
+      ? keyword
+      : undefined;
     return {
       page: params.page,
       pageSize: PAGE_SIZE,
       sortBy: catalogSort(params.sort),
       includeFacets: "true",
       exactCode,
-      keyword: exactCode ? undefined : keyword || undefined,
-      categoryIds: exactCode ? undefined : categoryIds || undefined,
-      materialTypes: exactCode ? undefined : materialTypes || undefined,
+      keyword: keyword || undefined,
+      categoryIds: categoryIds || undefined,
+      materialTypes: materialTypes || undefined,
       craftTechniques:
-        !exactCode && params.crafts.length > 0
+        params.crafts.length > 0
           ? params.crafts.join(",")
           : undefined,
       sizes:
-        !exactCode && params.sizes.length > 0
+        params.sizes.length > 0
           ? params.sizes.join(",")
           : undefined,
-      weightRanges: exactCode
-        ? undefined
-        : serializeWeightRanges(params.weights),
+      weightRanges: serializeWeightRanges(params.weights),
     };
   }, [
     categoriesLoading,
@@ -444,6 +448,8 @@ export default function Catalog({
     facets,
     loading: productsLoading,
     error: productsError,
+    refreshError: productsRefreshError,
+    refreshing: productsRefreshing,
     reload: reloadProducts,
     revision: catalogRevision,
     queryKey: catalogQueryKey,
@@ -485,7 +491,8 @@ export default function Catalog({
   } = useProductData(selectedQuery, {
     subscribe: false,
     loadCategories: false,
-    refreshKey: catalogRevision,
+    refreshKey: `${catalogAudience}:${catalogRevision}`,
+    requireFresh: true,
   });
   const selectedResponseCurrent = selectedDataQueryKey === selectedQueryKey;
   const selectedResponseComplete = selectedProducts.length >= selectedTotal;
@@ -521,7 +528,7 @@ export default function Catalog({
   ]);
   const selectionProducts = useMemo(() => {
     const byId = new Map<number, CatalogProduct>();
-    for (const product of [...selectedProducts, ...mergedProducts]) {
+    for (const product of [...mergedProducts, ...selectedProducts]) {
       byId.set(product.id, product);
     }
     return Array.from(byId.values());
@@ -604,11 +611,12 @@ export default function Catalog({
   );
   const displayProducts = virtualCatalog?.pageItems ?? mergedProducts;
   const displayTotal = virtualCatalog?.total ?? total;
+  const visibleResultTotal = virtualCatalog || catalogResponseCurrent ? displayTotal : 0;
   const suggestionProducts = virtualCatalog?.matches ?? mergedProducts;
   const showingVirtualWorks = virtualCatalog !== null && displayTotal > 0;
-  const showCatalogLoading = apiLoading
-    && !virtualCatalog
-    && mergedProducts.length === 0;
+  const showCatalogLoading = !virtualCatalog
+    && (apiLoading || productsRefreshing)
+    && (!catalogResponseCurrent || mergedProducts.length === 0);
   const showCatalogTools = apiLoading
     || categories.length > 0
     || displayTotal > 0
@@ -616,9 +624,10 @@ export default function Catalog({
 
   useEffect(() => {
     const pageCount = Math.ceil(displayTotal / PAGE_SIZE);
-    if ((apiLoading && !virtualCatalog) || params.page <= pageCount || pageCount <= 0) return;
+    if (!virtualCatalog && (apiLoading || productsRefreshing || apiError || !catalogResponseCurrent)) return;
+    if (params.page <= pageCount || pageCount <= 0) return;
     update("page", String(pageCount), { replace: true });
-  }, [apiLoading, displayTotal, params.page, update, virtualCatalog]);
+  }, [apiError, apiLoading, catalogResponseCurrent, displayTotal, params.page, productsRefreshing, update, virtualCatalog]);
 
   const currentCatalogUrl = `${location.pathname}${location.search}${location.hash}`;
   const catalogUrlForDetail = editorPreview ? null : currentCatalogUrl;
@@ -1167,7 +1176,7 @@ export default function Catalog({
           ) : null}
           <div ref={sentinelRef}>
             <Toolbar
-              total={displayTotal}
+              total={visibleResultTotal}
               materials={params.materials}
               materialOptions={materialOptions}
               sort={params.sort}
@@ -1185,7 +1194,7 @@ export default function Catalog({
           {stickyVisible ? (
             <StickyBar
               category={params.category}
-              total={displayTotal}
+              total={visibleResultTotal}
               sort={params.sort}
               selCount={selCount}
               filterCount={
@@ -1309,14 +1318,27 @@ export default function Catalog({
         ref={resultsRef}
         tabIndex={-1}
         aria-label="作品结果"
-        aria-busy={apiLoading}
+        aria-busy={apiLoading || productsRefreshing}
         style={{ scrollMarginTop: "calc(var(--site-header-offset, var(--site-header-height, 88px)) + 16px)" }}
       >
+      {productsRefreshError && !virtualCatalog ? (
+        <div role="alert" className="catalog-refresh-notice">
+          <span>作品更新失败，当前显示上次成功加载的结果。最新资料尚未确认。</span>
+          <button
+            type="button"
+            className="catalog-recovery-target"
+            disabled={productsRefreshing}
+            onClick={reloadProducts}
+          >
+            {productsRefreshing ? "正在更新" : "重试更新"}
+          </button>
+        </div>
+      ) : null}
       {showCatalogLoading ? (
         <div className="catalog-state">
           <RouteLoading scope="region" surface="public" label="正在加载珠宝作品…" />
         </div>
-      ) : apiError && !virtualCatalog && (!catalogResponseCurrent || mergedProducts.length === 0) ? (
+      ) : apiError && !productsRefreshError && !virtualCatalog && (!catalogResponseCurrent || mergedProducts.length === 0) ? (
         <div
           className="catalog-state"
           style={{
@@ -1487,7 +1509,7 @@ export default function Catalog({
       )}
       </section>
       <Pagination
-        total={displayTotal}
+        total={visibleResultTotal}
         page={params.page}
         onPage={goToPage}
       />
@@ -1511,7 +1533,7 @@ export default function Catalog({
             size: [],
           })}
           onClose={closeFilter}
-          total={displayTotal}
+          total={visibleResultTotal}
           returnFocusRef={filterTriggerRef}
         />
       )}

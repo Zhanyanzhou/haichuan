@@ -1,4 +1,6 @@
 import { createIdempotencyKey } from "@/utils/idempotency";
+import type { CatalogProduct } from "@/data/catalogData";
+import type { ConsultationSubmissionReceipt } from "@/services/clients/consultationSubmissionReceipt";
 
 const DRAFT_TTL_MS = 30 * 60 * 1000;
 const SUBMISSION_ATTEMPT_PREFIX = "hc:consultation-submission-attempt";
@@ -23,6 +25,11 @@ export type ConsultationSubmissionReservation =
   | { status: "conflict"; attempt: ConsultationSubmissionAttempt };
 
 const volatileSubmissionAttempts = new Map<string, ConsultationSubmissionAttempt>();
+const inFlightSubmissions = new Map<string, Promise<ConsultationSubmissionReceipt>>();
+const contactSubmissionContexts = new Map<ConsultationDraftOwner, {
+  active: string;
+  parked: Map<string, ConsultationSubmissionAttempt>;
+}>();
 
 export function consultationDraftOwner(
   customerId: number | null | undefined,
@@ -51,8 +58,14 @@ export type SelectionConsultationDraft = {
   message: string;
 };
 
-let contactDraft: TimedDraft<ContactConsultationDraft> | null = null;
+const contactDrafts = new Map<string, TimedDraft<ContactConsultationDraft>>();
 let selectionDraft: TimedDraft<SelectionConsultationDraft> | null = null;
+type SelectionReceipt = {
+  receipt: ConsultationSubmissionReceipt;
+  products: CatalogProduct[];
+};
+let selectionReceipt: TimedDraft<SelectionReceipt> | null = null;
+const selectionReceiptListeners = new Set<() => void>();
 
 function saveDraft<T>(owner: ConsultationDraftOwner, value: T): TimedDraft<T> {
   return { owner, value, expiresAt: Date.now() + DRAFT_TTL_MS };
@@ -70,20 +83,26 @@ function readDraft<T>(
 export function saveContactConsultationDraft(
   owner: ConsultationDraftOwner,
   value: ContactConsultationDraft,
+  context = "",
 ) {
-  contactDraft = saveDraft(owner, value);
+  for (const [key, draft] of contactDrafts) {
+    if (draft.expiresAt <= Date.now()) contactDrafts.delete(key);
+  }
+  contactDrafts.set(context, saveDraft(owner, value));
 }
 
 export function readContactConsultationDraft(
   owner: ConsultationDraftOwner,
+  context = "",
 ): ContactConsultationDraft | null {
-  const value = readDraft(contactDraft, owner);
-  if (!value) contactDraft = null;
+  const value = readDraft(contactDrafts.get(context) ?? null, owner);
+  if (!value) contactDrafts.delete(context);
   return value;
 }
 
-export function clearContactConsultationDraft() {
-  contactDraft = null;
+export function clearContactConsultationDraft(context?: string) {
+  if (context === undefined) contactDrafts.clear();
+  else contactDrafts.delete(context);
 }
 
 /** 仅保存在当前 SPA 内存中，不写 localStorage / sessionStorage。 */
@@ -109,6 +128,41 @@ export function clearSelectionConsultationDraft() {
 export function clearConsultationDrafts() {
   clearContactConsultationDraft();
   clearSelectionConsultationDraft();
+  clearSelectionConsultationReceipt();
+}
+
+export function subscribeSelectionConsultationReceipt(listener: () => void) {
+  selectionReceiptListeners.add(listener);
+  return () => { selectionReceiptListeners.delete(listener); };
+}
+
+export function readSelectionConsultationReceipt(owner: ConsultationDraftOwner) {
+  return readDraft(selectionReceipt, owner);
+}
+
+export function saveSelectionConsultationReceipt(owner: ConsultationDraftOwner, value: SelectionReceipt) {
+  selectionReceipt = saveDraft(owner, value);
+  selectionReceiptListeners.forEach((listener) => listener());
+}
+
+export function clearSelectionConsultationReceipt() {
+  if (!selectionReceipt) return;
+  selectionReceipt = null;
+  selectionReceiptListeners.forEach((listener) => listener());
+}
+
+/** 站内返回或换入口时，同一个仍在途的提交共享请求和回执。 */
+export function runConsultationSubmission(
+  attempt: ConsultationSubmissionAttempt,
+  submit: (key: string) => Promise<ConsultationSubmissionReceipt>,
+) {
+  const existing = inFlightSubmissions.get(attempt.key);
+  if (existing) return existing;
+  const pending = submit(attempt.key).finally(() => {
+    inFlightSubmissions.delete(attempt.key);
+  });
+  inFlightSubmissions.set(attempt.key, pending);
+  return pending;
 }
 
 function submissionAttemptStorageKey(
@@ -131,8 +185,10 @@ function isSubmissionAttempt(value: unknown): value is ConsultationSubmissionAtt
 }
 
 /** 默认联系页仅探测本人的恢复入口，不消费草稿，也不删除其他身份或失效记录。 */
-export function hasContactConsultationRecovery(owner: ConsultationDraftOwner): boolean {
-  if (readDraft(contactDraft, owner)) return true;
+export function hasContactConsultationRecovery(owner: ConsultationDraftOwner, context = ""): boolean {
+  if (readDraft(contactDrafts.get(context) ?? null, owner)) return true;
+  const state = contactSubmissionContexts.get(owner);
+  if (state && state.active !== context) return state.parked.has(context);
   const key = submissionAttemptStorageKey("contact", owner);
   if (isSubmissionAttempt(volatileSubmissionAttempts.get(key))) return true;
   try {
@@ -160,10 +216,7 @@ export function readConsultationSubmissionAttempt(
   const attempt = isSubmissionAttempt(stored)
     ? stored
     : volatileSubmissionAttempts.get(storageKey) ?? null;
-  if (!attempt) {
-    clearConsultationSubmissionAttempt(channel, owner);
-    return null;
-  }
+  if (!attempt) return null;
   volatileSubmissionAttempts.set(storageKey, attempt);
   return attempt;
 }
@@ -179,6 +232,37 @@ export function clearConsultationSubmissionAttempt(
   } catch {
     // sessionStorage 被浏览器策略禁用时，页内副本仍已清除。
   }
+}
+
+function storeConsultationSubmissionAttempt(storageKey: string, attempt: ConsultationSubmissionAttempt) {
+  volatileSubmissionAttempts.set(storageKey, attempt);
+  try {
+    globalThis.sessionStorage?.setItem(storageKey, JSON.stringify(attempt));
+  } catch {
+    // 页面内存已先保存；本页重试继续安全复用同一键。
+  }
+}
+
+/** 同标签页换咨询作品时保留原尝试；作品引用只保存在内存中。 */
+export function activateContactSubmissionContext(owner: ConsultationDraftOwner, context: string) {
+  let state = contactSubmissionContexts.get(owner);
+  if (!state) {
+    state = { active: context, parked: new Map() };
+    contactSubmissionContexts.set(owner, state);
+  }
+  const current = readConsultationSubmissionAttempt("contact", owner);
+  if (state.active === context) return current;
+
+  if (current) state.parked.set(state.active, current);
+  const restored = state.parked.get(context) ?? null;
+  state.parked.delete(context);
+  state.active = context;
+  if (restored) {
+    storeConsultationSubmissionAttempt(submissionAttemptStorageKey("contact", owner), restored);
+  } else {
+    clearConsultationSubmissionAttempt("contact", owner);
+  }
+  return restored;
 }
 
 function stableValue(value: unknown): unknown {
@@ -219,11 +303,6 @@ export function reserveConsultationSubmissionAttempt(
     fingerprint,
     key: createIdempotencyKey(),
   };
-  volatileSubmissionAttempts.set(storageKey, attempt);
-  try {
-    globalThis.sessionStorage?.setItem(storageKey, JSON.stringify(attempt));
-  } catch {
-    // 页面内存已先保存；本页重试继续安全复用同一键。
-  }
+  storeConsultationSubmissionAttempt(storageKey, attempt);
   return { status: "ready", attempt, recovered: false };
 }
