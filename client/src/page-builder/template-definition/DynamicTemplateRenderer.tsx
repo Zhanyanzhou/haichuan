@@ -810,7 +810,11 @@ function ManagedTemplateSlotImage({
     ? buildResponsiveUploadsDerivedUrl(displaySrc, 1680) ?? displaySrc
     : displaySrc;
   const loading = priority ? "eager" : hostFetch ? undefined : "lazy";
+  // 加载失败的图片是行内替换元素，百分比宽高会退回替代文字的固有尺寸。
+  // 槽位已经有画框，图片必须绝对铺满这层，不能缩成 48×21 的破图。
   const style: CSSProperties = {
+    position: "absolute",
+    inset: 0,
     width: "100%",
     height: "100%",
     objectFit,
@@ -819,27 +823,29 @@ function ManagedTemplateSlotImage({
     transformOrigin,
   };
   return (
-    <img
-      ref={imageRef}
-      src={imgSrc || undefined}
-      onError={() => {
-        if (srcSetEnabled) setSrcSetEnabled(false);
-      }}
-      alt={alt}
-      data-template-image-fit={objectFit}
-      data-template-image-source={source}
-      data-template-media-state={media.status}
-      data-template-managed-preview={hostFetch ? previewUrl : undefined}
-      loading={loading}
-      decoding="async"
-      {...(priority ? { fetchpriority: "high" } : {})}
-      {...(resolved?.srcSet ? { srcSet: resolved.srcSet } : {})}
-      {...(resolved?.srcSet && resolved.sizes ? { sizes: resolved.sizes } : {})}
-      {...(resolved?.width !== undefined && resolved.height !== undefined
-        ? { width: resolved.width, height: resolved.height }
-        : {})}
-      style={style}
-    />
+    <span data-template-image-frame="true" style={{ display: "block", position: "relative", width: "100%", height: "100%" }}>
+      <img
+        ref={imageRef}
+        src={imgSrc || undefined}
+        onError={() => {
+          if (srcSetEnabled) setSrcSetEnabled(false);
+        }}
+        alt={alt}
+        data-template-image-fit={objectFit}
+        data-template-image-source={source}
+        data-template-media-state={media.status}
+        data-template-managed-preview={hostFetch ? previewUrl : undefined}
+        loading={loading}
+        decoding="async"
+        {...(priority ? { fetchpriority: "high" } : {})}
+        {...(resolved?.srcSet ? { srcSet: resolved.srcSet } : {})}
+        {...(resolved?.srcSet && resolved.sizes ? { sizes: resolved.sizes } : {})}
+        {...(resolved?.width !== undefined && resolved.height !== undefined
+          ? { width: resolved.width, height: resolved.height }
+          : {})}
+        style={style}
+      />
+    </span>
   );
 }
 
@@ -2807,6 +2813,10 @@ export default function DynamicTemplateRenderer({
     && isContentHeightSplitSection(definition)
     && countVisibleImages(result.plan.root) === 1
     && subtreeHasHeroImage(result.plan.root);
+  // 旧画布没有 hero-media-frame。上一帧新画框留下的“文案在图下”不能带到这次提交，
+  // 否则主图会先按自动高度塌成破图尺寸，轮询在布局效果清状态之前就读到了。
+  const activeHeroCopyBelow = heroMediaFrame && heroCopyBelow;
+  const activeHeroFrameCapped = heroMediaFrame && heroFrameCapped;
   return (
     <div
       ref={rootRef}
@@ -2831,8 +2841,8 @@ export default function DynamicTemplateRenderer({
       data-template-default-background-token={result.plan.metadata.defaultBackgroundToken}
       data-template-large-phone={largePhone ? "true" : undefined}
       data-template-narrow-split={narrowSplit ? "true" : undefined}
-      data-template-hero-copy={heroCopyBelow ? "below" : undefined}
-      data-template-hero-viewport-cap={heroFrameCapped ? "true" : undefined}
+      data-template-hero-copy={activeHeroCopyBelow ? "below" : undefined}
+      data-template-hero-viewport-cap={activeHeroFrameCapped ? "true" : undefined}
       data-image-carries-copy={imageCarriesCopy ? "true" : undefined}
       style={{
         background: result.plan.metadata.defaultBackgroundToken
@@ -2884,8 +2894,8 @@ export default function DynamicTemplateRenderer({
         showEmptyStructure={mode === "editor" && editorSurface === "template-definition"}
         sectionRole={sectionRole}
         pageHeroPlacement={pageHeroPlacement}
-        heroCopyBelow={heroCopyBelow}
-        heroFrameCapped={heroFrameCapped}
+        heroCopyBelow={activeHeroCopyBelow}
+        heroFrameCapped={activeHeroFrameCapped}
         stableMediaFrame={heroMediaFrame || reuseDesktopHero}
         inheritedCanvasColor={result.plan.metadata.defaultBackgroundToken
           ? DYNAMIC_TEMPLATE_BACKGROUND_TOKENS[result.plan.metadata.defaultBackgroundToken]

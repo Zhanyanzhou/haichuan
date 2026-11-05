@@ -129,7 +129,9 @@ export function useTemplateRenderedPropertyValues(nodeIds: readonly string[], br
     frameObserver.observe(document.body, { childList: true, subtree: true });
     collectDocuments();
     documents.forEach((doc) => { void doc.fonts?.ready.then(schedule); });
-    schedule();
+    // 首次取样不在 ResizeObserver 回调里，必须马上量到。
+    // 推迟到 16ms 后，宽度切成固定时还没有对象尺寸，输入框不会出现。
+    measure();
     return () => { disposed = true; if (measureTimer) window.clearTimeout(measureTimer); disconnectObservers(); frameObserver.disconnect(); frames.forEach((element) => element.removeEventListener("load", handleFrameLoad)); };
   }, [selectionKey, breakpoint, definition, previewWidth]);
   return values;
