@@ -704,6 +704,8 @@ function ManagedTemplateSlotImage({
 }) {
   // blob 必须由这张图片所在的 iframe 文档创建，父页面的 blob 在画布里不会显示。
   const imageRef = useRef<HTMLImageElement>(null);
+  // 只有槽位自己已经高出图片时才抽出文档流。自动高度的槽位仍要靠图片撑开。
+  const [coverBrokenFrame, setCoverBrokenFrame] = useState(false);
   const media = useManagedTemplateMediaDisplayUrl(src, hostFetch, imageRef);
   const previewUrl = hostFetch ? resolveManagedTemplateMediaPreviewUrl(src) : src;
   const displaySrc = hostFetch
@@ -731,6 +733,33 @@ function ManagedTemplateSlotImage({
   useEffect(() => {
     setSrcSetEnabled(true);
   }, [src]);
+  useLayoutEffect(() => {
+    setCoverBrokenFrame(false);
+  }, [src]);
+  useLayoutEffect(() => {
+    if (coverBrokenFrame) return undefined;
+    const image = imageRef.current;
+    const slot = image?.parentElement?.parentElement;
+    if (!image || !slot) return undefined;
+    const fitToFrame = () => {
+      // 行内图片会把自动高度槽位撑开，必须先抽出再量。没有独立画框的槽位会塌掉，不能铺满。
+      const previousPosition = image.style.position;
+      const previousInset = image.style.inset;
+      image.style.position = "absolute";
+      image.style.inset = "0";
+      const slotHeight = slot.getBoundingClientRect().height;
+      image.style.position = previousPosition;
+      image.style.inset = previousInset;
+      if (slotHeight > 40) setCoverBrokenFrame(true);
+    };
+    fitToFrame();
+    image.addEventListener("error", fitToFrame);
+    image.addEventListener("load", fitToFrame);
+    return () => {
+      image.removeEventListener("error", fitToFrame);
+      image.removeEventListener("load", fitToFrame);
+    };
+  }, [coverBrokenFrame, src]);
   useLayoutEffect(() => {
     setMeasuredCssWidth(null);
     if (hostFetch || !facts || facts.animated) return undefined;
@@ -810,20 +839,37 @@ function ManagedTemplateSlotImage({
     ? buildResponsiveUploadsDerivedUrl(displaySrc, 1680) ?? displaySrc
     : displaySrc;
   const loading = priority ? "eager" : hostFetch ? undefined : "lazy";
-  // 加载失败的图片是行内替换元素，百分比宽高会退回替代文字的固有尺寸。
-  // 槽位已经有画框，图片必须绝对铺满这层，不能缩成 48×21 的破图。
-  const style: CSSProperties = {
-    position: "absolute",
-    inset: 0,
-    width: "100%",
-    height: "100%",
-    objectFit,
-    objectPosition,
-    transform,
-    transformOrigin,
-  };
+  // 失败图片不接受百分比高度，只会剩替代文字那么大。画框已经独立存在时才绝对铺满。
+  const style: CSSProperties = coverBrokenFrame
+    ? {
+      position: "absolute",
+      inset: 0,
+      width: "100%",
+      height: "100%",
+      objectFit,
+      objectPosition,
+      transform,
+      transformOrigin,
+    }
+    : {
+      display: "block",
+      width: "100%",
+      height: "auto",
+      objectFit,
+      objectPosition,
+      transform,
+      transformOrigin,
+    };
   return (
-    <span data-template-image-frame="true" style={{ display: "block", position: "relative", width: "100%", height: "100%" }}>
+    <span
+      data-template-image-frame="true"
+      style={{
+        display: "block",
+        position: "relative",
+        width: "100%",
+        height: coverBrokenFrame ? "100%" : "auto",
+      }}
+    >
       <img
         ref={imageRef}
         src={imgSrc || undefined}
