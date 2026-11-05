@@ -736,7 +736,6 @@ function ManagedTemplateSlotImage({
     const parent = imageRef.current?.parentElement;
     if (!parent || typeof ResizeObserver === "undefined") return undefined;
     let current = 0;
-    let animationFrameId = 0;
     const commitMeasuredWidth = (next: number) => {
       if (current !== 0 && next < current + 8) return;
       current = next;
@@ -757,19 +756,21 @@ function ManagedTemplateSlotImage({
       });
       if (!geometry) return;
       const next = Math.round(geometry.renderedCssWidth);
-      // ResizeObserver 回调里同步 setState 会触发同帧再布局，Chrome 会抛
-      // “ResizeObserver loop …”；与 TemplateViewportFrame 一样延后到下一帧提交。
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
-      animationFrameId = requestAnimationFrame(() => {
-        animationFrameId = 0;
-        commitMeasuredWidth(next);
-      });
+      commitMeasuredWidth(next);
     };
-    measure();
-    const observer = new ResizeObserver(measure);
+    let measureTimer = 0;
+    const scheduleMeasure = () => {
+      if (measureTimer) return;
+      measureTimer = window.setTimeout(() => {
+        measureTimer = 0;
+        measure();
+      }, 16);
+    };
+    scheduleMeasure();
+    const observer = new ResizeObserver(scheduleMeasure);
     observer.observe(parent);
     return () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      if (measureTimer) window.clearTimeout(measureTimer);
       observer.disconnect();
     };
   }, [
@@ -785,6 +786,7 @@ function ManagedTemplateSlotImage({
     hostFetch,
     authorScale,
     fit,
+    facts,
   ]);
   // 公开态才接派生图与固有尺寸；后台态走 blob 预览，保持即时显示与既有会话语义。
   // 没有原图展示尺寸时不生成 srcset，避免把请求档位写成实际像素。
@@ -1595,7 +1597,6 @@ function RenderNode({
     const ownerWindow = element?.ownerDocument.defaultView;
     if (!element || !ownerWindow || !element.isConnected || !hasPositionedChildren) return;
     // 只测量具有叠放子项的容器，统一处理 px、rem 及百分比 padding；不写模板状态。
-    let animationFrameId = 0;
     const measure = () => {
       if (!element.isConnected || !element.ownerDocument.defaultView) return;
       const computed = element.ownerDocument.defaultView.getComputedStyle(element);
@@ -1605,18 +1606,19 @@ function RenderNode({
         if (element.style.getPropertyValue(property) !== value) element.style.setProperty(property, value);
       }
     };
+    let measureTimer = 0;
     const scheduleMeasure = () => {
-      if (animationFrameId) ownerWindow.cancelAnimationFrame(animationFrameId);
-      animationFrameId = ownerWindow.requestAnimationFrame(() => {
-        animationFrameId = 0;
+      if (measureTimer) return;
+      measureTimer = ownerWindow.setTimeout(() => {
+        measureTimer = 0;
         measure();
-      });
+      }, 16);
     };
     scheduleMeasure();
     const observer = new ownerWindow.ResizeObserver(scheduleMeasure);
     observer.observe(element);
     return () => {
-      if (animationFrameId) ownerWindow.cancelAnimationFrame(animationFrameId);
+      if (measureTimer) ownerWindow.clearTimeout(measureTimer);
       observer.disconnect();
     };
   }, [hasPositionedChildren, node.rules.padding]);
@@ -2472,7 +2474,6 @@ export default function DynamicTemplateRenderer({
     const owner = canvas.ownerDocument.defaultView;
     if (!owner) return;
     const nodes = [...canvas.querySelectorAll<HTMLElement>("[data-template-node-id]")];
-    let animationFrameId = 0;
     const update = () => {
       const frame = canvas.getBoundingClientRect();
       // 图没铺满时外壳随内容变高，不能用变高后的边框判断越界。
@@ -2502,22 +2503,23 @@ export default function DynamicTemplateRenderer({
         : "";
       setFixedCanvasOverflow((current) => current === overflow ? current : overflow);
     };
+    let measureTimer = 0;
     const scheduleUpdate = () => {
-      if (animationFrameId) owner.cancelAnimationFrame(animationFrameId);
-      animationFrameId = owner.requestAnimationFrame(() => {
-        animationFrameId = 0;
+      if (measureTimer) return;
+      measureTimer = owner.setTimeout(() => {
+        measureTimer = 0;
         update();
-      });
+      }, 16);
     };
     scheduleUpdate();
     // 只观察画布根：逐节点 observe 会在子项随画幅回写时放大 RO 投递风暴。
     const observer = new owner.ResizeObserver(scheduleUpdate);
     observer.observe(canvas);
     return () => {
-      if (animationFrameId) owner.cancelAnimationFrame(animationFrameId);
+      if (measureTimer) owner.clearTimeout(measureTimer);
       observer.disconnect();
     };
-  }, [definition, contentBySlotId, device, explicitCanvasRatio?.width, explicitCanvasRatio?.height, mode]);
+  }, [definition, contentBySlotId, device, explicitCanvasRatio, mode]);
   const [largePhone, setLargePhone] = useState(false);
   // R-2 只限制写了 hero-media-frame 的第一只全幅主视觉。
   // 未写策略或 paired-canvas 的对换画布要让图片铺满整节；把图片框压到视口高会在底下露出画布底色。
@@ -2542,7 +2544,6 @@ export default function DynamicTemplateRenderer({
       setHeroFrameCapped(false);
       return undefined;
     }
-    let animationFrameId = 0;
     const update = () => {
       const height = window.innerHeight;
       const short = height > 0 && height < 480;
@@ -2579,12 +2580,13 @@ export default function DynamicTemplateRenderer({
       setHeroCopyBelow(short || capped || copyExceedsFrame);
       setHeroFrameCapped(capped);
     };
+    let measureTimer = 0;
     const scheduleUpdate = () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
-      animationFrameId = requestAnimationFrame(() => {
-        animationFrameId = 0;
+      if (measureTimer) return;
+      measureTimer = window.setTimeout(() => {
+        measureTimer = 0;
         update();
-      });
+      }, 16);
     };
     scheduleUpdate();
     const observed = rootRef.current;
@@ -2592,7 +2594,7 @@ export default function DynamicTemplateRenderer({
     if (observed) observer?.observe(observed);
     window.addEventListener("resize", scheduleUpdate);
     return () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      if (measureTimer) window.clearTimeout(measureTimer);
       observer?.disconnect();
       window.removeEventListener("resize", scheduleUpdate);
     };
@@ -2603,26 +2605,26 @@ export default function DynamicTemplateRenderer({
       setLargePhone(false);
       return undefined;
     }
-    let animationFrameId = 0;
     const update = () => {
       const width = element.clientWidth;
       setLargePhone(width >= 600 && width < 768);
     };
+    let measureTimer = 0;
     const scheduleUpdate = () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
-      animationFrameId = requestAnimationFrame(() => {
-        animationFrameId = 0;
+      if (measureTimer) return;
+      measureTimer = window.setTimeout(() => {
+        measureTimer = 0;
         update();
-      });
+      }, 16);
     };
     scheduleUpdate();
     const observer = new ResizeObserver(scheduleUpdate);
     observer.observe(element);
     return () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      if (measureTimer) window.clearTimeout(measureTimer);
       observer.disconnect();
     };
-  }, [device, result.ok, result.ok ? result.plan.templateId : ""]);
+  }, [device, result]);
   const [narrowSplit, setNarrowSplit] = useState(false);
   const [copyOverflow, setCopyOverflow] = useState("");
   const [pairedImageCompressed, setPairedImageCompressed] = useState(false);
@@ -2636,7 +2638,6 @@ export default function DynamicTemplateRenderer({
       setTextContrastNote("none");
       return undefined;
     }
-    let animationFrameId = 0;
     const update = () => {
       if (!element.isConnected) return;
       const fontSize = Number.parseFloat(getComputedStyle(element).fontSize) || 16;
@@ -2699,21 +2700,22 @@ export default function DynamicTemplateRenderer({
         : "";
       setCopyOverflow((current) => current === message ? current : message);
     };
+    let measureTimer = 0;
     const scheduleUpdate = () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
-      animationFrameId = requestAnimationFrame(() => {
-        animationFrameId = 0;
+      if (measureTimer) return;
+      measureTimer = window.setTimeout(() => {
+        measureTimer = 0;
         update();
-      });
+      }, 16);
     };
     scheduleUpdate();
     const observer = new ResizeObserver(scheduleUpdate);
     observer.observe(element);
     return () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      if (measureTimer) window.clearTimeout(measureTimer);
       observer.disconnect();
     };
-  }, [copySignature, device, inkSignature, mode, result.ok, sectionRole, result.ok ? result.plan.templateId : ""]);
+  }, [copySignature, device, inkSignature, mode, result, sectionRole]);
   if (!result.ok) {
     if (mode === "public") return null;
     return (

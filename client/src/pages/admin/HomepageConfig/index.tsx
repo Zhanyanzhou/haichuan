@@ -563,7 +563,6 @@ function CanvasBlockAnchor({
     const frameWindow = anchor?.ownerDocument.defaultView;
     if (!anchor || !frameWindow || frameWindow === window) return;
 
-    let animationFrameId = 0;
     const reportCanvasHeight = () => {
       // 不能直接量 documentElement.scrollHeight：iframe 文档的根元素高度
       // 至少等于 iframe 视口高度，而视口高度又由宿主按上报值回填，
