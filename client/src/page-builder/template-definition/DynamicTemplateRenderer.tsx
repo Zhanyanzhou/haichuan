@@ -750,7 +750,9 @@ function ManagedTemplateSlotImage({
       const slotHeight = slot.getBoundingClientRect().height;
       image.style.position = previousPosition;
       image.style.inset = previousInset;
-      if (slotHeight > 40) setCoverBrokenFrame(true);
+      // 独立画框抽出图片后仍有高度。Logo 的 3:1 窄框大约 36px，40 会漏掉。
+      // 没有比例、也没有最小高度的自动槽位会塌到 0，继续靠图片自己撑开。
+      if (slotHeight >= 24) setCoverBrokenFrame(true);
     };
     fitToFrame();
     image.addEventListener("error", fitToFrame);
