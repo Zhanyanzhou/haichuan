@@ -156,6 +156,7 @@ export function HomeFirstFold({ data }: { data?: PuckDocument | null }) {
       ) : hero.image ? null : (
         <RouteLoading
           data-home-loading-status="true"
+          mark={false}
           scope="region"
           surface="public"
           label="首页内容正在准备"

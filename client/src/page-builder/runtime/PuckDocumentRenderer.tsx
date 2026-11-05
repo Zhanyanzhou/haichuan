@@ -82,7 +82,12 @@ function hasRequiredPublicMedia(block: PuckBlock) {
   const props = block.props || {};
   switch (block.type) {
     case "首屏主视觉":
-      return Boolean(textValue(props.desktopImage) || textValue(props.mobileImage));
+      if (textValue(props.desktopImage) || textValue(props.mobileImage)) return true;
+      // 带版本印记的首屏缺图时整块不公开。没有印记的历史发布仍保留标题，
+      // 否则首屏区块会被直接丢掉，已发布标题无法成为页面 H1。
+      return props.__contentTemplate == null && Boolean(
+        textValue(props.title) || textValue(props.subtitle) || textValue(props.eyebrow),
+      );
     default:
       return true;
   }

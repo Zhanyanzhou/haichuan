@@ -78,6 +78,20 @@ html:has(.site-shell)::-webkit-scrollbar {
   }
 }
 
+/* 载入层铺在已预留的首屏框内。公开区域载入默认 min-height:100dvh，
+   在 390×844 上会比上面的 4:5 预留高出约 75px，发布后页脚跟着上跳。 */
+.hc-products-page-frame {
+  position: relative;
+}
+
+.hc-products-page-frame > .site-route-loading.site-route-loading--public.site-route-loading--region {
+  position: absolute;
+  inset: 0;
+  height: auto;
+  min-height: 0;
+  background: transparent;
+}
+
 /* ═══════ Header ═══════ */
 .site-header {
   position: fixed;

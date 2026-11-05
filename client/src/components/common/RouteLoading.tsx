@@ -11,6 +11,8 @@ interface RouteLoadingProps extends Omit<HTMLAttributes<HTMLDivElement>, "role">
   scope?: RouteLoadingScope;
   surface?: RouteLoadingSurface;
   routeProgress?: boolean;
+  /** 首屏加载断言要求区域内没有图片；其他路由保留站点标记。 */
+  mark?: boolean;
 }
 
 export default function RouteLoading({
@@ -18,6 +20,7 @@ export default function RouteLoading({
   scope = "viewport",
   surface = "admin",
   routeProgress = false,
+  mark = true,
   className,
   ...rest
 }: RouteLoadingProps = {}) {
@@ -39,13 +42,15 @@ export default function RouteLoading({
       {routeProgress ? <ProgressBar /> : null}
       <span className="site-route-loading__indicator" aria-hidden="true">
         <span className="site-route-loading__ring" />
-        <img
-          className="site-route-loading__mark"
-          src="/favicon.svg?v=20261027c"
-          alt=""
-          width="32"
-          height="32"
-        />
+        {mark ? (
+          <img
+            className="site-route-loading__mark"
+            src="/favicon.svg?v=20261027c"
+            alt=""
+            width="32"
+            height="32"
+          />
+        ) : null}
       </span>
       <span className="site-route-loading__text">{statusText}</span>
     </div>

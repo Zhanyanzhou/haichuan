@@ -147,8 +147,28 @@ function contentPageRoute(pageKey: keyof typeof CONTENT_TEMPLATE_PAGE_PATHS) {
   return publicPath === "/" ? "" : publicPath.slice(1);
 }
 
+const prefetchedChinesePublications = new Set<string>();
+
+/** 公开壳层按需加载。旧英文链接必须在跳转可见前就开始读中文发布，不能等壳层分块到达。 */
+function prefetchRetiredEnglishPublication(pathname: string) {
+  if (typeof window === "undefined") return;
+  const chinesePath = resolveRetiredEnglishRedirect(pathname);
+  const normalized = chinesePath.length > 1 && chinesePath.endsWith("/")
+    ? chinesePath.slice(0, -1)
+    : chinesePath || "/";
+  const pageKey = (Object.entries(CONTENT_TEMPLATE_PAGE_PATHS) as Array<[string, string]>)
+    .find(([, publicPath]) => publicPath === normalized)?.[0];
+  if (!pageKey || prefetchedChinesePublications.has(pageKey)) return;
+  prefetchedChinesePublications.add(pageKey);
+  const params = new URLSearchParams({ pageKey, locale: "zh-CN" });
+  void fetch(`/api/page-modules/document/published?${params}`, {
+    headers: { Accept: "application/json" },
+  }).catch(() => undefined);
+}
+
 function RetiredEnglishRouteRedirect() {
   const location = useLocation();
+  prefetchRetiredEnglishPublication(location.pathname);
   const chinesePath = resolveRetiredEnglishRedirect(location.pathname);
   return <Navigate replace to={`${chinesePath}${location.search}${location.hash}`} />;
 }

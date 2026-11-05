@@ -1524,8 +1524,8 @@ function renderTemplateChildren({
           width: "100%",
           minWidth: 0,
           maxWidth: "100%",
-          // 对换画布的图片占满既定画幅，流内长文案只溢出网格行，不参与它的定高。
-          ...(pairedHeroFrame ? { height: "100%", flex: "1 1 auto", minHeight: 0, gridTemplateRows: "minmax(0, 1fr)" } : {}),
+          // 对换画布的图片先占满外壳。没锁成固定主视觉时，长文案仍能把这一行撑高，图片跟着变高。
+          ...(pairedHeroFrame ? { height: "100%", flex: "1 1 auto", minHeight: 0 } : {}),
           ...frameBleed,
         }}
       >
@@ -2914,10 +2914,9 @@ export default function DynamicTemplateRenderer({
   // 左右图文整节用对换比例，文字仍在图下，不把主图盖住文字。
   // 只有一张主图时，主图吃掉对换画布里文案下方的空白，手机槽位不再沿用桌面横图比例。
   const pairedCanvas = pairedCanvasRatio && isContentHeightSplitSection(definition) ? null : pairedCanvasRatio;
-  // 显式固定画幅必须锁定真实根与外壳。历史定义保留原有的铺满判定。
+  // 图没有铺满时，不再把外壳锁成更高的对换画布，否则底色会在照片下面留出一整条。
   const lockSwappedCanvas = Boolean(pairedCanvasRatio) && (
-    definition.metadata.geometryPolicy === "paired-canvas"
-    || subtreeFillsPairedCanvas(result.plan.root, sectionRole)
+    subtreeFillsPairedCanvas(result.plan.root, sectionRole)
     || isContentHeightSplitSection(definition)
   );
   const fillSplitRemainder = device === "mobile"
