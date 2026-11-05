@@ -249,7 +249,8 @@ test("背景可清空，手机可关闭继承的渐变并保存（自有API Mock
   await dialog.getByRole("button", { name: "创建模板", exact: true }).click();
   await expect(dialog).toBeHidden();
   await page.getByRole("button", { name: "模板整体", exact: true }).click();
-  const section = page.getByRole("region", { name: "模板颜色与背景", exact: true });
+  // 根节点的背景颜色、背景图片和渐变嵌在「背景与边框」里，不再单独成区。
+  const section = page.locator('[data-template-property-group="外观"]');
   const color = section.getByRole("textbox", { name: "背景颜色", exact: true });
   await color.fill("#112233"); await color.press("Tab");
   await color.fill(""); await color.press("Tab");

@@ -736,6 +736,12 @@ function ManagedTemplateSlotImage({
     const parent = imageRef.current?.parentElement;
     if (!parent || typeof ResizeObserver === "undefined") return undefined;
     let current = 0;
+    let animationFrameId = 0;
+    const commitMeasuredWidth = (next: number) => {
+      if (current !== 0 && next < current + 8) return;
+      current = next;
+      setMeasuredCssWidth(next);
+    };
     const measure = () => {
       const frameWidth = parent.offsetWidth;
       const frameHeight = parent.offsetHeight;
@@ -751,14 +757,21 @@ function ManagedTemplateSlotImage({
       });
       if (!geometry) return;
       const next = Math.round(geometry.renderedCssWidth);
-      if (current !== 0 && next < current + 8) return;
-      current = next;
-      setMeasuredCssWidth(next);
+      // ResizeObserver 回调里同步 setState 会触发同帧再布局，Chrome 会抛
+      // “ResizeObserver loop …”；与 TemplateViewportFrame 一样延后到下一帧提交。
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      animationFrameId = requestAnimationFrame(() => {
+        animationFrameId = 0;
+        commitMeasuredWidth(next);
+      });
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(parent);
-    return () => observer.disconnect();
+    return () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      observer.disconnect();
+    };
   }, [
     src,
     viewport,
@@ -1163,9 +1176,19 @@ function renderTemplateChildren({
   const visibleChildren = renderedChildren.filter((child) => !child.hidden);
   const firstVisibleId = visibleChildren[0]?.nodeId;
   const lastVisibleId = visibleChildren[visibleChildren.length - 1]?.nodeId;
-  // 品牌事实与到店邀请是上图下文：主图保持自己的比例，文字排在图下。
-  // 其余手机流式模板仍把跟随主图的文字收进图片槽位。
-  const stackedCopy = sectionRole === "maison-fact" || sectionRole === "service-invitation";
+  // 品牌事实、到店邀请，以及明确的上下/左右图文配方：主图保持自己的比例，文字排在图下。
+  // 首屏与全幅覆盖仍把跟随主图的文字收进图片槽位。
+  const recipeLayout = shared.layoutDefinition?.templateRecipe?.layout;
+  const stackedRecipeLayout = recipeLayout === "topImageBottomContent"
+    || recipeLayout === "topContentBottomImage"
+    || recipeLayout === "leftImageRightContent"
+    || recipeLayout === "leftContentRightImage"
+    || recipeLayout === "splitColumns"
+    || recipeLayout === "cards"
+    || recipeLayout === "free"
+    || recipeLayout === "centerSubject"
+    || recipeLayout === "headerSubjectFooter";
+  const stackedCopy = sectionRole === "maison-fact" || sectionRole === "service-invitation" || stackedRecipeLayout;
   const pairedHeroFrame = Boolean(pairedCanvas)
     && sectionRole === "page-hero"
     && device === "mobile"
@@ -1572,6 +1595,7 @@ function RenderNode({
     const ownerWindow = element?.ownerDocument.defaultView;
     if (!element || !ownerWindow || !element.isConnected || !hasPositionedChildren) return;
     // 只测量具有叠放子项的容器，统一处理 px、rem 及百分比 padding；不写模板状态。
+    let animationFrameId = 0;
     const measure = () => {
       if (!element.isConnected || !element.ownerDocument.defaultView) return;
       const computed = element.ownerDocument.defaultView.getComputedStyle(element);
@@ -1581,10 +1605,20 @@ function RenderNode({
         if (element.style.getPropertyValue(property) !== value) element.style.setProperty(property, value);
       }
     };
-    measure();
-    const observer = new ownerWindow.ResizeObserver(measure);
+    const scheduleMeasure = () => {
+      if (animationFrameId) ownerWindow.cancelAnimationFrame(animationFrameId);
+      animationFrameId = ownerWindow.requestAnimationFrame(() => {
+        animationFrameId = 0;
+        measure();
+      });
+    };
+    scheduleMeasure();
+    const observer = new ownerWindow.ResizeObserver(scheduleMeasure);
     observer.observe(element);
-    return () => observer.disconnect();
+    return () => {
+      if (animationFrameId) ownerWindow.cancelAnimationFrame(animationFrameId);
+      observer.disconnect();
+    };
   }, [hasPositionedChildren, node.rules.padding]);
   const safeAction = node.slot && (node.slot.type === "button" || node.slot.type === "link")
     ? getSafeActionContent(node.content, contentRenderMode !== "public")
@@ -2062,6 +2096,16 @@ function RenderNode({
           alignSelf: "start" as const,
           maxHeight: "none",
           overflow: "hidden" as const,
+        } : coversPairedSection && !capHeroFrame && node.slot?.semanticRole === "heroImage" ? {
+          // 首屏主图保持对换画幅并留在文档流里。文案变长时整节变高，图片高度不跟着拉长。
+          position: "relative" as const,
+          width: "100%",
+          height: "auto",
+          aspectRatio: paintedMobileFrame ?? (pairedCanvas ? `${pairedCanvas.width} / ${pairedCanvas.height}` : "9 / 16"),
+          maxWidth: "100%",
+          flex: "0 0 auto",
+          minHeight: 0,
+          overflow: "hidden" as const,
         } : coversPairedSection && !capHeroFrame ? {
           // 高度按内容盒的 100% 再叠负外边距，会在画布底下留下同样深的底色。贴齐整节才盖住内边距。
           position: "absolute" as const,
@@ -2428,8 +2472,15 @@ export default function DynamicTemplateRenderer({
     const owner = canvas.ownerDocument.defaultView;
     if (!owner) return;
     const nodes = [...canvas.querySelectorAll<HTMLElement>("[data-template-node-id]")];
+    let animationFrameId = 0;
     const update = () => {
       const frame = canvas.getBoundingClientRect();
+      // 图没铺满时外壳随内容变高，不能用变高后的边框判断越界。
+      // 仍按声明的双端比例画一条界，超出这条界才提示。
+      const intendedHeight = frame.width * explicitCanvasRatio.height / explicitCanvasRatio.width;
+      const limitBottom = frame.top + (Number.isFinite(intendedHeight)
+        ? Math.min(frame.height, intendedHeight)
+        : frame.height);
       const names: string[] = [];
       for (const node of nodes) {
         if (names.length >= 4) break;
@@ -2437,7 +2488,7 @@ export default function DynamicTemplateRenderer({
         const box = node.getBoundingClientRect();
         if (box.width < 1 || box.height < 1) continue;
         const past = box.left < frame.left - 1 || box.top < frame.top - 1
-          || box.right > frame.right + 1 || box.bottom > frame.bottom + 1
+          || box.right > frame.right + 1 || box.bottom > limitBottom + 1
           || (/Heading|Text|RichText|Badge/.test(node.dataset.templateNodeType ?? "")
             // 中文字形可能超出行盒 1～2px；这不等于少了一行，几何越框仍按上面的 1px 检查。
             && node.scrollHeight > node.clientHeight + 2);
@@ -2451,11 +2502,21 @@ export default function DynamicTemplateRenderer({
         : "";
       setFixedCanvasOverflow((current) => current === overflow ? current : overflow);
     };
-    update();
-    const observer = new owner.ResizeObserver(update);
+    const scheduleUpdate = () => {
+      if (animationFrameId) owner.cancelAnimationFrame(animationFrameId);
+      animationFrameId = owner.requestAnimationFrame(() => {
+        animationFrameId = 0;
+        update();
+      });
+    };
+    scheduleUpdate();
+    // 只观察画布根：逐节点 observe 会在子项随画幅回写时放大 RO 投递风暴。
+    const observer = new owner.ResizeObserver(scheduleUpdate);
     observer.observe(canvas);
-    nodes.forEach((node) => observer.observe(node));
-    return () => observer.disconnect();
+    return () => {
+      if (animationFrameId) owner.cancelAnimationFrame(animationFrameId);
+      observer.disconnect();
+    };
   }, [definition, contentBySlotId, device, explicitCanvasRatio?.width, explicitCanvasRatio?.height, mode]);
   const [largePhone, setLargePhone] = useState(false);
   // R-2 只限制写了 hero-media-frame 的第一只全幅主视觉。
@@ -2481,6 +2542,7 @@ export default function DynamicTemplateRenderer({
       setHeroFrameCapped(false);
       return undefined;
     }
+    let animationFrameId = 0;
     const update = () => {
       const height = window.innerHeight;
       const short = height > 0 && height < 480;
@@ -2517,14 +2579,22 @@ export default function DynamicTemplateRenderer({
       setHeroCopyBelow(short || capped || copyExceedsFrame);
       setHeroFrameCapped(capped);
     };
-    update();
+    const scheduleUpdate = () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      animationFrameId = requestAnimationFrame(() => {
+        animationFrameId = 0;
+        update();
+      });
+    };
+    scheduleUpdate();
     const observed = rootRef.current;
-    const observer = observed ? new ResizeObserver(update) : null;
+    const observer = observed ? new ResizeObserver(scheduleUpdate) : null;
     if (observed) observer?.observe(observed);
-    window.addEventListener("resize", update);
+    window.addEventListener("resize", scheduleUpdate);
     return () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
       observer?.disconnect();
-      window.removeEventListener("resize", update);
+      window.removeEventListener("resize", scheduleUpdate);
     };
   }, [copySignature, device, heroMediaFrame, imageCarriesCopy]);
   useLayoutEffect(() => {
@@ -2533,14 +2603,25 @@ export default function DynamicTemplateRenderer({
       setLargePhone(false);
       return undefined;
     }
+    let animationFrameId = 0;
     const update = () => {
       const width = element.clientWidth;
       setLargePhone(width >= 600 && width < 768);
     };
-    update();
-    const observer = new ResizeObserver(update);
+    const scheduleUpdate = () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      animationFrameId = requestAnimationFrame(() => {
+        animationFrameId = 0;
+        update();
+      });
+    };
+    scheduleUpdate();
+    const observer = new ResizeObserver(scheduleUpdate);
     observer.observe(element);
-    return () => observer.disconnect();
+    return () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      observer.disconnect();
+    };
   }, [device, result.ok, result.ok ? result.plan.templateId : ""]);
   const [narrowSplit, setNarrowSplit] = useState(false);
   const [copyOverflow, setCopyOverflow] = useState("");
@@ -2555,6 +2636,7 @@ export default function DynamicTemplateRenderer({
       setTextContrastNote("none");
       return undefined;
     }
+    let animationFrameId = 0;
     const update = () => {
       if (!element.isConnected) return;
       const fontSize = Number.parseFloat(getComputedStyle(element).fontSize) || 16;
@@ -2617,10 +2699,20 @@ export default function DynamicTemplateRenderer({
         : "";
       setCopyOverflow((current) => current === message ? current : message);
     };
-    update();
-    const observer = new ResizeObserver(update);
+    const scheduleUpdate = () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      animationFrameId = requestAnimationFrame(() => {
+        animationFrameId = 0;
+        update();
+      });
+    };
+    scheduleUpdate();
+    const observer = new ResizeObserver(scheduleUpdate);
     observer.observe(element);
-    return () => observer.disconnect();
+    return () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      observer.disconnect();
+    };
   }, [copySignature, device, inkSignature, mode, result.ok, sectionRole, result.ok ? result.plan.templateId : ""]);
   if (!result.ok) {
     if (mode === "public") return null;

@@ -88,7 +88,12 @@ test.describe("显式标准双端固定画幅", () => {
         group.childIds = [title.nodeId];
         title.responsive.mobile = {};
         if (kind === "text-overflow") title.responsive.desktop.height = { mode: "fixed", value: { value: 20, unit: "px" } };
-        if (kind === "geometry-overflow") title.responsive.desktop.margin = { top: { value: 700, unit: "px" }, right: { value: 0, unit: "px" }, bottom: { value: 0, unit: "px" }, left: { value: 0, unit: "px" } };
+        // 外边距会和画布折叠，标题边框仍在画布内。内边距才会把标题真正推过声明比例。
+        if (kind === "geometry-overflow") {
+          const padding = { top: { value: 700, unit: "px" }, right: { value: 0, unit: "px" }, bottom: { value: 0, unit: "px" }, left: { value: 0, unit: "px" } };
+          group.responsive.desktop.padding = padding;
+          group.responsive.mobile = { padding };
+        }
         base.nodes[base.rootNodeId].childIds = [group.nodeId]; base.nodes[group.nodeId] = group; base.nodes[title.nodeId] = title;
         base.slots[slot.slotId] = slot; base.defaultContent[slot.slotId] = "预约鉴赏";
         scenes.push(react.default.createElement("section", { key: kind, "data-linebox-case": kind, style: { width:390, marginBottom:80 } }, react.default.createElement(renderer.default, { definition: dimensions.applyStandardTemplateCanvasPair(base, { width:16, height:9 }), device:"mobile", mode:"editor", showEmptySlots:true })));
@@ -351,17 +356,29 @@ test.describe("显式标准双端固定画幅", () => {
       for (const device of ["desktop", "mobile"] as const) {
         const scene = page.locator(`[data-pair="${index}"][data-device="${device}"]`);
         const canvas = scene.locator("[data-template-fixed-canvas='true']");
-        await expect(canvas).toBeVisible();
-        const boxes = await canvas.evaluate((element) => {
-          const root = element.querySelector<HTMLElement>(":scope > [data-template-node-id]")!;
-          const outer = element.getBoundingClientRect(); const inner = root.getBoundingClientRect();
-          return { outer: { width:outer.width, height:outer.height }, inner:{width:inner.width,height:inner.height}, overflow:getComputedStyle(element).overflowY };
-        });
         const ratio = pair[device];
-        expect(boxes.outer.height).toBeCloseTo(boxes.outer.width * ratio.height / ratio.width, 1);
-        expect(boxes.inner.height).toBeCloseTo(boxes.outer.height, 1);
-        expect(boxes.inner.width).toBeCloseTo(boxes.outer.width, 1);
-        expect(boxes.overflow).toBe("visible");
+        if (await canvas.count()) {
+          await expect(canvas).toBeVisible();
+          const boxes = await canvas.evaluate((element) => {
+            const root = element.querySelector<HTMLElement>(":scope > [data-template-node-id]")!;
+            const outer = element.getBoundingClientRect(); const inner = root.getBoundingClientRect();
+            return { outer: { width:outer.width, height:outer.height }, inner:{width:inner.width,height:inner.height}, overflow:getComputedStyle(element).overflowY };
+          });
+          expect(boxes.outer.height).toBeCloseTo(boxes.outer.width * ratio.height / ratio.width, 1);
+          expect(boxes.inner.height).toBeCloseTo(boxes.outer.height, 1);
+          expect(boxes.inner.width).toBeCloseTo(boxes.outer.width, 1);
+          expect(boxes.overflow).toBe("visible");
+        } else {
+          // 没有铺满对换画布的主图时，外壳随长内容增高，比例记在属性上，不锁出一条空底色。
+          const host = scene.locator(".hc-dynamic-template");
+          await expect(host).toHaveAttribute("data-template-paired-canvas", formatExactTemplateRatio(ratio.width, ratio.height));
+          const size = await host.evaluate((element) => {
+            const box = element.getBoundingClientRect();
+            return { width: box.width, height: box.height, overflow: getComputedStyle(element).overflowY };
+          });
+          expect(size.overflow).toBe("visible");
+          expect(size.height).toBeGreaterThan(size.width * ratio.height / ratio.width - 1);
+        }
         await expect(scene.locator("[data-template-fixed-canvas-note]")).toBeVisible();
       }
     }

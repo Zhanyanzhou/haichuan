@@ -92,7 +92,8 @@ export default function CanvasImageFocusEditor({ nodeId, sourceElement, editing,
       }}>
       <span aria-hidden="true" style={{ position: "absolute", left: `${focus.x}%`, top: `${focus.y}%`, transform: "translate(-50%, -50%)", border: "2px solid white", outline: "1px solid #181A1B", borderRadius: "50%", width: 18, height: 18 }}>+</span>
     </div>
-    <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "white", padding: 4 }} onPointerDown={(event) => event.stopPropagation()}>
+    {/* 取景条放在选区外沿下方，避免矮图被自身控件盖住无法拖动焦点。 */}
+    <div style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 4, background: "white", padding: 4, zIndex: 1 }} onPointerDown={(event) => event.stopPropagation()}>
       <span>取景 {focus.x}% / {focus.y}% · 不改变图片外框</span>
       <select aria-label="取景适配" value={rules.objectFit ?? "cover"} onChange={(event) => preview(focus, event.target.value as "cover" | "contain")}><option value="cover">填满并裁切</option><option value="contain">完整显示</option></select>
       <button type="button" disabled={Boolean(error)} onClick={() => close(true)}>确认取景</button><button type="button" onClick={() => close(false)}>取消取景</button>

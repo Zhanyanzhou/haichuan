@@ -20,6 +20,8 @@ function add(parentId: string, type: Parameters<typeof addDynamicTemplateNode>[2
 }
 const grid = add(definition.rootNodeId, "Grid");
 const image = add(grid, "ImageSlot");
+// 列数只在有并列子项时进入「布局」组；单子项网格不会把 columns 放进分组复制。
+add(grid, "ImageSlot");
 const container = add(definition.rootNodeId, "Container");
 const heading = add(container, "HeadingSlot");
 const locked = add(definition.rootNodeId, "Grid");

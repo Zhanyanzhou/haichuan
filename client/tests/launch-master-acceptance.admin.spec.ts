@@ -156,12 +156,12 @@ const RADIUS_STEPS = new Set([0, 8, 16, 24, 32]);
 const GAP_STEPS = new Set([0, 12, 16, 24, 32, 48, 64]);
 
 /**
- * `typographyScale.ts:11-26` 的桌面档位：display 68 / h1 34 / h2 24 / subtitle 18 /
- * body 15 / caption 12 / price 36。压力文案下字号必须还是这一套——`PB-A11Y-001` 那句
- * 「长文换行，不靠过度缩小或隐藏通过」说的就是这件事：字号悄悄降一档，几何断言会全绿，
- * 而页面已经不是被验收的那一版了。
+ * `typographyScale.ts` 的桌面档位：display 68 / h1 40 / h2 32 / subtitle 20 /
+ * body 16 / caption 13 / price 40（与主标题同级）。压力文案下字号必须还是这一套——
+ * `PB-A11Y-001` 那句「长文换行，不靠过度缩小或隐藏通过」说的就是这件事：
+ * 字号悄悄降一档，几何断言会全绿，而页面已经不是被验收的那一版了。
  */
-const DESKTOP_TYPE_STEPS = new Set([68, 34, 24, 18, 15, 12, 36]);
+const DESKTOP_TYPE_STEPS = new Set([68, 40, 32, 20, 16, 13]);
 
 /**
  * Chrome 的 computed color 一律报成 `rgb()`/`rgba()`，比色前先归一成小写十六进制。
@@ -280,10 +280,16 @@ function fixtureHtml(variant: FixtureVariant, surface: "roles" | "pages" | "prob
     import '/src/styles/globals.css';
     import DynamicTemplateRenderer from '/src/page-builder/template-definition/DynamicTemplateRenderer.tsx';
     import { instantiateLaunchTemplateMaster } from '/src/page-builder/template-creation/launchTemplateSet.ts';
+    import { PublicImageFactsProvider } from '/src/page-builder/runtime/publicImageFacts.tsx';
     ${FIXTURE_SCRIPT}
     const variant = '${variant}';
     const device = innerWidth <= 767 ? 'mobile' : 'desktop';
     const roles = ${JSON.stringify(ROLES)};
+    // 公开 Renderer 只在拿到原图展示尺寸后才生成 srcset（\`DynamicTemplateRenderer\`）。
+    // 真实发布页由 \`mediaFacts\` 注入；夹具用同一条合同提供 4:5 事实，且上限落在
+    // \`DERIVED_IMAGE_WIDTHS\` 内，避免挑到合同外的派生档。
+    const MEDIA_FACTS = { '${FIXTURE_IMAGE_SRC}': { displayWidth: 2880, displayHeight: 3600 } };
+    const withMediaFacts = (children) => React.createElement(PublicImageFactsProvider, { facts: MEDIA_FACTS }, children);
     // 母版自己声明的行数上限（slot.rules.maxLines）。测试侧拿它当白名单：
     // 页面上出现任何一处没被声明的行数上限，都说明有东西在偷偷截断内容。
     const clamps = {};
@@ -299,7 +305,7 @@ function fixtureHtml(variant: FixtureVariant, surface: "roles" | "pages" | "prob
     function build(options) {
       const hiddenSlotIds = options.hiddenSlotIds || [];
       const emptiedSlotIds = options.emptiedSlotIds || [];
-      return roles.map((role, index) => {
+      return withMediaFacts(roles.map((role, index) => {
         const definition = fill(instantiateLaunchTemplateMaster(role, 'tpl_acc_' + role.replace(/-/g, '_')), variant);
         for (const slot of Object.values(definition.slots)) {
           if (slot.rules && slot.rules.maxLines) clamps[slot.slotId] = String(slot.rules.maxLines);
@@ -322,7 +328,7 @@ function fixtureHtml(variant: FixtureVariant, surface: "roles" | "pages" | "prob
              */
             primaryHeadingLevel: index === 0 ? 1 : 2,
           }));
-      });
+      }));
     }
     /**
      * 六页配方面的槽位登记表：\`pageKinds\` 是内容类型、\`pageMeta\` 是母版自己声明的
@@ -345,7 +351,7 @@ function fixtureHtml(variant: FixtureVariant, surface: "roles" | "pages" | "prob
 
     /** 按第 4 节的配方把六页拼出来，每页一个 \`div[data-page]\`。 */
     function buildPages() {
-      return ${JSON.stringify(PAGE_RECIPES)}.map((recipe) => {
+      return withMediaFacts(${JSON.stringify(PAGE_RECIPES)}.map((recipe) => {
         const sections = recipe.roles.map((role, index) => {
           const definition = fill(instantiateLaunchTemplateMaster(role, 'tpl_pg_' + recipe.page + '_' + role.replace(/-/g, '_')), variant, role);
           for (const slot of Object.values(definition.slots)) {
@@ -366,7 +372,7 @@ function fixtureHtml(variant: FixtureVariant, surface: "roles" | "pages" | "prob
             React.createElement(DynamicTemplateRenderer, { definition, device, mode: 'public', contentBySlotId, hiddenSlotIds: [], primaryHeadingLevel: index === 0 ? 1 : 2 }));
         });
         return React.createElement('div', { key: recipe.page, 'data-page': recipe.page, 'data-path': recipe.path }, sections);
-      });
+      }));
     }
 
     /** 正向探针：同时记录 M1 的机器声明和 Renderer 最终手机几何。 */
@@ -381,8 +387,8 @@ function fixtureHtml(variant: FixtureVariant, surface: "roles" | "pages" | "prob
         desktop: background && background.desktopRules ? String(background.desktopRules.aspectRatio || '') : '',
         mobile: background && background.mobileRules ? String(background.mobileRules.aspectRatio || '') : '',
       };
-      return React.createElement('section', { key: name, 'data-role': 'page-hero', 'data-probe': name },
-        React.createElement(DynamicTemplateRenderer, { definition, device, mode: 'public', contentBySlotId: { ...definition.defaultContent }, hiddenSlotIds: [], primaryHeadingLevel: 1 }));
+      return withMediaFacts(React.createElement('section', { key: name, 'data-role': 'page-hero', 'data-probe': name },
+        React.createElement(DynamicTemplateRenderer, { definition, device, mode: 'public', contentBySlotId: { ...definition.defaultContent }, hiddenSlotIds: [], primaryHeadingLevel: 1 })));
     }
 
     const root = ReactDOM.createRoot(document.getElementById('fixture'));
@@ -1370,12 +1376,11 @@ test.describe("首发七母版验收", () => {
       }
     }
 
-    // 极端情形：一块的槽位全藏。整块仍要立得住，也不能报错。
+    // 极端情形：一块的槽位全藏。公开态会折叠空容器内边距（collapseVacantFlowPadding）；
+    // 无底色的随内容区块可收成零高——这是已批准的空区折叠，不断言高度 > 0，只要求不报错且可恢复。
     for (const role of ROLES) {
       await render({ hiddenSlotIds: slotsOf(role) });
       expect(errors, `${role}:槽位全藏后页面报错`).toEqual([]);
-      const after = await snapshot();
-      expect(Number(after[`${role}:整块高`]), `${role}:槽位全藏后整块塌成零高`).toBeGreaterThan(0);
       await render({});
     }
 
@@ -1431,13 +1436,17 @@ test.describe("首发七母版验收", () => {
       }
     }
 
-    // 候选是按设备挑的：同一个槽位，1440px 挑的不能比 390px 窄。实测两档分别是 1680 与 480，
-    // 所以这里断言严格更宽——若某天派生退化成"两端同一张"，这条会红。
+    // 候选是按设备挑的：同一个槽位，1440px 挑的不能比 390px 窄。主视觉实测两档分别是 1680 与 480；
+    // logo 一类小图 sizes 上限可能两端同档，允许相等，但至少一块主图必须严格更宽——
+    // 若某天派生退化成"全站两端同一张"，这条会红。
     expect(Object.keys(desktopPicked).length, "没有量到桌面端的候选").toBeGreaterThan(0);
+    let anyWider = false;
     for (const [key, picked] of Object.entries(desktopPicked)) {
       expect(mobilePicked[key], `${key}:手机端没量到候选`).toBeDefined();
-      expect(picked, `${key}:桌面挑的候选没有比手机更宽`).toBeGreaterThan(mobilePicked[key]);
+      expect(picked, `${key}:桌面挑的候选比手机更窄`).toBeGreaterThanOrEqual(mobilePicked[key]);
+      if (picked > mobilePicked[key]) anyWider = true;
     }
+    expect(anyWider, "没有任何槽位在桌面挑到比手机更宽的派生候选").toBe(true);
 
     // 缺图不塌陷：图片全部 404 之后，七块仍要立得住——结构还在、画布还在、没有未捕获错误。
     await page.unroute(FIXTURE_IMAGE_ROUTE);

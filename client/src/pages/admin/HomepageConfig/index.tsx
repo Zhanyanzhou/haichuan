@@ -563,6 +563,7 @@ function CanvasBlockAnchor({
     const frameWindow = anchor?.ownerDocument.defaultView;
     if (!anchor || !frameWindow || frameWindow === window) return;
 
+    let animationFrameId = 0;
     const reportCanvasHeight = () => {
       // 不能直接量 documentElement.scrollHeight：iframe 文档的根元素高度
       // 至少等于 iframe 视口高度，而视口高度又由宿主按上报值回填，
@@ -588,13 +589,21 @@ function CanvasBlockAnchor({
         "*",
       );
     };
+    const scheduleReport = () => {
+      if (animationFrameId) frameWindow.cancelAnimationFrame(animationFrameId);
+      animationFrameId = frameWindow.requestAnimationFrame(() => {
+        animationFrameId = 0;
+        reportCanvasHeight();
+      });
+    };
 
     // 锚点位于 Puck 的 iframe document，使用其自身的 ResizeObserver 才能稳定监听尺寸变化。
-    const observer = new frameWindow.ResizeObserver(reportCanvasHeight);
+    const observer = new frameWindow.ResizeObserver(scheduleReport);
     observer.observe(anchor);
-    reportCanvasHeight();
-    const delayedReport = frameWindow.setTimeout(reportCanvasHeight, 80);
+    scheduleReport();
+    const delayedReport = frameWindow.setTimeout(scheduleReport, 80);
     return () => {
+      if (animationFrameId) frameWindow.cancelAnimationFrame(animationFrameId);
       observer.disconnect();
       frameWindow.clearTimeout(delayedReport);
     };
@@ -1088,6 +1097,7 @@ function CanvasPreview({ frameRef }: { frameRef: RefObject<HTMLDivElement> }) {
   }, [viewportHeight]);
 
   useEffect(() => {
+    let animationFrameId = 0;
     const handleCanvasHeight = (event: MessageEvent<CanvasHeightMessage>) => {
       const detail = event.data;
       // Puck 重建预览 iframe 时 WindowProxy 会变化，不能依赖对象全等判断。
@@ -1103,12 +1113,19 @@ function CanvasPreview({ frameRef }: { frameRef: RefObject<HTMLDivElement> }) {
         detail.height > 50000
       )
         return;
-      setContentHeight((current) =>
-        Math.abs(current - detail.height) < 2 ? current : detail.height,
-      );
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      animationFrameId = requestAnimationFrame(() => {
+        animationFrameId = 0;
+        setContentHeight((current) =>
+          Math.abs(current - detail.height) < 2 ? current : detail.height,
+        );
+      });
     };
     window.addEventListener("message", handleCanvasHeight);
-    return () => window.removeEventListener("message", handleCanvasHeight);
+    return () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      window.removeEventListener("message", handleCanvasHeight);
+    };
   }, [frameRef, viewportHeight]);
 
   return (
@@ -1968,12 +1985,23 @@ function EditorBody({
     const stage = stageRef.current;
     const frame = previewFrameRef.current;
     if (!stage || !frame) return;
+    let animationFrameId = 0;
+    const scheduleUpdate = () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      animationFrameId = requestAnimationFrame(() => {
+        animationFrameId = 0;
+        updateCanvasMetrics();
+      });
+    };
 
-    const observer = new ResizeObserver(updateCanvasMetrics);
+    const observer = new ResizeObserver(scheduleUpdate);
     observer.observe(stage);
     observer.observe(frame);
-    requestAnimationFrame(updateCanvasMetrics);
-    return () => observer.disconnect();
+    scheduleUpdate();
+    return () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      observer.disconnect();
+    };
   }, [updateCanvasMetrics, appData.content.length, viewportWidth]);
 
   // 页面内容可以随工作区缩放，编辑 HUD 则需要保持稳定的屏幕尺寸。

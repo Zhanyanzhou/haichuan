@@ -125,7 +125,10 @@ if (new URLSearchParams(window.location.search).has("schema3")) {
 }
 draft.definition = definition;
 useTemplateEditorSession.getState().open(draft);
-if (explicitSizePreview) useTemplateEditorSession.getState().setPreviewWidth(900);
+// 画布观察宽度与 metadata.previewDesktopWidth 分离：显示端固定 900，避免共享 1440 画布
+// 把"拖动预览宽度"断言绑到错误的起始宽度上。尺寸场景也显式设 900。
+const requestedPreview = Number(new URLSearchParams(window.location.search).get("preview"));
+useTemplateEditorSession.getState().setPreviewWidth(Number.isFinite(requestedPreview) && requestedPreview >= 280 ? requestedPreview : 900);
 const initialZoom = Number(new URLSearchParams(window.location.search).get("zoom"));
 if (initialZoom) useTemplateEditorSession.getState().setCanvasZoom(initialZoom);
 

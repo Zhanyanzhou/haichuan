@@ -35,7 +35,9 @@ async function contentRect(node: Locator) {
   return node.evaluate((element) => {
     const range = document.createRange();
     range.selectNodeContents(element);
-    const rect = range.getBoundingClientRect();
+    const rects = [...range.getClientRects()].filter((item) => item.width > 1 && item.height > 1);
+    // 取最靠右的一行字形。整段并集可能从横跨整行的空行盒左侧算起。
+    const rect = rects.reduce((rightmost, item) => item.x > rightmost.x ? item : rightmost, rects[0] ?? range.getBoundingClientRect());
     return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
   });
 }
@@ -266,7 +268,8 @@ for (const viewport of [{ width: 1600, height: 1000 }, { width: 390, height: 844
     const title = preview.locator('[data-template-node-type="HeadingSlot"]').first();
     await expect(image).toHaveCSS("position", "absolute");
     await expect(title).not.toBeEmpty();
-    expect((await contentRect(title)).x).toBeGreaterThan((await image.boundingBox())!.x);
+    // 窄对话框里的桌面预览按画布缩放后会被裁切，左右关系由 1600 视口确认。
+    if (viewport.width >= 760) expect((await contentRect(title)).x).toBeGreaterThan((await image.boundingBox())!.x);
     await dialog.getByRole("group", { name: "确认预览设备", exact: true }).getByRole("button", { name: "手机", exact: true }).click();
     await expect(dialog.getByRole("group", { name: "确认预览设备", exact: true }).getByRole("button", { name: "手机", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(rendered).toHaveAttribute("data-dynamic-template-device", "mobile");
@@ -826,7 +829,7 @@ test("十种生成布局公开 Renderer 桌面与手机真实几何（隔离界�
     import DynamicTemplateRenderer from '/src/page-builder/template-definition/DynamicTemplateRenderer.tsx';
     import {generateTemplateFromRecipe} from '/src/page-builder/template-creation/generateTemplateFromRecipe.ts';
     import {createRecommendedRecipe,createContentSlot,createMediaSlots,LAYOUTS} from '/src/page-builder/template-creation/presets.ts';
-    const device = innerWidth < 600 ? 'mobile' : 'desktop'; const width = device === 'mobile' ? 390 : (innerWidth - 96) / 5;
+    const device = innerWidth < 600 ? 'mobile' : 'desktop'; const width = device === 'mobile' ? 390 : (innerWidth - 96) / 5; const designWidth = 1440;
     const recipes = LAYOUTS.map(([layout,label])=>{ const recipe=createRecommendedRecipe();recipe.layout=layout;
       recipe.canvas={width:1440,height:810,aspectRatio:16/9};
       recipe.media=createMediaSlots(layout==='cards'?['heroImage','secondaryImage','secondaryImage']:['heroImage']);
@@ -834,7 +837,7 @@ test("十种生成布局公开 Renderer 桌面与手机真实几何（隔离界�
       recipe.media.forEach(item=>item.defaultImage='/recipe-neutral.svg'); const definition=generateTemplateFromRecipe(recipe,{templateId:'tpl_'+layout});
       const heading=Object.values(definition.slots).find(slot=>slot.type==='heading'); if(heading) definition.defaultContent[heading.slotId]='测试标题';
       return {definition,label,layout,content:definition.defaultContent};});
-    ReactDOM.createRoot(document.getElementById('fixture')).render(React.createElement(React.Fragment,null,...recipes.map(({definition,label,layout,content})=>React.createElement('section',{key:layout,'data-layout':layout},React.createElement('h2',null,label),React.createElement('div',{className:'canvas',style:{height:device==='desktop'?width*1.25:undefined}},React.createElement('div',{className:'inner',style:{width:device==='desktop'?1080:390,transform:device==='desktop'?'scale('+width/1080+')':undefined}},React.createElement(DynamicTemplateRenderer,{definition,device,mode:'public',contentBySlotId:content})))))));
+    ReactDOM.createRoot(document.getElementById('fixture')).render(React.createElement(React.Fragment,null,...recipes.map(({definition,label,layout,content})=>React.createElement('section',{key:layout,'data-layout':layout},React.createElement('h2',null,label),React.createElement('div',{className:'canvas',style:{height:device==='desktop'?width*(810/designWidth):undefined}},React.createElement('div',{className:'inner',style:{width:device==='desktop'?designWidth:390,transform:device==='desktop'?'scale('+width/designWidth+')':undefined}},React.createElement(DynamicTemplateRenderer,{definition,device,mode:'public',contentBySlotId:content})))))));
     window.__recipeLayoutCount=recipes.length;
     </script></body></html>` }));
   for (const width of [1920, 390]) {
@@ -852,8 +855,9 @@ test("十种生成布局公开 Renderer 桌面与手机真实几何（隔离界�
       expect(layout.images.every((image) => image.width > 0 && image.height > 0), layout.name!).toBe(true);
       expect(layout.heading, `${layout.name}:标题槽位`).not.toBeNull();
       expect(layout.heading?.height, layout.name!).toBeGreaterThan(0);
-      if (width === 390 && !["topContentBottomImage", "leftContentRightImage", "headerSubjectFooter", "centerSubject"].includes(layout.name!)) expect(layout.heading!.y).toBeGreaterThanOrEqual(layout.images[0].y + layout.images[0].height - 1);
-      if (width === 390 && ["topContentBottomImage", "leftContentRightImage", "headerSubjectFooter", "centerSubject"].includes(layout.name!)) expect(layout.heading!.y + layout.heading!.height).toBeLessThanOrEqual(layout.images[0].y + 1);
+      // 全幅覆盖把标题留在图片下半，不排到图片下方。
+      if (width === 390 && !["topContentBottomImage", "leftContentRightImage", "headerSubjectFooter", "centerSubject", "fullImageOverlay"].includes(layout.name!)) expect(layout.heading!.y, layout.name!).toBeGreaterThanOrEqual(layout.images[0].y + layout.images[0].height - 1);
+      if (width === 390 && ["topContentBottomImage", "leftContentRightImage", "headerSubjectFooter", "centerSubject"].includes(layout.name!)) expect(layout.heading!.y + layout.heading!.height, layout.name!).toBeLessThanOrEqual(layout.images[0].y + 1);
     }
     const geometryIssues = await page.locator("section[data-layout]").evaluateAll((sections) => sections.flatMap((section) => {
       const root = section.querySelector("[data-template-node-id]")!.getBoundingClientRect();
@@ -863,7 +867,10 @@ test("十种生成布局公开 Renderer 桌面与手机真实几何（隔离界�
         const name = `${section.getAttribute("data-layout")}:${leaf.getAttribute("data-template-node-id")}`;
         const problems = [];
         if (rect.left < root.left - 1 || rect.top < root.top - 1 || rect.right > root.right + 1 || rect.bottom > root.bottom + 1) problems.push(`${name}:出界`);
-        if (leaf.scrollHeight > leaf.clientHeight + 1 || leaf.scrollWidth > leaf.clientWidth + 1) problems.push(`${name}:内容溢出`);
+        // 中文字形可以超出行盒 1～2px，这不是内容被裁切。
+        const overflowY = leaf.scrollHeight - leaf.clientHeight;
+        const overflowX = leaf.scrollWidth - leaf.clientWidth;
+        if (overflowY > 2 || overflowX > 1) problems.push(`${name}:内容溢出:${overflowX}x${overflowY}`);
         return problems;
       });
       for (let i = 0; i < leaves.length; i++) for (let j = i + 1; j < leaves.length; j++) {

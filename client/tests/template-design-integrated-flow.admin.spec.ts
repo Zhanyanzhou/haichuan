@@ -507,6 +507,15 @@ async function readSessionSnapshot(page: Page) {
   });
 }
 
+/** 根节点的「排列与分栏」收在次级折叠里；并列容器则直接露出预览按钮。 */
+async function previewContainerLayout(page: Page, name: "预览左右排列" | "预览上下排列") {
+  const details = page.locator('details[data-template-property-group="排列与分栏"]');
+  if (await details.count() && (await details.getAttribute("open")) === null) {
+    await details.locator("summary").click();
+  }
+  await page.getByRole("button", { name, exact: true }).click();
+}
+
 function expectExactStructure(definition: TemplateDefinitionV2) {
   const root = definition.nodes[definition.rootNodeId];
   if (!root) throw new Error("定义缺少根节点");
@@ -678,6 +687,13 @@ function expectRendererGeometry(
 ) {
   const identity = expectExactStructure(definition);
   const hiddenNodeIdSet = new Set(hiddenNodeIds);
+  // 公开预览丢掉没有内容的容器。空槽位的上级区域和分组也不再占 DOM。
+  const isCollapsedBranch = (nodeId: string): boolean => {
+    const node = definition.nodes[nodeId];
+    if (!node) return false;
+    if (node.slotId) return hiddenNodeIdSet.has(nodeId);
+    return node.childIds.length > 0 && node.childIds.every(isCollapsedBranch);
+  };
   const expectedOrder = [
     identity.rootNodeId,
     identity.regionIds[0],
@@ -686,19 +702,14 @@ function expectRendererGeometry(
     identity.regionIds[1],
     identity.groupIds[1],
     ...identity.slotNodeIds.slice(1),
-  ].filter((nodeId) => !hiddenNodeIdSet.has(nodeId));
+  ].filter((nodeId) => nodeId === identity.rootNodeId
+    || (!hiddenNodeIdSet.has(nodeId) && !isCollapsedBranch(nodeId)));
   expect(geometry.nodes.map((node) => node.nodeId), `${device} 必须按 Definition 深度优先顺序渲染真实节点`)
     .toEqual(expectedOrder);
   const expectedParents = new Map<string, string | null>([[identity.rootNodeId, null]]);
   for (const node of Object.values(definition.nodes)) {
     for (const childId of node.childIds) expectedParents.set(childId, node.nodeId);
   }
-  const isCollapsedBranch = (nodeId: string): boolean => {
-    const node = definition.nodes[nodeId];
-    if (!node) return false;
-    if (node.slotId) return hiddenNodeIdSet.has(nodeId);
-    return node.childIds.length > 0 && node.childIds.every(isCollapsedBranch);
-  };
   for (const node of geometry.nodes) {
     expect(node.parentNodeId, `${device}.${node.nodeId} 必须保持 Definition 父子关系`)
       .toBe(expectedParents.get(node.nodeId));
@@ -716,7 +727,7 @@ function expectRendererGeometry(
   for (const parent of Object.values(definition.nodes)) {
     if (parent.childIds.length < 2) continue;
     const orderedChildren = parent.childIds
-      .filter((childId) => !hiddenNodeIdSet.has(childId))
+      .filter((childId) => byId.has(childId))
       .map((childId, index) => ({ childId, index, order: definition.nodes[childId].responsive[device].order }))
       .sort((left, right) => left.order - right.order || left.index - right.index)
       .map(({ childId }) => byId.get(childId)!);
@@ -735,16 +746,32 @@ function expectResponsiveRootGeometry(
   geometry: Awaited<ReturnType<typeof readRendererGeometry>>,
   definition: TemplateDefinitionV2,
   device: "desktop" | "mobile",
+  hiddenNodeIds: readonly string[] = [],
 ) {
   const identity = expectExactStructure(definition);
+  const hiddenNodeIdSet = new Set(hiddenNodeIds);
+  const isCollapsedBranch = (nodeId: string): boolean => {
+    const node = definition.nodes[nodeId];
+    if (!node) return false;
+    if (node.slotId) return hiddenNodeIdSet.has(nodeId);
+    return node.childIds.length > 0 && node.childIds.every(isCollapsedBranch);
+  };
   const byId = new Map(geometry.nodes.map((node) => [node.nodeId, node]));
   const root = byId.get(identity.rootNodeId);
   const firstRegion = byId.get(identity.regionIds[0]);
   const secondRegion = byId.get(identity.regionIds[1]);
-  if (!root || !firstRegion || !secondRegion) throw new Error(`${device} 缺少根级响应式几何节点`);
+  if (!root) throw new Error(`${device} 缺少根级响应式几何节点`);
   expect(root.display, `${device} 根节点必须使用真实 flex 构图`).toBe("flex");
   expect(root.flexDirection, `${device} 根节点方向必须与当前端定义一致`)
     .toBe(device === "desktop" ? "row" : "column");
+  if (!firstRegion || !secondRegion) {
+    const missingRegionIds = [
+      identity.regionIds[0],
+      identity.regionIds[1],
+    ].filter((regionId) => !byId.has(regionId));
+    if (missingRegionIds.every(isCollapsedBranch)) return;
+    throw new Error(`${device} 缺少根级响应式几何节点`);
+  }
   if (device === "desktop") {
     expect(secondRegion.rect.x, "桌面端第二内容区域必须真实位于第一内容区域右侧")
       .toBeGreaterThan(firstRegion.rect.x + 1);
@@ -878,7 +905,7 @@ async function expectPageFieldSummary(
       hideable: true,
       label: "工艺主图",
       limit: "建议 1600 × 1000 像素",
-      overrideCopy: "页面设计覆盖：允许图片适配/图片焦点覆盖",
+      overrideCopy: "允许图片适配/图片焦点覆盖",
       policy: {
         position: false, size: false, zIndex: false, imageFit: true, imageFocus: true,
         typography: false, spacing: false, minWidthPercent: 25, maxWidthPercent: 150,
@@ -894,7 +921,7 @@ async function expectPageFieldSummary(
       hideable: false,
       label: "工艺标题",
       limit: "最小 2 字；最大 36 字",
-      overrideCopy: "页面设计覆盖：允许文字样式覆盖；字号 12–96 像素",
+      overrideCopy: "允许文字样式覆盖；字号 12–96 像素",
       policy: {
         position: false, size: false, zIndex: false, imageFit: false, imageFocus: false,
         typography: true, spacing: false, minWidthPercent: 25, maxWidthPercent: 150,
@@ -910,7 +937,7 @@ async function expectPageFieldSummary(
       hideable: true,
       label: "正文槽位",
       limit: "最小 0 字；最大 240 字",
-      overrideCopy: "页面设计覆盖：允许间距覆盖；间距不超过 120 像素",
+      overrideCopy: "允许间距覆盖；间距不超过 120 像素",
       policy: {
         position: false, size: false, zIndex: false, imageFit: false, imageFocus: false,
         typography: false, spacing: true, minWidthPercent: 25, maxWidthPercent: 150,
@@ -926,7 +953,7 @@ async function expectPageFieldSummary(
       hideable: true,
       label: "了解工艺",
       limit: "未设置额外限制",
-      overrideCopy: "页面设计覆盖：允许位置覆盖；偏移不超过 30%",
+      overrideCopy: "允许位置覆盖；偏移不超过 30%",
       policy: {
         position: true, size: false, zIndex: false, imageFit: false, imageFocus: false,
         typography: false, spacing: false, minWidthPercent: 25, maxWidthPercent: 150,
@@ -956,8 +983,14 @@ async function expectPageFieldSummary(
     await tree.getByRole("treeitem", { name: scope.region }).click();
     await page.getByRole("tab", { name: "页面开放范围" }).click();
     const fields = page.getByRole("region", { name: "当前结构页面字段" });
-    const buttons = fields.getByRole("button");
+    const buttons = fields.getByRole("button", { name: /的页面使用规则$/ });
     await expect(buttons).toHaveCount(scope.count);
+    const preview = fields.locator(".template-editor__page-form-preview");
+    if (!(await preview.evaluate((element: HTMLDetailsElement) => element.open))) {
+      await preview.locator("summary").click();
+    }
+    const cards = preview.locator(".template-editor__page-form-field");
+    await expect(cards).toHaveCount(scope.count);
     for (let localIndex = 0; localIndex < scope.count; localIndex += 1) {
       const index = scope.offset + localIndex;
       const item = expected[index];
@@ -974,9 +1007,10 @@ async function expectPageFieldSummary(
       expect(JSON.parse(validationAttribute!)).toEqual(item.validation);
       expect(JSON.parse(policyAttribute!)).toEqual(item.policy);
       await expect(field).toContainText(`${item.required ? "必须由页面填写" : "建议填写"} · 可填写 · ${item.hideable ? "可隐藏" : "固定显示"}`);
-      await expect(field).toContainText(`控件：${item.controlLabel}`);
-      await expect(field).toContainText(`限制：${item.limit}`);
-      await expect(field).toContainText(item.overrideCopy);
+      const card = cards.nth(localIndex);
+      await expect(card).toContainText(`当前查看范围第 ${localIndex + 1} 项 · ${item.controlLabel}`);
+      await expect(card).toContainText(item.limit);
+      await expect(card).toContainText(item.overrideCopy);
     }
   }
 }
@@ -1470,18 +1504,15 @@ test("TD-6A 同一个专用模板从真正空白制作到目录精确 v1", async
   await page.keyboard.press("Enter");
   await page.getByRole("tab", { name: "设计", exact: true }).click();
   await page.getByRole("button", { name: /桌面端模板布局/ }).click();
-  await page.getByRole("button", { name: "预览左右排列", exact: true }).click();
+  await previewContainerLayout(page, "预览左右排列");
   await page.getByRole("button", { name: "确认排列转换", exact: true }).click();
   await page.getByRole("button", { name: /移动端模板布局/ }).click();
-  await page.getByRole("button", { name: "预览上下排列", exact: true }).click();
+  await previewContainerLayout(page, "预览上下排列");
   await page.getByRole("button", { name: "确认排列转换", exact: true }).click();
   await tree.getByRole("treeitem", { name: "图片组 布局容器" }).click();
   await page.getByRole("button", { name: /桌面端模板布局/ }).click();
-  await page.getByRole("button", { name: "预览左右排列", exact: true }).click();
-  await page.getByRole("button", { name: "确认排列转换", exact: true }).click();
-  await page.getByRole("button", { name: /移动端模板布局/ }).click();
-  await page.getByRole("button", { name: "预览上下排列", exact: true }).click();
-  await page.getByRole("button", { name: "确认排列转换", exact: true }).click();
+  // 只有一个可见子项时，切换排列不会重排内部内容，预览按钮保持禁用。
+  await expect(page.getByRole("button", { name: "预览左右排列", exact: true })).toBeDisabled();
 
   await openPageField(page, /图片槽位/, "工艺主图");
   const systemIdentity = page.getByText("系统身份 · 改名称不会改变身份", { exact: true });
@@ -1526,7 +1557,7 @@ test("TD-6A 同一个专用模板从真正空白制作到目录精确 v1", async
   expect(authoredSession.definition.nodes[authoredSession.definition.rootNodeId].responsive.mobile.direction)
     .toBe("column");
   expect(authoredSession.definition.nodes[imageGroupId].responsive.desktop.direction).toBe("row");
-  expect(authoredSession.definition.nodes[imageGroupId].responsive.mobile.direction).toBe("column");
+  expect(authoredSession.definition.nodes[imageGroupId].responsive.mobile.direction).toBeUndefined();
   await expectPageFieldSummary(page, authoredSession.pageFields);
   const pageFieldsByLabel = Object.fromEntries(authoredSession.pageFields.map((field) => [field.label, field]));
   expect(pageFieldsByLabel["工艺主图"].effectiveDesignOverrideCapabilities).toMatchObject({ imageFit: true });
@@ -1698,7 +1729,7 @@ test("TD-6A 同一个专用模板从真正空白制作到目录精确 v1", async
         : [];
       const geometry = await readRendererGeometry(page, redoneBatch.definition!, run.device);
       expectRendererGeometry(geometry, redoneBatch.definition!, run.device, missingNodeIds);
-      expectResponsiveRootGeometry(geometry, redoneBatch.definition!, run.device);
+      expectResponsiveRootGeometry(geometry, redoneBatch.definition!, run.device, missingNodeIds);
       if (value === "short-text") shortHeight = geometry.root.scrollHeight;
       if (value === "long-text") {
         expect(geometry.root.scrollHeight, `${run.device} 长文不得出现失控高度`)

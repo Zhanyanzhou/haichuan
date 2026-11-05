@@ -355,6 +355,7 @@ export default function TemplateViewportFrame({
   useLayoutEffect(() => {
     const stage = stageRef.current;
     if (!stage) return undefined;
+    let animationFrameId = 0;
     const measureWidth = () => {
       const viewport = readCanvasContentBox(stage);
       const fitScale = resolveFiniteCanvasScale(calculateFitCanvasScale({
@@ -371,10 +372,20 @@ export default function TemplateViewportFrame({
         ? current
         : { ...current, fitScale });
     };
-    const observer = new ResizeObserver(measureWidth);
+    const scheduleMeasure = () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      animationFrameId = requestAnimationFrame(() => {
+        animationFrameId = 0;
+        measureWidth();
+      });
+    };
+    const observer = new ResizeObserver(scheduleMeasure);
     observer.observe(stage);
-    measureWidth();
-    return () => observer.disconnect();
+    scheduleMeasure();
+    return () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      observer.disconnect();
+    };
   }, [measurement.documentHeight, minimumFitScale, sourceWidth]);
 
   useEffect(() => {
@@ -420,7 +431,6 @@ export default function TemplateViewportFrame({
     if (!frameDocument || !content) return undefined;
     const ownerWindow = frameDocument.defaultView;
     if (!ownerWindow || !content.isConnected || content.ownerDocument !== frameDocument) return undefined;
-    let animationFrameId: number | null = null;
     const commitMeasuredHeight = () => {
       if (!content.isConnected || frameRef.current?.contentDocument !== frameDocument) return;
       const contentRect = content.getBoundingClientRect();
@@ -519,38 +529,44 @@ export default function TemplateViewportFrame({
         overflowNodeId,
       });
     };
+    let timeoutId: number | null = null;
     const measureHeight = () => {
       if (!ownerWindow) {
         commitMeasuredHeight();
         return;
       }
-      if (animationFrameId !== null) return;
-      // ResizeObserver 回调中同步改变 iframe 高度会让依赖视口尺寸的模板
-      // 在同一帧反向触发观察器。延迟到下一动画帧提交，保留实时测量，
-      // 同时切断浏览器报告的 undelivered notifications 循环。
-      animationFrameId = ownerWindow.requestAnimationFrame(() => {
-        animationFrameId = null;
+      if (timeoutId !== null) return;
+      // 观察目标尺寸变化后再改 iframe 高度，会在同帧 RO 投递里形成回写。
+      // 用 setTimeout(0) 离开当前帧的 RO 交付，而不是再叠一层 rAF。
+      timeoutId = ownerWindow.setTimeout(() => {
+        timeoutId = null;
         commitMeasuredHeight();
-      });
+      }, 0) as unknown as number;
     };
     // 内容属于 iframe，与 Overlay / 目录预览一致，使用源文档的观察器。
+    // 只观察内容根与直接子树：逐节点 observe 会在改 iframe 高度时对每个槽位
+    // 再投递一次，放大 Chrome undelivered notifications。几何仍在 commit 时查询。
     const observer = new ownerWindow.ResizeObserver(measureHeight);
     observer.observe(content);
-    // iframe 文档本身至少与当前 viewport 等高，读取 body/documentElement.scrollHeight
-    // 会让随内容画布只能增高、无法在比例或内容缩短后回落。只测量真实渲染子树，
-    // 并补充直接子项的可见底边以覆盖绝对定位或变换后的溢出内容。
     Array.from(content.children).forEach((child) => observer.observe(child));
-    content.querySelectorAll<HTMLElement>("[data-template-node-id], [data-content-role]")
-      .forEach((node) => observer.observe(node));
+    const mutationObserver = new ownerWindow.MutationObserver(measureHeight);
+    mutationObserver.observe(content, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ["class", "hidden", "data-template-node-id", "data-content-role"],
+    });
     measureHeight();
     const timers = ownerWindow
       ? [0, 50, 200, 500].map((delay) => ownerWindow.setTimeout(measureHeight, delay))
       : [];
     return () => {
       observer.disconnect();
+      mutationObserver.disconnect();
       if (ownerWindow) {
         timers.forEach((timer) => ownerWindow.clearTimeout(timer));
-        if (animationFrameId !== null) ownerWindow.cancelAnimationFrame(animationFrameId);
+        if (timeoutId !== null) ownerWindow.clearTimeout(timeoutId);
       }
     };
   }, [autoHeight, children, contentElement, fallbackHeight, frameDocument, heightMode, sourceWidth, styleRevision]);

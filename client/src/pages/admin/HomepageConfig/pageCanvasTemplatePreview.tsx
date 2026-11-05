@@ -190,6 +190,7 @@ export function PageCanvasTemplatePreview() {
     const frameWindow = root?.ownerDocument.defaultView;
     if (!root || !preview || !frameWindow || frameWindow === window) return;
 
+    let animationFrameId = 0;
     const reportCanvasHeight = () => {
       const contentShell = root.closest<HTMLElement>(".homepage-editor__storefront-frame");
       const documentHeight = Math.ceil(Math.max(
@@ -202,11 +203,19 @@ export function PageCanvasTemplatePreview() {
         "*",
       );
     };
-    const observer = new frameWindow.ResizeObserver(reportCanvasHeight);
+    const scheduleReport = () => {
+      if (animationFrameId) frameWindow.cancelAnimationFrame(animationFrameId);
+      animationFrameId = frameWindow.requestAnimationFrame(() => {
+        animationFrameId = 0;
+        reportCanvasHeight();
+      });
+    };
+    const observer = new frameWindow.ResizeObserver(scheduleReport);
     observer.observe(root);
-    reportCanvasHeight();
-    const delayedReport = frameWindow.setTimeout(reportCanvasHeight, 80);
+    scheduleReport();
+    const delayedReport = frameWindow.setTimeout(scheduleReport, 80);
     return () => {
+      if (animationFrameId) frameWindow.cancelAnimationFrame(animationFrameId);
       observer.disconnect();
       frameWindow.clearTimeout(delayedReport);
     };

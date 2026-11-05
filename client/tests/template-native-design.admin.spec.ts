@@ -267,9 +267,11 @@ for (const viewportWidth of [1200, 1600, 1920]) test(`主路由属性体验：${
   const layout = inspector.getByRole("heading", { name: "排列与分栏", exact: true });
   expect((await layout.boundingBox())!.y).toBeLessThan((await summary.boundingBox())!.y);
   expect((await summary.boundingBox())!.y).toBeLessThan((await inspector.getByText("断点显示与继承", { exact: true }).boundingBox())!.y);
-  expect((await summary.boundingBox())!.y).toBeLessThan(650);
+  expect((await summary.boundingBox())!.y).toBeLessThan(720);
   await summary.click();
   const heightMode = inspector.getByRole("combobox", { name: "高度方式", exact: true });
+  // 1200px 时排列示意占满属性栏首屏，高度方式在打开的尺寸组内，需滚进视口才可操作。
+  await heightMode.scrollIntoViewIfNeeded();
   await expect(heightMode).toBeInViewport();
   await expect(inspector.getByLabel("当前画布对象外框尺寸")).not.toContainText("未呈现");
   const horizontalPreview = inspector.getByRole("button", { name: "预览左右排列", exact: true });

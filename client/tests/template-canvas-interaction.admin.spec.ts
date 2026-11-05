@@ -168,7 +168,14 @@ test("尺寸实际反馈：锚定百分比限制使用CSS包含块且受限预�
   await mountCanvas(page, false, true, false, false, false, false, "zoom=1&anchor-limit"); await enterStack(page);
   await page.getByRole("button", { name: "选择模板目标 前图", exact: true }).click({ position: { x: 12, y: 35 } });
   const before = await snapshot(page); const node = page.frameLocator("iframe").locator(`[data-template-node-id="${before.ids.first}"]`);
-  const initial = await node.boundingBox(); const maxWidth = await node.evaluate((element) => element.parentElement!.clientWidth * .5);
+  const initial = await node.boundingBox(); const maxWidth = await node.evaluate((element) => {
+    const specified = getComputedStyle(element).maxWidth;
+    const parent = element.parentElement;
+    if (!parent) return Number.NaN;
+    if (specified.endsWith("%")) return parent.getBoundingClientRect().width * Number.parseFloat(specified) / 100;
+    const pixels = Number.parseFloat(specified);
+    return Number.isFinite(pixels) ? pixels : parent.getBoundingClientRect().width * 0.5;
+  });
   const handle = await page.getByRole("button", { name: "调整前图大小：e", exact: true }).boundingBox(); if (!handle || !initial) throw new Error("缺少锚定测试尺寸");
   await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2); await page.mouse.down();
   await page.mouse.move(handle.x + handle.width / 2 + 350, handle.y + handle.height / 2);
@@ -233,7 +240,7 @@ test("尺寸实际反馈：横向保留比例，锚定左上柄保持相反边",
 });
 
 test("隔离画布：流式拖动重排保存关系，连续拖宽不修改模板", async ({ page }) => {
-  await mountCanvas(page, true); await enterStack(page);
+  await mountCanvas(page, true, false, false, false, false, false, "zoom=1&preview=1440"); await enterStack(page);
   await page.getByRole("button", { name: "选择模板目标 前图", exact: true }).click({ position: { x: 10, y: 60 } });
   const before = await snapshot(page);
   const beginReorder = async () => {
@@ -279,10 +286,11 @@ test("隔离画布：流式拖动重排保存关系，连续拖宽不修改模�
   expect((await snapshot(page)).history).toBe(1);
   await page.getByRole("button", { name: "撤销", exact: true }).click();
   expect((await snapshot(page)).childIds).toEqual(before.childIds);
+  await page.setViewportSize({ width: 1920, height: 1080 });
   const width = await page.getByRole("button", { name: /^拖动预览宽度/ }).boundingBox();
   if (!width) throw new Error("缺少预览宽度柄");
   await page.mouse.move(width.x + width.width / 2, width.y + width.height / 2); await page.mouse.down();
-  await page.mouse.move(width.x - 150, width.y + width.height / 2); await page.mouse.up();
+  await page.mouse.move(width.x - 600, width.y + width.height / 2, { steps: 8 }); await page.mouse.up();
   const resized = await snapshot(page);
   expect(resized.previewWidth).toBeLessThan(900);
   expect(resized.storedWidth).toBe(900); expect(resized.history).toBe(0); expect(resized.dirty).toBe(false);
@@ -398,7 +406,7 @@ test("隔离画布：拖入显示容器和插入线，取消零写入，提交�
 });
 
 test("隔离画布：带内边距的锚定对象移动写偏移，缩放不改变父子顺序", async ({ page }) => {
-  await mountCanvas(page, false, true); await enterStack(page);
+  await mountCanvas(page, false, true, false, false, false, false, "zoom=1"); await enterStack(page);
   await page.getByRole("button", { name: "选择模板目标 前图", exact: true }).click({ position: { x: 6, y: 50 } });
   const before = await snapshot(page);
   const handle = await page.getByRole("button", { name: "拖动移动前图", exact: true }).boundingBox();
@@ -410,7 +418,8 @@ test("隔离画布：带内边距的锚定对象移动写偏移，缩放不改�
   await expect.poll(async () => (await snapshot(page)).preview).toBe(true);
   await page.mouse.up();
   const after = await snapshot(page);
-  expect(after.firstRules.anchor.offsetX.value).toBeGreaterThan(0);
+  expect(after.firstRules.anchor.offsetX.value).toBeCloseTo(30, 0);
+  expect(after.firstRules.anchor.offsetY.value).toBeCloseTo(15, 0);
   expect(after.childIds).toEqual(before.childIds); expect(after.history).toBe(1);
   const moved = await node.boundingBox();
   expect(moved!.x - original.x).toBeCloseTo(30, 0); expect(moved!.y - original.y).toBeCloseTo(15, 0);
@@ -805,6 +814,7 @@ test("隔离画布新增：鼠标取景遵守屏幕阈值，松手保留预览�
   const original = await image.evaluate((element) => getComputedStyle(element).objectPosition);
   await page.getByRole("button", { name: "调整画面", exact: true }).click();
   const slider = page.getByRole("slider", { name: "图片焦点", exact: true });
+  // 取景条已移出选区外；仍按网格采样，避免命中焦点标记圆点以外的遮挡层。
   const mouseHitPoint = async (target: Locator) => target.evaluate((element) => {
     const bounds = element.getBoundingClientRect();
     for (let row = 0; row < 10; row += 1) for (let column = 0; column < 10; column += 1) {

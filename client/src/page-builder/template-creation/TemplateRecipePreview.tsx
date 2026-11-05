@@ -23,20 +23,52 @@ export default function TemplateRecipePreview({ definition, device = "desktop", 
     const viewport = host.current;
     const stage = viewport?.parentElement;
     if (!viewport || !stage) return;
-    const observer = new ResizeObserver((entries) => entries.forEach((entry) => {
-      if (entry.target === viewport) setViewportWidth(entry.contentRect.width);
-      else setAvailableSize({ width: entry.contentRect.width, height: entry.contentRect.height });
-    }));
+    let animationFrameId = 0;
+    let nextViewportWidth: number | null = null;
+    let nextAvailable: { width: number; height: number } | null = null;
+    const commit = () => {
+      animationFrameId = 0;
+      if (nextViewportWidth !== null) {
+        setViewportWidth(nextViewportWidth);
+        nextViewportWidth = null;
+      }
+      if (nextAvailable) {
+        setAvailableSize(nextAvailable);
+        nextAvailable = null;
+      }
+    };
+    const observer = new ResizeObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.target === viewport) nextViewportWidth = entry.contentRect.width;
+        else nextAvailable = { width: entry.contentRect.width, height: entry.contentRect.height };
+      });
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      animationFrameId = requestAnimationFrame(commit);
+    });
     observer.observe(stage);
     observer.observe(viewport);
-    return () => observer.disconnect();
+    return () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      observer.disconnect();
+    };
   }, []);
   useEffect(() => {
     const element = content.current;
     if (!element) return;
-    const observer = new ResizeObserver(([entry]) => setNaturalHeight(Math.max(1, entry.contentRect.height)));
+    let animationFrameId = 0;
+    const observer = new ResizeObserver(([entry]) => {
+      const next = Math.max(1, entry.contentRect.height);
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      animationFrameId = requestAnimationFrame(() => {
+        animationFrameId = 0;
+        setNaturalHeight(next);
+      });
+    });
     observer.observe(element);
-    return () => observer.disconnect();
+    return () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      observer.disconnect();
+    };
   }, []);
   return <div ref={host} className={`template-recipe__preview${compact ? " template-recipe__preview--option" : ""}${device === "mobile" ? " template-recipe__preview--mobile" : ""}`} aria-label={compact ? undefined : "生成方案预览"} data-preview-device={device} data-canvas-width={canvas.width} data-canvas-height={canvas.height} style={{ width: previewWidth, ...(device === "mobile" ? { height: Math.min(availableSize.height, naturalHeight * scale) } : { aspectRatio: canvas.aspectRatio }) }}>
     <div style={{ height: device === "mobile" ? naturalHeight * scale : "100%" }}>

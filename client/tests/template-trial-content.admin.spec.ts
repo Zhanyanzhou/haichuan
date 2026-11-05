@@ -445,7 +445,7 @@ test("模板试排内容只存在当前会话，并驱动画布与压力预览�
   const richTextNode = Object.values(extendedDefinition.nodes).find((node) => node.type === "RichTextSlot");
   const linkNode = Object.values(extendedDefinition.nodes).find((node) => node.type === "LinkSlot");
   if (!buttonNode || !richTextNode || !linkNode) throw new Error("补充试排槽位失败");
-  await page.getByRole("button", { name: "保存模板", exact: true }).click();
+  await page.locator('.homepage-editor__toolbar [data-workspace-action="save"]').click();
   await expect(page.getByText("模板草稿已保存，可继续设计或发布", { exact: true }).last()).toBeVisible();
   if (!server.resource) throw new Error("Route-Mock 未记录试排前的模板基线");
   const beforeTrial = await readEditorFacts(page);
@@ -609,7 +609,7 @@ test("模板试排内容只存在当前会话，并驱动画布与压力预览�
     .locator(`[data-template-node-id="${headingNode.nodeId}"]`)).not.toContainText("海风与珍珠的夏夜");
   expect(JSON.stringify((await readEditorFacts(page)).trialContentBySlotId)).toContain("海风与珍珠的夏夜");
 
-  await page.getByRole("button", { name: "保存模板", exact: true }).click();
+  await page.locator('.homepage-editor__toolbar [data-workspace-action="save"]').click();
   await expect(page.getByText("模板草稿已保存，可继续设计或发布", { exact: true }).last()).toBeVisible();
   if (!server.resource) throw new Error("Route-Mock 未记录保存后的模板");
   const savedDefinition = structuredClone(server.resource.draft.definition) as TemplateDefinitionV2;

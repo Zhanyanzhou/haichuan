@@ -254,13 +254,21 @@ export default function CanvasSelectionDock({
       });
     };
 
-    updatePosition();
+    let positionFrame = 0;
+    const scheduleUpdatePosition = () => {
+      if (positionFrame) hostWindow.cancelAnimationFrame(positionFrame);
+      positionFrame = hostWindow.requestAnimationFrame(() => {
+        positionFrame = 0;
+        updatePosition();
+      });
+    };
+    scheduleUpdatePosition();
     revealDock();
     hostWindow.addEventListener("resize", revealDock);
-    hostWindow.addEventListener("scroll", updatePosition, true);
+    hostWindow.addEventListener("scroll", scheduleUpdatePosition, true);
     frameWindow.addEventListener("resize", revealDock);
-    frameWindow.addEventListener("scroll", updatePosition, true);
-    const overlayObserver = new ResizeObserver(updatePosition);
+    frameWindow.addEventListener("scroll", scheduleUpdatePosition, true);
+    const overlayObserver = new ResizeObserver(scheduleUpdatePosition);
     const frameObserver = new ResizeObserver(revealDock);
     overlayObserver.observe(selectedBlock);
     frameObserver.observe(frame);
@@ -268,10 +276,11 @@ export default function CanvasSelectionDock({
 
     return () => {
       hostWindow.removeEventListener("resize", revealDock);
-      hostWindow.removeEventListener("scroll", updatePosition, true);
+      hostWindow.removeEventListener("scroll", scheduleUpdatePosition, true);
       frameWindow.removeEventListener("resize", revealDock);
-      frameWindow.removeEventListener("scroll", updatePosition, true);
+      frameWindow.removeEventListener("scroll", scheduleUpdatePosition, true);
       if (revealFrame) hostWindow.cancelAnimationFrame(revealFrame);
+      if (positionFrame) hostWindow.cancelAnimationFrame(positionFrame);
       overlayObserver.disconnect();
       frameObserver.disconnect();
     };

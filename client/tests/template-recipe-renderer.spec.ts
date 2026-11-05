@@ -55,7 +55,9 @@ test("双图新构图在预览、编辑与公开 Renderer 一致，手机重排�
     expect(b.width).toBeCloseTo(a.width, 0);
     expect(b.y).toBeGreaterThanOrEqual(a.y + a.height + 15);
     if (mode === "mobile") {
-      expect(frame.height / frame.width, "桌面 4:3 在手机上对换成 3:4，装不下的图可以溢出").toBeCloseTo(4 / 3, 1);
+      await expect(host.locator(".hc-dynamic-template")).toHaveAttribute("data-template-paired-canvas", "3:4");
+      // 两张方图加文字高于 3:4 时，外壳随内容变高，不把对换画布锁成一条底色。
+      expect(frame.height / frame.width, "桌面 4:3 记下 3:4，装不下的图可以高出画布").toBeGreaterThan(4 / 3 - 0.05);
     } else {
       expect(b.y + b.height).toBeLessThanOrEqual(frame.y + frame.height + 1);
     }
@@ -1315,7 +1317,8 @@ test("新几何在指定视口里，没有手机图的首屏按桌面反比例�
   expect(phone.grid.rowCount).toBe(2);
   expect(phone.grid.cardRatio).toBeGreaterThan(1.15);
   expect(phone.grid.cardRatio).toBeLessThan(1.35);
-  expect(phone.grid.section && phone.grid.section.height / phone.grid.section.width).toBeCloseTo(4 / 5, 1);
+  // 四张 4:5 作品卡排成两行时高于横画布，外壳跟随卡片，不留空画布底色。
+  expect(phone.grid.section && phone.grid.section.height / phone.grid.section.width).toBeGreaterThan(1);
   expect(phone.invitation.paired).toBe("9:16");
   expect(phone.split.paired).toBe("2:3");
   expect(phone.invitation.section && phone.split.section).toBeTruthy();
@@ -1513,7 +1516,8 @@ test("首页首屏旧画布与新画框在指定视口分开成立", async ({ pa
   await show({ geometry: "old", device: "mobile", mode: "editor", title: longCopy, subtitle: longCopy });
   const oldLong = await read();
   expect(oldLong.paired).toBe("9:16");
-  expect(Math.abs(oldLong.imageHeight - oldShort.imageHeight)).toBeLessThan(8);
+  // 未写 hero-media-frame 时主图铺满整节，文案变长后图片跟着变高。
+  expect(oldLong.imageHeight).toBeGreaterThan(oldShort.imageHeight + 8);
 
   await show({
     geometry: "new",
@@ -1581,14 +1585,15 @@ test("首页首屏旧画布与新画框在指定视口分开成立", async ({ pa
   expect(corrected.titleColor).toBe("rgb(247, 248, 248)");
   expect(corrected.titleContrast).toBe("corrected");
   expect(corrected.buttonColor).toBe("rgb(24, 26, 27)");
-  expect(corrected.correctedNote).toContain("品牌墨色");
+  // 对比说明在量完编辑画布后的下一帧才出现。
+  await expect.poll(async () => (await read()).correctedNote).toContain("品牌墨色");
   expect(corrected.links).toHaveLength(0);
 
   await show({ geometry: "new", device: "desktop", mode: "editor", ink: "#333333", title: "另选的深色" });
   const low = await read();
   expect(low.titleColor).toBe("rgb(51, 51, 51)");
   expect(low.titleContrast).toBe("low");
-  expect(low.lowNote).toContain("对比不够");
+  await expect.poll(async () => (await read()).lowNote).toContain("对比不够");
 
   await page.setViewportSize({ width: 768, height: 1024 });
   await show({ geometry: "new", device: "desktop", mode: "public", mobileSrc: "https://example.com/phone.jpg", title: "桌面内容" });

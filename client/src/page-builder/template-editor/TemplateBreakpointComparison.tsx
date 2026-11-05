@@ -53,11 +53,22 @@ function ComparisonViewport({ definition, contentBySlotId, selectedNodeId, onFoc
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) return;
+    let animationFrameId = 0;
     const update = () => setWidth(host.clientWidth);
-    update();
-    const observer = new ResizeObserver(update);
+    const scheduleUpdate = () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      animationFrameId = requestAnimationFrame(() => {
+        animationFrameId = 0;
+        update();
+      });
+    };
+    scheduleUpdate();
+    const observer = new ResizeObserver(scheduleUpdate);
     observer.observe(host);
-    return () => observer.disconnect();
+    return () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      observer.disconnect();
+    };
   }, []);
   useLayoutEffect(() => { measure(); }, [measure, definition, contentBySlotId]);
   useEffect(() => {
@@ -70,15 +81,24 @@ function ComparisonViewport({ definition, contentBySlotId, selectedNodeId, onFoc
   useEffect(() => {
     const ownerWindow = root?.ownerDocument.defaultView;
     if (!root?.isConnected || !ownerWindow || root.ownerDocument !== iframeRef.current?.contentDocument) return;
-    const observer = new ownerWindow.ResizeObserver(measure);
+    let animationFrameId = 0;
+    const scheduleMeasure = () => {
+      if (animationFrameId) ownerWindow.cancelAnimationFrame(animationFrameId);
+      animationFrameId = ownerWindow.requestAnimationFrame(() => {
+        animationFrameId = 0;
+        measure();
+      });
+    };
+    const observer = new ownerWindow.ResizeObserver(scheduleMeasure);
     observer.observe(root);
     const iframe = iframeRef.current;
-    iframe?.addEventListener("comparison-styles-loaded", measure);
-    root.addEventListener("load", measure, true);
+    iframe?.addEventListener("comparison-styles-loaded", scheduleMeasure);
+    root.addEventListener("load", scheduleMeasure, true);
     return () => {
+      if (animationFrameId) ownerWindow.cancelAnimationFrame(animationFrameId);
       observer.disconnect();
-      iframe?.removeEventListener("comparison-styles-loaded", measure);
-      root.removeEventListener("load", measure, true);
+      iframe?.removeEventListener("comparison-styles-loaded", scheduleMeasure);
+      root.removeEventListener("load", scheduleMeasure, true);
     };
   }, [root, measure]);
 

@@ -1944,16 +1944,29 @@ function ContentTemplateEditorContractFrame({
       scheduleGeometryReport();
     };
 
-    syncLayoutVariables();
+    let resizeFrame = 0;
+    const scheduleSyncLayoutVariables = () => {
+      if (!ownerWindow) {
+        syncLayoutVariables();
+        return;
+      }
+      ownerWindow.cancelAnimationFrame(resizeFrame);
+      resizeFrame = ownerWindow.requestAnimationFrame(() => {
+        resizeFrame = 0;
+        syncLayoutVariables();
+      });
+    };
+    scheduleSyncLayoutVariables();
     const ResizeObserverConstructor = ownerWindow?.ResizeObserver;
     const observer = ResizeObserverConstructor
-      ? new ResizeObserverConstructor(syncLayoutVariables)
+      ? new ResizeObserverConstructor(scheduleSyncLayoutVariables)
       : undefined;
     observer?.observe(root);
-    ownerWindow?.addEventListener("resize", syncLayoutVariables);
+    ownerWindow?.addEventListener("resize", scheduleSyncLayoutVariables);
     return () => {
       observer?.disconnect();
-      ownerWindow?.removeEventListener("resize", syncLayoutVariables);
+      ownerWindow?.removeEventListener("resize", scheduleSyncLayoutVariables);
+      ownerWindow?.cancelAnimationFrame(resizeFrame);
       ownerWindow?.cancelAnimationFrame(geometryFrame);
       clearVariables();
       frameHeight.clear();

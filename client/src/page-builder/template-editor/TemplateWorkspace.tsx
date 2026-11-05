@@ -712,19 +712,28 @@ export default function TemplateWorkspace({
     const controls = Array.from(document.querySelectorAll<HTMLElement>(
       ".template-editor__workspace-subject, .template-editor__toolbar .homepage-editor__workspace-status",
     ));
+    let animationFrameId = 0;
     const measure = () => {
       const bodyTop = body.getBoundingClientRect().top;
       setInspectorTopInset(Math.max(0, ...controls.map((control) => (
         getComputedStyle(control).position === "fixed" ? control.getBoundingClientRect().bottom - bodyTop : 0
       ))));
     };
-    measure();
-    const observer = new ResizeObserver(measure);
+    const scheduleMeasure = () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      animationFrameId = requestAnimationFrame(() => {
+        animationFrameId = 0;
+        measure();
+      });
+    };
+    scheduleMeasure();
+    const observer = new ResizeObserver(scheduleMeasure);
     [body, ...controls].forEach((element) => observer.observe(element));
-    window.addEventListener("resize", measure);
+    window.addEventListener("resize", scheduleMeasure);
     return () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
       observer.disconnect();
-      window.removeEventListener("resize", measure);
+      window.removeEventListener("resize", scheduleMeasure);
     };
   }, [inspectorOverlay.compact, inspectorOverlay.panelRef, inspectorCollapsed]);
   useEffect(() => {
