@@ -70,7 +70,9 @@ export function measureTemplateContainerLayout(definition: TemplateDefinitionV2,
       if (![x, y, w, h].every(Number.isFinite) || x < -0.001 || y < -0.001 || x + w > 1.001 || y + h > 1.001 || w <= 0 || h <= 0) throw new Error("存在越出内容框或尺寸为零的子对象；请先调整容器尺寸，转换不会自动裁掉对象。");
       placements[childId] = { x: Math.max(0, x), y: Math.max(0, y), width: Math.min(w, 1 - Math.max(0, x)), height: Math.min(h, 1 - Math.max(0, y)), zIndex: resolveTemplateNodeRules(definition, childId, breakpoint).placement?.zIndex ?? index };
     }
-    return { placements, height: { mode: "fixed" as const, value: { value: parent.offsetHeight, unit: "px" as const } } };
+    // 画布有缩放时，子项坐标已按 scale 还原成布局像素。
+    // 容器高度必须用同一套像素，不能把缩放后的 offsetHeight 写回去，否则预览会整体挪开。
+    return { placements, height: { mode: "fixed" as const, value: { value: bounds.height / scaleY, unit: "px" as const } } };
   }
   throw new Error("当前聚焦画布未呈现此容器，请先聚焦断点并显示容器，不能用其他视口代替测量。");
 }

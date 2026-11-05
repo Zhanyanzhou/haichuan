@@ -23,11 +23,11 @@ export default function TemplateRecipePreview({ definition, device = "desktop", 
     const viewport = host.current;
     const stage = viewport?.parentElement;
     if (!viewport || !stage) return;
-    let animationFrameId = 0;
+    let measureTimer = 0;
     let nextViewportWidth: number | null = null;
     let nextAvailable: { width: number; height: number } | null = null;
     const commit = () => {
-      animationFrameId = 0;
+      measureTimer = 0;
       if (nextViewportWidth !== null) {
         setViewportWidth(nextViewportWidth);
         nextViewportWidth = null;
@@ -42,31 +42,32 @@ export default function TemplateRecipePreview({ definition, device = "desktop", 
         if (entry.target === viewport) nextViewportWidth = entry.contentRect.width;
         else nextAvailable = { width: entry.contentRect.width, height: entry.contentRect.height };
       });
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
-      animationFrameId = requestAnimationFrame(commit);
+      // 定时器离开本轮 ResizeObserver 投递。requestAnimationFrame 仍算同一轮，会触发 loop 告警。
+      if (measureTimer) return;
+      measureTimer = window.setTimeout(commit, 16);
     });
     observer.observe(stage);
     observer.observe(viewport);
     return () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      if (measureTimer) window.clearTimeout(measureTimer);
       observer.disconnect();
     };
   }, []);
   useEffect(() => {
     const element = content.current;
     if (!element) return;
-    let animationFrameId = 0;
+    let measureTimer = 0;
     const observer = new ResizeObserver(([entry]) => {
       const next = Math.max(1, entry.contentRect.height);
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
-      animationFrameId = requestAnimationFrame(() => {
-        animationFrameId = 0;
+      if (measureTimer) return;
+      measureTimer = window.setTimeout(() => {
+        measureTimer = 0;
         setNaturalHeight(next);
-      });
+      }, 16);
     });
     observer.observe(element);
     return () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      if (measureTimer) window.clearTimeout(measureTimer);
       observer.disconnect();
     };
   }, []);

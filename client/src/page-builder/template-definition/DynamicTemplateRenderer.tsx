@@ -737,9 +737,11 @@ function ManagedTemplateSlotImage({
     if (!parent || typeof ResizeObserver === "undefined") return undefined;
     let current = 0;
     const commitMeasuredWidth = (next: number) => {
+      // 首帧画布还没按视口撑开时，量到的窄宽不能盖过声明的 sizes。
+      // 否则 1440 视口会按几百像素挑候选，比手机更窄。
       if (current !== 0 && next < current + 8) return;
       current = next;
-      setMeasuredCssWidth(next);
+      setMeasuredCssWidth((previous) => (previous !== null && next <= previous + 8 ? previous : next));
     };
     const measure = () => {
       const frameWidth = parent.offsetWidth;
@@ -1388,7 +1390,8 @@ function renderTemplateChildren({
       desktopAspect: segment.image.slot?.desktopRules?.aspectRatio,
       hasMobileAsset: isSafeTemplateMediaUrl(segmentImage?.mobileSrc),
       explicitObjectFit: segment.image.layoutOverride?.objectFit,
-      pairedCanvas: Boolean(pairedCanvas),
+      // 整节已经对换时，主图跟着竖画布，不再退回桌面横图。
+      pairedCanvas: Boolean(pairedCanvas) || pairedHeroFrame,
     }) ?? (slotRatio ? `${slotRatio.width} / ${slotRatio.height}` : "4 / 5");
     const bleeds = imageBleedsOnMobile(segment.image, {
       device: "mobile",

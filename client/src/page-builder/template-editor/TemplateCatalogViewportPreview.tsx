@@ -238,7 +238,7 @@ export default function TemplateCatalogViewportPreview({
     const host = hostRef.current;
     const stage = stageRef.current;
     if (!host || !stage || isUnavailable) return undefined;
-    let animationFrameId: number | null = null;
+    let measureTimer = 0;
     const measureScale = () => {
       const availableWidth = stage.clientWidth;
       const widthFitScale = availableWidth > 0 ? availableWidth / sourceWidth : 0;
@@ -261,11 +261,12 @@ export default function TemplateCatalogViewportPreview({
         : { ...current, scale });
     };
     const scheduleWidthMeasurement = () => {
-      if (animationFrameId !== null) return;
-      animationFrameId = window.requestAnimationFrame(() => {
-        animationFrameId = null;
+      // 定时器离开本轮 ResizeObserver 投递。requestAnimationFrame 仍算同一轮，会触发 loop 告警。
+      if (measureTimer) return;
+      measureTimer = window.setTimeout(() => {
+        measureTimer = 0;
         measureScale();
-      });
+      }, 16);
     };
     const observer = new ResizeObserver(scheduleWidthMeasurement);
     observer.observe(stage);
@@ -276,7 +277,7 @@ export default function TemplateCatalogViewportPreview({
     return () => {
       observer.disconnect();
       listObserver.disconnect();
-      if (animationFrameId !== null) window.cancelAnimationFrame(animationFrameId);
+      if (measureTimer) window.clearTimeout(measureTimer);
     };
   }, [isUnavailable, measurement.naturalHeight, presentation, sourceWidth, zoom]);
 

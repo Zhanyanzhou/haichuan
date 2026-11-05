@@ -254,13 +254,14 @@ export default function CanvasSelectionDock({
       });
     };
 
-    let positionFrame = 0;
+    let positionTimer = 0;
     const scheduleUpdatePosition = () => {
-      if (positionFrame) hostWindow.cancelAnimationFrame(positionFrame);
-      positionFrame = hostWindow.requestAnimationFrame(() => {
-        positionFrame = 0;
+      // 定时器离开本轮 ResizeObserver 投递。requestAnimationFrame 仍算同一轮，会触发 loop 告警。
+      if (positionTimer) return;
+      positionTimer = hostWindow.setTimeout(() => {
+        positionTimer = 0;
         updatePosition();
-      });
+      }, 16);
     };
     scheduleUpdatePosition();
     revealDock();
@@ -280,7 +281,7 @@ export default function CanvasSelectionDock({
       frameWindow.removeEventListener("resize", revealDock);
       frameWindow.removeEventListener("scroll", scheduleUpdatePosition, true);
       if (revealFrame) hostWindow.cancelAnimationFrame(revealFrame);
-      if (positionFrame) hostWindow.cancelAnimationFrame(positionFrame);
+      if (positionTimer) hostWindow.clearTimeout(positionTimer);
       overlayObserver.disconnect();
       frameObserver.disconnect();
     };

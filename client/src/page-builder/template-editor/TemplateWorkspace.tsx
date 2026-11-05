@@ -712,7 +712,7 @@ export default function TemplateWorkspace({
     const controls = Array.from(document.querySelectorAll<HTMLElement>(
       ".template-editor__workspace-subject, .template-editor__toolbar .homepage-editor__workspace-status",
     ));
-    let animationFrameId = 0;
+    let measureTimer = 0;
     const measure = () => {
       const bodyTop = body.getBoundingClientRect().top;
       setInspectorTopInset(Math.max(0, ...controls.map((control) => (
@@ -720,18 +720,19 @@ export default function TemplateWorkspace({
       ))));
     };
     const scheduleMeasure = () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
-      animationFrameId = requestAnimationFrame(() => {
-        animationFrameId = 0;
+      // 定时器离开本轮 ResizeObserver 投递。requestAnimationFrame 仍算同一轮，会触发 loop 告警。
+      if (measureTimer) return;
+      measureTimer = window.setTimeout(() => {
+        measureTimer = 0;
         measure();
-      });
+      }, 16);
     };
     scheduleMeasure();
     const observer = new ResizeObserver(scheduleMeasure);
     [body, ...controls].forEach((element) => observer.observe(element));
     window.addEventListener("resize", scheduleMeasure);
     return () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      if (measureTimer) window.clearTimeout(measureTimer);
       observer.disconnect();
       window.removeEventListener("resize", scheduleMeasure);
     };

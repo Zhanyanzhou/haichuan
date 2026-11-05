@@ -355,8 +355,7 @@ export default function TemplateViewportFrame({
   useLayoutEffect(() => {
     const stage = stageRef.current;
     if (!stage) return undefined;
-    let outerFrameId = 0;
-    let innerFrameId = 0;
+    let measureTimer = 0;
     const measureWidth = () => {
       const viewport = readCanvasContentBox(stage);
       const fitScale = resolveFiniteCanvasScale(calculateFitCanvasScale({
@@ -374,23 +373,18 @@ export default function TemplateViewportFrame({
         : { ...current, fitScale });
     };
     const scheduleMeasure = () => {
-      if (outerFrameId) cancelAnimationFrame(outerFrameId);
-      if (innerFrameId) cancelAnimationFrame(innerFrameId);
-      // 双帧：跳过 Chrome 对“本轮 ResizeObserver 投递里改布局”的 loop 告警。
-      outerFrameId = requestAnimationFrame(() => {
-        outerFrameId = 0;
-        innerFrameId = requestAnimationFrame(() => {
-          innerFrameId = 0;
-          measureWidth();
-        });
-      });
+      // 定时器离开本轮 ResizeObserver 投递。requestAnimationFrame 仍算同一轮，会触发 loop 告警。
+      if (measureTimer) return;
+      measureTimer = window.setTimeout(() => {
+        measureTimer = 0;
+        measureWidth();
+      }, 16);
     };
     const observer = new ResizeObserver(scheduleMeasure);
     observer.observe(stage);
     scheduleMeasure();
     return () => {
-      if (outerFrameId) cancelAnimationFrame(outerFrameId);
-      if (innerFrameId) cancelAnimationFrame(innerFrameId);
+      if (measureTimer) window.clearTimeout(measureTimer);
       observer.disconnect();
     };
   }, [measurement.documentHeight, minimumFitScale, sourceWidth]);

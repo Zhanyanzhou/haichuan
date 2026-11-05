@@ -1986,13 +1986,14 @@ function EditorBody({
     const stage = stageRef.current;
     const frame = previewFrameRef.current;
     if (!stage || !frame) return;
-    let animationFrameId = 0;
+    let measureTimer = 0;
     const scheduleUpdate = () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
-      animationFrameId = requestAnimationFrame(() => {
-        animationFrameId = 0;
+      // 定时器离开本轮 ResizeObserver 投递。requestAnimationFrame 仍算同一轮，会触发 loop 告警。
+      if (measureTimer) return;
+      measureTimer = window.setTimeout(() => {
+        measureTimer = 0;
         updateCanvasMetrics();
-      });
+      }, 16);
     };
 
     const observer = new ResizeObserver(scheduleUpdate);
@@ -2000,7 +2001,7 @@ function EditorBody({
     observer.observe(frame);
     scheduleUpdate();
     return () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      if (measureTimer) window.clearTimeout(measureTimer);
       observer.disconnect();
     };
   }, [updateCanvasMetrics, appData.content.length, viewportWidth]);

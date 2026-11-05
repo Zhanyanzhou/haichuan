@@ -53,20 +53,21 @@ function ComparisonViewport({ definition, contentBySlotId, selectedNodeId, onFoc
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    let animationFrameId = 0;
+    let measureTimer = 0;
     const update = () => setWidth(host.clientWidth);
     const scheduleUpdate = () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
-      animationFrameId = requestAnimationFrame(() => {
-        animationFrameId = 0;
+      // 定时器离开本轮 ResizeObserver 投递。requestAnimationFrame 仍算同一轮，会触发 loop 告警。
+      if (measureTimer) return;
+      measureTimer = window.setTimeout(() => {
+        measureTimer = 0;
         update();
-      });
+      }, 16);
     };
     scheduleUpdate();
     const observer = new ResizeObserver(scheduleUpdate);
     observer.observe(host);
     return () => {
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      if (measureTimer) window.clearTimeout(measureTimer);
       observer.disconnect();
     };
   }, []);
@@ -81,13 +82,14 @@ function ComparisonViewport({ definition, contentBySlotId, selectedNodeId, onFoc
   useEffect(() => {
     const ownerWindow = root?.ownerDocument.defaultView;
     if (!root?.isConnected || !ownerWindow || root.ownerDocument !== iframeRef.current?.contentDocument) return;
-    let animationFrameId = 0;
+    let measureTimer = 0;
     const scheduleMeasure = () => {
-      if (animationFrameId) ownerWindow.cancelAnimationFrame(animationFrameId);
-      animationFrameId = ownerWindow.requestAnimationFrame(() => {
-        animationFrameId = 0;
+      // 定时器离开本轮 ResizeObserver 投递。requestAnimationFrame 仍算同一轮，会触发 loop 告警。
+      if (measureTimer) return;
+      measureTimer = ownerWindow.setTimeout(() => {
+        measureTimer = 0;
         measure();
-      });
+      }, 16);
     };
     const observer = new ownerWindow.ResizeObserver(scheduleMeasure);
     observer.observe(root);
@@ -95,7 +97,7 @@ function ComparisonViewport({ definition, contentBySlotId, selectedNodeId, onFoc
     iframe?.addEventListener("comparison-styles-loaded", scheduleMeasure);
     root.addEventListener("load", scheduleMeasure, true);
     return () => {
-      if (animationFrameId) ownerWindow.cancelAnimationFrame(animationFrameId);
+      if (measureTimer) ownerWindow.clearTimeout(measureTimer);
       observer.disconnect();
       iframe?.removeEventListener("comparison-styles-loaded", scheduleMeasure);
       root.removeEventListener("load", scheduleMeasure, true);
