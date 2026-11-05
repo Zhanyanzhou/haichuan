@@ -6,13 +6,7 @@
 
 | 快照 | 现行入口 |
 | --- | --- |
-| `AI_PROGRAM_LEDGER.md` | `../../AI_PROGRAM_LEDGER.md` |
 | `CURRENT_STATE.md` | `../../CURRENT_STATE.md` |
-| `ARCHITECTURE.md` | `../../ARCHITECTURE.md` |
-| `COMPONENTS.md` | `../../COMPONENTS.md` |
-| `DATA_AND_API.md` | `../../DATA_AND_API.md` |
 | `DECISIONS.md` | `../../DECISIONS.md` |
-| `end-to-end-flow-matrix.md` | `../../acceptance/end-to-end-flow-matrix.md` |
-| `feature-completion-matrix.md` | `../../acceptance/feature-completion-matrix.md` |
 
 现行状态必须从当前代码、配置、Git、机器合同和当次运行结果重新取得。

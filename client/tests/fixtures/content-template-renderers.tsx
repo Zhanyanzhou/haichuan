@@ -11,6 +11,7 @@ import {
   dynamicTemplateVersionKey,
 } from "../../src/page-builder/dynamic-template-instance";
 import type { TemplateDefinitionV2 } from "../../src/page-builder/template-definition";
+import { PublicImageFactsProvider } from "../../src/page-builder/runtime/publicImageFacts";
 import "../../src/styles/globals.css";
 
 const rendererDocument: PuckDocument = {
@@ -344,6 +345,8 @@ const emptyFixedBeforeVisibleDynamicDocument = dynamicPrimaryDocument([
 
 createRoot(document.getElementById("root")!).render(
   <MemoryRouter>
+    {/* 与发布文档一致地提供媒体事实，响应式派生不能猜测未知原图尺寸。 */}
+    <PublicImageFactsProvider facts={{ "/uploads/test-hero.png": { displayWidth: 3360, displayHeight: 1890, animated: false } }}>
     <div data-renderer-fixture="fixed-hero">
       <PuckDocumentRenderer data={rendererDocument} />
     </div>
@@ -377,5 +380,6 @@ createRoot(document.getElementById("root")!).render(
     <div data-renderer-fixture="unsupported-preview">
       <PuckDocumentRenderer data={unsupportedHeroDocument} mode="preview" />
     </div>
+    </PublicImageFactsProvider>
   </MemoryRouter>,
 );

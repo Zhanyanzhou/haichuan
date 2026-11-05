@@ -112,8 +112,9 @@ test("private Blob URLs are revoked on source replacement and unmount", async ({
 
 test("double image failure keeps an accessible stable-size placeholder", async ({ page }) => {
   await page.goto("/__secure-image-fixture");
-  const placeholder = page.getByRole("img", { name: "Unavailable proof（图片暂不可用）" });
+  const placeholder = page.getByRole("group", { name: "Unavailable proof（图片暂不可用）" });
   await expect(placeholder).toBeVisible();
+  await expect(placeholder.getByRole("button", { name: "重新加载图片" })).toBeVisible();
   const box = await placeholder.boundingBox();
   expect(box?.width).toBe(160);
   expect(box?.height).toBe(90);

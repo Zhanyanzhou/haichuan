@@ -2,8 +2,6 @@ import { Type } from 'class-transformer';
 import { IsArray, IsEnum, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength, Validate, ValidateNested, ArrayMinSize, ArrayMaxSize, ValidatorConstraint, ValidatorConstraintInterface, ValidationArguments } from 'class-validator';
 import { CustomStage, OrderStatus } from '@prisma/client';
 
-/** 单品数量上限，与 OrdersService.normalizeItems 保持一致 */
-const MAX_ITEM_QUANTITY = 99;
 /** 单订单商品行上限，与 OrdersService.normalizeItems 保持一致 */
 const MAX_ITEMS = 20;
 

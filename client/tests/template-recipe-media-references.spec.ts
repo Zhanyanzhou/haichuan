@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { AxiosError, AxiosHeaders } from "axios";
 import api from "../src/services/httpClient";
 import { advanceSessionEpoch } from "../src/services/sessionEpoch";
@@ -143,6 +143,20 @@ test("编辑器素材探测只把 404/410 当成文件缺失，限流和瞬时�
   expect(editorMediaProbeIndicatesMissing(503)).toBe(false);
   expect(editorMediaProbeIndicatesMissing(404)).toBe(true);
   expect(editorMediaProbeIndicatesMissing(410)).toBe(true);
+});
+
+test("后台小图可选择受控派生宽度，原图、公开图片与外链不被改写", () => {
+  const source = "/uploads/page-assets/hero.jpg";
+  expect(resolveManagedTemplateMediaPreviewUrl(source, 480)).toBe(
+    "/api/upload/media/preview-by-storage-key?storageKey=page-assets%2Fhero.jpg&width=480",
+  );
+  expect(resolveManagedTemplateMediaPreviewUrl(source, 800)).toContain("&width=800");
+  expect(resolveManagedTemplateMediaPreviewUrl(source)).not.toContain("&width=");
+  expect(resolveManagedTemplateMediaPreviewUrl("/uploads/legacy.png", 480)).toBe("/uploads/legacy.png");
+  expect(resolveManagedTemplateMediaPreviewUrl("https://example.com/image.jpg", 480)).toBe("https://example.com/image.jpg");
+  expect(resolveManagedTemplateMediaPreviewUrl("/uploads/page-assets/../private.jpg", 480)).toBe(
+    "/uploads/page-assets/../private.jpg",
+  );
 });
 
 test("编辑器 page-assets 由宿主拉取对象 URL，不把预览地址直接塞进 iframe 图片", async () => {
@@ -337,4 +351,178 @@ test("后台媒体预览首次 401 后沿现有会话刷新链路重试取图（
   expect(result).toEqual({ protocol: "blob:", size: "image-bytes".length });
   expect(previewRequests).toBe(2);
   expect(refreshRequests).toBe(1);
+});
+
+type CanvasMediaOptions = { src?: string; width?: 480 | 800; defer?: boolean };
+
+declare global {
+  interface Window {
+    canvasMediaTest: {
+      update: (options: CanvasMediaOptions) => void;
+      changeSession: () => void;
+      unmount: () => void;
+      created: string[];
+      revoked: string[];
+    };
+  }
+}
+
+const previewPng = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64",
+);
+
+function makeGate() {
+  let open!: () => void;
+  const wait = new Promise<void>((resolve) => { open = resolve; });
+  return { open, wait };
+}
+
+async function mountCanvasMediaHook(page: Page) {
+  await page.route("**/__canvas-media-hook", (route) => route.fulfill({
+    contentType: "text/html; charset=utf-8",
+    body: `<!doctype html><html><body><script type="module">
+      import React from '/node_modules/.vite/deps/react.js';
+      import ReactDOM from '/node_modules/.vite/deps/react-dom_client.js';
+      import { useManagedTemplateMediaDisplayUrl } from '/src/page-builder/template-definition/managedMediaPreview.ts';
+      import { useAuthStore } from '/src/store/authStore.ts';
+      const frame = document.createElement('iframe');
+      frame.srcdoc = '<!doctype html><html><body><main></main></body></html>';
+      const loaded = new Promise((resolve) => frame.addEventListener('load', resolve, { once: true }));
+      document.body.appendChild(frame);
+      await loaded;
+      const frameURL = frame.contentWindow.URL;
+      const create = frameURL.createObjectURL.bind(frameURL);
+      const revoke = frameURL.revokeObjectURL.bind(frameURL);
+      const created = [];
+      const revoked = [];
+      frameURL.createObjectURL = (blob) => { const url = create(blob); created.push(url); return url; };
+      frameURL.revokeObjectURL = (url) => { revoked.push(url); revoke(url); };
+      const root = ReactDOM.createRoot(frame.contentDocument.querySelector('main'));
+      let props = { src: '/uploads/page-assets/canvas-a.png', defer: true };
+      function Preview({ src, width, defer }) {
+        const owner = React.useRef(null);
+        const media = useManagedTemplateMediaDisplayUrl(src, true, owner, { width, defer });
+        return React.createElement('div', { ref: owner, 'data-preview-status': media.status, 'data-preview-src': media.displaySrc },
+          media.displaySrc && React.createElement('img', { src: media.displaySrc, alt: '画布素材' }));
+      }
+      function update(options) {
+        props = { ...props, ...options };
+        root.render(React.createElement(Preview, props));
+      }
+      window.canvasMediaTest = { update, changeSession: () => useAuthStore.getState().markAnonymous(), unmount: () => root.unmount(), created, revoked };
+      update({});
+    </script></body></html>`,
+  }));
+  await page.goto("/__canvas-media-hook");
+  const frame = page.frameLocator("iframe");
+  const surface = frame.locator("[data-preview-status]");
+  await expect(surface).toHaveAttribute("data-preview-status", "loading");
+  await expect(surface).toHaveAttribute("data-preview-src", "");
+  return { surface, image: frame.getByRole("img", { name: "画布素材" }) };
+}
+
+test("画布等到尺寸才读派生图，升档保留旧图，404回退和缓存命中均用当前iframe", async ({ page }) => {
+  const requests: Array<string | null> = [];
+  const large = makeGate();
+  await page.route("**/api/upload/media/preview-by-storage-key**", async (route) => {
+    const width = new URL(route.request().url()).searchParams.get("width");
+    expect(route.request().headers()["x-session-domain"]).toBe("admin");
+    requests.push(width);
+    if (width === "800") {
+      await large.wait;
+      return route.fulfill({ status: 404, body: "derivative not available" });
+    }
+    return route.fulfill({ status: 200, contentType: "image/png", body: previewPng });
+  });
+  const { surface, image } = await mountCanvasMediaHook(page);
+  expect(requests).toEqual([]);
+  await page.evaluate(() => window.canvasMediaTest.update({ width: 480, defer: false }));
+  await expect(surface).toHaveAttribute("data-preview-status", "ready");
+  await expect.poll(() => image.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBe(1);
+  const first = await image.getAttribute("src");
+  expect(first).toMatch(/^blob:/);
+  expect(await page.evaluate(() => window.canvasMediaTest.created)).toEqual([first]);
+  await page.evaluate(() => window.canvasMediaTest.update({ width: 800 }));
+  await expect.poll(() => requests).toEqual(["480", "800"]);
+  await expect(surface).toHaveAttribute("data-preview-status", "loading");
+  await expect(image).toHaveAttribute("src", first!);
+  expect(await page.evaluate(() => window.canvasMediaTest.revoked)).toEqual([]);
+  large.open();
+  await expect(surface).toHaveAttribute("data-preview-status", "ready");
+  await expect.poll(() => image.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBe(1);
+  const original = await image.getAttribute("src");
+  expect(original).not.toBe(first);
+  expect(requests).toEqual(["480", "800", null]);
+  await expect.poll(() => page.evaluate(() => window.canvasMediaTest.revoked)).toEqual([first]);
+  await page.evaluate(() => window.canvasMediaTest.update({ width: 480 }));
+  await expect(surface).toHaveAttribute("data-preview-status", "ready");
+  expect(requests).toEqual(["480", "800", null]);
+  const last = await image.getAttribute("src");
+  expect(last).not.toBe(first);
+  expect(last).not.toBe(original);
+  await page.evaluate(() => window.canvasMediaTest.unmount());
+  await expect.poll(() => page.evaluate(() => window.canvasMediaTest.revoked)).toEqual([first, original, last]);
+});
+
+test("切换画布素材或会话后旧派生失败不会取原图，当前会话重新读取同源", async ({ page }) => {
+  const source = "/uploads/page-assets/canvas-b.png";
+  const requests: string[] = [];
+  const oldSource = makeGate();
+  const oldSession = makeGate();
+  const newSession = makeGate();
+  let largeSourceBReads = 0;
+  await page.route("**/api/upload/media/preview-by-storage-key**", async (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    const asset = params.get("storageKey")?.split("/").at(-1);
+    const width = params.get("width");
+    requests.push(`${asset}:${width}`);
+    if (width === "800") {
+      const gate = asset === "canvas-a.png" ? oldSource : (++largeSourceBReads === 1 ? oldSession : newSession);
+      await gate.wait;
+      return route.fulfill({ status: 404, body: "late derivative failure" });
+    }
+    return route.fulfill({ status: 200, contentType: "image/png", body: previewPng });
+  });
+  const { surface, image } = await mountCanvasMediaHook(page);
+  await page.evaluate(() => window.canvasMediaTest.update({ width: 800, defer: false }));
+  await expect.poll(() => requests).toEqual(["canvas-a.png:800"]);
+  await page.evaluate((src) => window.canvasMediaTest.update({ src, width: 480 }), source);
+  await expect(surface).toHaveAttribute("data-preview-status", "ready");
+  const beforeIdentity = await image.getAttribute("src");
+  const firstFailure = page.waitForResponse((response) => response.status() === 404 && response.url().includes("canvas-a.png"));
+  oldSource.open();
+  await (await firstFailure).finished();
+
+  await page.evaluate(() => window.canvasMediaTest.update({ width: 800 }));
+  await expect.poll(() => requests).toEqual(["canvas-a.png:800", "canvas-b.png:480", "canvas-b.png:800"]);
+  await expect(image).toHaveAttribute("src", beforeIdentity!);
+  await page.evaluate(() => window.canvasMediaTest.changeSession());
+  await expect(surface).toHaveAttribute("data-preview-src", "");
+  await expect.poll(() => requests).toEqual(["canvas-a.png:800", "canvas-b.png:480", "canvas-b.png:800", "canvas-b.png:800"]);
+  const secondFailure = page.waitForResponse((response) => response.status() === 404 && response.url().includes("canvas-b.png"));
+  oldSession.open();
+  await (await secondFailure).finished();
+  await page.evaluate(() => window.canvasMediaTest.update({ width: 480 }));
+  await expect(surface).toHaveAttribute("data-preview-status", "ready");
+  await expect(image).not.toHaveAttribute("src", beforeIdentity!);
+  const lastFailure = page.waitForResponse((response) => response.status() === 404 && response.url().includes("canvas-b.png"));
+  newSession.open();
+  await (await lastFailure).finished();
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await expect(surface).toHaveAttribute("data-preview-status", "ready");
+  expect(requests).toEqual(["canvas-a.png:800", "canvas-b.png:480", "canvas-b.png:800", "canvas-b.png:800", "canvas-b.png:480"]);
+});
+
+test("派生与原图都失败时只发一次原图回退，保持画布错误状态", async ({ page }) => {
+  const requests: Array<string | null> = [];
+  await page.route("**/api/upload/media/preview-by-storage-key**", async (route) => {
+    requests.push(new URL(route.request().url()).searchParams.get("width"));
+    await route.fulfill({ status: 404, body: "missing media" });
+  });
+  const { surface, image } = await mountCanvasMediaHook(page);
+  await page.evaluate(() => window.canvasMediaTest.update({ width: 480, defer: false }));
+  await expect(surface).toHaveAttribute("data-preview-status", "error");
+  await expect(image).toHaveCount(0);
+  expect(requests).toEqual(["480", null]);
 });

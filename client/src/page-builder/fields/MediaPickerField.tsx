@@ -8,7 +8,7 @@
  * 4. 操作按钮全部带文字：更换 / 链接 / 删除(danger)。
  */
 
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { App as AntdApp, Upload, Button, Input, type InputRef } from "antd";
 import {
   InboxOutlined,
@@ -21,7 +21,6 @@ import {
 import { uploadApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { ratioLabelOf } from "@/page-builder/config/imageSpecs";
-import { useImageNaturalSize } from "./specCheck";
 import {
   addPageMediaItem,
   PAGE_MEDIA_LIBRARY_CHANGED_EVENT,
@@ -63,6 +62,30 @@ function useLibraryMediaItem(url: string): PageMediaItem | null {
   const path = url.split("?")[0];
   if (!path) return null;
   return items.find((item) => item.url.split("?")[0] === path) ?? null;
+}
+
+/** 小预览只负责加载状态；原图像素事实继续由 useResolvedMediaSource 提供。 */
+function useMediaPickerPreviewSource(value: string) {
+  const urls = useMemo(() => ({
+    thumbnail: resolveManagedTemplateMediaPreviewUrl(value, 800),
+    original: resolveManagedTemplateMediaPreviewUrl(value),
+  }), [value]);
+  const [failure, setFailure] = useState<{ owner: typeof urls; originalFailed: boolean } | null>(null);
+  // 源变化的这一帧就重新选派生图，不能等 effect 清理后才丢弃上一张的失败状态。
+  const currentFailure = failure?.owner === urls ? failure : null;
+  const src = currentFailure ? urls.original : urls.thumbnail;
+  const error = Boolean(currentFailure?.originalFailed);
+  useEffect(() => {
+    if (!src || error) return;
+    let cancelled = false;
+    const image = new Image();
+    image.onerror = () => {
+      if (!cancelled) setFailure({ owner: urls, originalFailed: src === urls.original });
+    };
+    image.src = src;
+    return () => { cancelled = true; };
+  }, [error, src, urls]);
+  return { src, error };
 }
 
 type MediaFactsFetchState = "idle" | "loading" | "ready" | "unknown" | "error";
@@ -252,8 +275,7 @@ export default function MediaPickerField({
   const ownValue = value?.trim() ?? "";
   const inheritedValue = fallbackSrc?.trim() ?? "";
   const displayValue = ownValue || inheritedValue;
-  const previewSrc = resolveManagedTemplateMediaPreviewUrl(displayValue);
-  const imgSize = useImageNaturalSize(previewSrc);
+  const { src: previewSrc, error: previewError } = useMediaPickerPreviewSource(displayValue);
   const hasOwnValue = ownValue.length > 0;
   const usingInherited = !hasOwnValue && inheritedValue.length > 0;
   const libraryItem = useLibraryMediaItem(displayValue);
@@ -287,7 +309,7 @@ export default function MediaPickerField({
     inherited: usingInherited,
   });
   const hasQualityWarning = Boolean(displayValue && (advice.pixelsLow || advice.cropHeavy));
-  const qualityState = imgSize.error
+  const qualityState = previewError
     ? "error"
     : factsFetchState === "error"
       ? "error"
@@ -475,7 +497,7 @@ export default function MediaPickerField({
       {/* ═══ 预览（有图时的默认态） ═══ */}
       {hasValue && (
         <div>
-          {onFocusChange && !imgSize.error ? (
+          {onFocusChange && !previewError ? (
             <>
               <ImageFocusPad
                 value={{ x: focusX, y: focusY }}
@@ -503,7 +525,7 @@ export default function MediaPickerField({
               className={`homepage-editor__media-preview-img${hasCropPreview ? " is-crop-preview" : ""}`}
               style={hasCropPreview ? { aspectRatio: previewAspectRatio } : undefined}
             >
-              <img
+              {!previewError ? <img
                 src={previewSrc}
                 alt="预览"
                 style={{
@@ -515,11 +537,9 @@ export default function MediaPickerField({
                   width: "100%",
                   height: "100%",
                   background: "#F4F5F5",
-                  // 复用素材探测状态，替换成功后恢复；不遗留 DOM 上的隐藏样式。
-                  display: imgSize.error ? "none" : undefined,
                 }}
-              />
-              {imgSize.error ? (
+              /> : null}
+              {previewError ? (
                 <div
                   className="homepage-editor__media-preview-error"
                   role="alert"
@@ -775,7 +795,7 @@ export default function MediaPickerField({
         </>
       )}
 
-      {displayValue && hasQualityWarning && !imgSize.error ? (
+      {displayValue && hasQualityWarning && !previewError ? (
         <div className="homepage-editor__media-warning" role="alert">
           <ExclamationCircleOutlined aria-hidden="true" />
           <span>

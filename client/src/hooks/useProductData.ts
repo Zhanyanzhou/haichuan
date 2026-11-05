@@ -172,19 +172,25 @@ function parsePublicProduct(value: unknown): PublicProductSummary | null {
   };
 }
 
-function parsePublicProductPayload(value: unknown): PublicProductPayload {
+function parsePublicProductPayload(value: unknown, requireValidItems: boolean): PublicProductPayload {
   const rawList = Array.isArray(value)
     ? value
     : isRecord(value) && Array.isArray(value.list)
       ? value.list
-      : [];
+      : null;
+  if (!rawList) throw new Error("Invalid public product list");
   const list = rawList
     .map(parsePublicProduct)
     .filter((product): product is PublicProductSummary => Boolean(product));
   const totalValue = isRecord(value) ? value.total : undefined;
-  const total = typeof totalValue === "number" && Number.isFinite(totalValue)
-    ? totalValue
-    : list.length;
+  if (
+    (requireValidItems && list.length !== rawList.length) ||
+    (totalValue !== undefined &&
+      (typeof totalValue !== "number" || !Number.isInteger(totalValue) || totalValue < list.length))
+  ) {
+    throw new Error("Invalid public product page");
+  }
+  const total = totalValue ?? list.length;
   const facetValue = isRecord(value) && isRecord(value.facets)
     ? value.facets.sizes
     : undefined;
@@ -265,7 +271,7 @@ export interface ProductQuery {
   ids?: string;
   /** 分类 ID 集合；绝不能传入 ids（ids 是商品 ID）。 */
   categoryIds?: string;
-  /** 精确货号；Catalog 的货号直达语义会忽略其他筛选。 */
+  /** 优先按货号直达；查无作品且有 keyword 时，按原筛选回退搜索。 */
   exactCode?: string;
   /** 材质（服务端白名单校验，非法值静默忽略） */
   materialType?: string;
@@ -303,6 +309,8 @@ interface ProductDataOptions {
   loadCategories?: boolean;
   /** 复用外层目录的更新信号刷新定向选款，不再建立第二条 SSE。 */
   refreshKey?: string | number;
+  /** 选款校验必须等待本轮请求，缓存只用于显示。 */
+  requireFresh?: boolean;
 }
 
 export function useProductCategories() {
@@ -353,18 +361,23 @@ export function useProductData(
   const [categoriesLoaded, setCategoriesLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [refreshErrorKey, setRefreshErrorKey] = useState("");
+  const [settledRequestKey, setSettledRequestKey] = useState("");
   const [revision, setRevision] = useState(0);
   const [dataQueryKey, setDataQueryKey] = useState("");
   const subscribe = options.subscribe !== false;
   const loadCategories = options.loadCategories !== false;
   const refreshKey = options.refreshKey;
   // query 引用不稳定会导致无限重拉，按值序列化作为 effect 依赖
-  const queryKey = query === null ? "__paused__" : JSON.stringify(query);
+  const queryKey = query === null ? "__paused__" : JSON.stringify([refreshKey, query]);
+  const requestKey = JSON.stringify([queryKey, revision]);
+  const refreshing = query !== null && settledRequestKey !== requestKey;
   const pageCacheRef = useRef(new Map<string, CatalogPageSnapshot>());
 
   useEffect(() => {
     const controller = new AbortController();
     let cancelled = false;
+    setSettledRequestKey("");
     (async () => {
       // null = 暂停商品请求；主目录仍可先取分类树，供 URL 分类展开后代。
       if (query === null) {
@@ -372,6 +385,7 @@ export function useProductData(
         setTotal(0);
         setFacets({ sizes: [] });
         setError(false);
+        setRefreshErrorKey("");
         setDataQueryKey("");
         if (!loadCategories) {
           setLoading(false);
@@ -393,8 +407,7 @@ export function useProductData(
         return;
       }
       // 删掉关键词时先用上次成功的全部作品，避免新请求被卡住时列表一直停在筛选结果上。
-      const cacheKey = `${refreshKey ?? ""}|${queryKey}`;
-      const cached = pageCacheRef.current.get(cacheKey);
+      const cached = pageCacheRef.current.get(queryKey);
       if (cached) {
         setApiProducts(cached.products);
         setTotal(cached.total);
@@ -413,7 +426,6 @@ export function useProductData(
             page: query.page ?? 1,
             pageSize: query.pageSize ?? 24,
             keyword: query.keyword?.trim() || undefined,
-            exactCode: query.exactCode?.trim() || undefined,
             ids: query.ids || undefined,
             categoryIds: query.categoryIds || undefined,
             materialType: query.materialType || undefined,
@@ -429,11 +441,28 @@ export function useProductData(
             includeFacets: query.includeFacets,
           }).filter(([, value]) => value !== undefined),
         );
-        const [prodRes, catRes] = await Promise.all([
-          productApi.getPublicList(params, controller.signal),
+        const fetchPage = async (pageParams: Record<string, unknown>) =>
+          parsePublicProductPayload(
+            unwrapResponse<unknown>(await productApi.getPublicList(pageParams, controller.signal)),
+            Boolean(pageParams.ids || pageParams.exactCode),
+          );
+        const fetchProducts = async () => {
+          const exactCode = query.exactCode?.trim();
+          if (!exactCode) return fetchPage(params);
+          const exactPage = await fetchPage({
+            exactCode,
+            page: 1,
+            pageSize: params.pageSize,
+            sortBy: query.sortBy,
+            includeFacets: query.includeFacets,
+          });
+          if (exactPage.total === 0 && params.keyword && !cancelled) return fetchPage(params);
+          return exactPage;
+        };
+        const [data, catRes] = await Promise.all([
+          fetchProducts(),
           loadCategories ? categoryApi.getTree() : Promise.resolve(null),
         ]);
-        const data = parsePublicProductPayload(unwrapResponse<unknown>(prodRes));
         const list = data.list;
 
         // 构建分类映射: categoryId → name
@@ -450,7 +479,7 @@ export function useProductData(
 
         const mapped = list.map((product) => mapApiProduct(product, categoryById));
         if (!cancelled) {
-          rememberCatalogPage(pageCacheRef.current, cacheKey, {
+          rememberCatalogPage(pageCacheRef.current, queryKey, {
             products: mapped,
             total: data.total,
             facets: data.facets,
@@ -463,12 +492,18 @@ export function useProductData(
             setCategoriesLoaded(true);
           }
           setDataQueryKey(queryKey);
+          setRefreshErrorKey("");
         }
       } catch (error) {
         if (cancelled || isCanceledRequest(error)) return;
-        if (!pageCacheRef.current.has(cacheKey)) setError(true);
+        // 旧结果可继续浏览，但不能把有缓存等同于已成功核验最新公开状态。
+        setRefreshErrorKey(pageCacheRef.current.has(queryKey) ? queryKey : "");
+        setError(true);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setSettledRequestKey(requestKey);
+        }
       }
     })();
     return () => {
@@ -476,7 +511,7 @@ export function useProductData(
       controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [revision, queryKey, loadCategories, refreshKey]);
+  }, [requestKey, loadCategories]);
 
   // P1-35：带自动重连 + debounce 的 SSE（断线重连；消息风暴合并为一次重拉）
   useReconnectingEventSource(
@@ -496,8 +531,10 @@ export function useProductData(
     products,
     total,
     facets,
-    loading,
-    error,
+    loading: loading || (options.requireFresh === true && refreshing),
+    error: error && (!options.requireFresh || !refreshing),
+    refreshError: refreshErrorKey === queryKey,
+    refreshing,
     categories,
     categoriesLoaded,
     reload,

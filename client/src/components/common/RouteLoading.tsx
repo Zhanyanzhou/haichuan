@@ -1,6 +1,7 @@
 import { getBrowserPublicContentLocale } from "@/i18n/publicLocale";
 import type { HTMLAttributes } from "react";
 import { createPortal } from "react-dom";
+import ProgressBar from "./ProgressBar";
 
 type RouteLoadingScope = "viewport" | "admin-content" | "workspace" | "region" | "panel" | "inline";
 type RouteLoadingSurface = "public" | "admin";
@@ -9,12 +10,14 @@ interface RouteLoadingProps extends Omit<HTMLAttributes<HTMLDivElement>, "role">
   label?: string;
   scope?: RouteLoadingScope;
   surface?: RouteLoadingSurface;
+  routeProgress?: boolean;
 }
 
 export default function RouteLoading({
   label,
   scope = "viewport",
   surface = "admin",
+  routeProgress = false,
   className,
   ...rest
 }: RouteLoadingProps = {}) {
@@ -33,6 +36,7 @@ export default function RouteLoading({
       aria-busy="true"
       aria-label={statusText}
     >
+      {routeProgress ? <ProgressBar /> : null}
       <span className="site-route-loading__indicator" aria-hidden="true">
         <span className="site-route-loading__ring" />
         <img

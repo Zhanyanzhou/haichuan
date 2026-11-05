@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { useEditorCanvasActive } from "@/page-builder/workspace/editorCanvasActivity";
 import { App as AntdApp } from "antd";
 import {
   ArrowDownOutlined,
@@ -47,6 +48,7 @@ export default function CanvasSelectionDock({
   readOnly?: boolean;
 }) {
   const { modal } = AntdApp.useApp();
+  const canvasActive = useEditorCanvasActive();
   const getPuck = useGetPuck();
   usePageModuleStructureHistoryGuard();
   const portalRef = useRef<HTMLDivElement>(null);
@@ -91,11 +93,12 @@ export default function CanvasSelectionDock({
     !content[selectedIndex + 1]?.props?.locked;
 
   useEffect(() => {
-    if (!componentId || !portalRef.current) return undefined;
+    if (!canvasActive || !componentId || !portalRef.current) return undefined;
     return registerOverlayPortal(portalRef.current, { disableDrag: true });
-  }, [componentId, dockHost]);
+  }, [canvasActive, componentId, dockHost]);
 
   useLayoutEffect(() => {
+    if (!canvasActive) return;
     const hostWindow = window;
     const frame = document.querySelector<HTMLIFrameElement>(
       ".homepage-editor__canvas-scroll iframe",
@@ -275,7 +278,7 @@ export default function CanvasSelectionDock({
       overlayObserver.disconnect();
       frameObserver.disconnect();
     };
-  }, [canvasReadyRevision, componentId, dockHost, selectedIndex]);
+  }, [canvasActive, canvasReadyRevision, componentId, dockHost, selectedIndex]);
 
   const moveSelected = (direction: -1 | 1) => {
     if (readOnly) return;
@@ -314,7 +317,7 @@ export default function CanvasSelectionDock({
     duplicatePageModule(getPuck, selectedIndex);
   };
 
-  return selectedModule && dockHost && !readOnly
+  return canvasActive && selectedModule && dockHost && !readOnly
     ? createPortal(
         <div
           ref={portalRef}

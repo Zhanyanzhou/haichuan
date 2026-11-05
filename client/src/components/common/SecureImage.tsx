@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, ImgHTMLAttributes } from "react";
 
 interface SecureImageProps {
@@ -140,7 +140,32 @@ export function SecureImage({
     shouldDefer ? "idle" : "loading",
   );
   const [fallbackFailed, setFallbackFailed] = useState(false);
+  const [retryGeneration, setRetryGeneration] = useState(0);
+  const [canShowRetry, setCanShowRetry] = useState(false);
   const placeholderRef = useRef<HTMLDivElement | null>(null);
+  const errorRef = useRef<HTMLDivElement | null>(null);
+  const retry = useCallback(() => {
+    setFallbackFailed(false);
+    setResolvedSrc(null);
+    setStatus("loading");
+    setRetryGeneration((generation) => generation + 1);
+  }, []);
+
+  useEffect(() => {
+    if (status !== "error" || !normalizedSrc || !shouldLoad) return;
+    // 只在网络恢复时重试，不在持续失败时轮询受控媒体。
+    window.addEventListener("online", retry);
+    return () => window.removeEventListener("online", retry);
+  }, [normalizedSrc, retry, shouldLoad, status]);
+
+  useEffect(() => {
+    // 卡片链接、缩略图按钮内部不能再嵌套按钮。它们仍可在网络恢复时自动重试；
+    // 详情主图等独立图片提供原地重试操作。
+    const interactiveParent = errorRef.current?.parentElement?.closest(
+      'a, button, [role="button"], [role="link"]',
+    );
+    setCanShowRetry(Boolean(status === "error" && normalizedSrc && errorRef.current && !interactiveParent));
+  }, [fallbackFailed, normalizedSrc, status]);
 
   useEffect(() => {
     if (!shouldDefer) {
@@ -218,7 +243,7 @@ export function SecureImage({
       controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [normalizedSrc, privateMedia, shouldLoad, tokenKind]);
+  }, [normalizedSrc, privateMedia, retryGeneration, shouldLoad, tokenKind]);
 
   useEffect(() => {
     setFallbackFailed(false);
@@ -298,12 +323,26 @@ export function SecureImage({
     }
     return (
       <div
+        ref={errorRef}
         className={className}
-        style={placeholderStyle}
-        role={alt ? "img" : undefined}
+        style={{ ...placeholderStyle, flexDirection: "column", gap: 8 }}
+        role={alt ? "group" : undefined}
         aria-label={alt ? `${alt}（图片暂不可用）` : undefined}
       >
-        图片暂不可用
+        <span>图片暂不可用</span>
+        {canShowRetry ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              retry();
+            }}
+            style={{ minWidth: 44, minHeight: 44, padding: "0 12px", border: "1px solid currentColor", background: "transparent", color: "inherit", font: "inherit", cursor: "pointer" }}
+          >
+            重新加载图片
+          </button>
+        ) : null}
       </div>
     );
   }

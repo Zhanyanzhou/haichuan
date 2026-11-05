@@ -54,7 +54,6 @@ async function mockCatalogApi(page: Page) {
   await page.addInitScript(() => {
     localStorage.removeItem("customerToken");
     localStorage.removeItem("customer");
-    localStorage.removeItem("hc_selection_tray");
   });
   await page.route("**/api/products/catalog/stream**", (route) => route.abort());
   await page.route("**/api/page-modules/document/stream**", (route) => route.abort());
@@ -265,6 +264,7 @@ test("Catalog 在公开商品响应畸形时过滤无效记录而不污染目录
 });
 
 test("Catalog 使用服务端分页并保持 URL、作品页与跨页选款盘", async ({ page }) => {
+  await page.route("**/api/customers/me", (route) => route.fulfill({ json: wrapped(null) }));
   const firstRequest = page.waitForRequest((request) => {
     const url = new URL(request.url());
     return url.pathname.endsWith("/api/products/public") && url.searchParams.get("pageSize") === "32";
@@ -288,6 +288,10 @@ test("Catalog 使用服务端分页并保持 URL、作品页与跨页选款盘",
   await page.getByRole("navigation", { name: "面包屑" }).getByRole("link", { name: "选款中心" }).click();
   await expect(page).toHaveURL(/\/catalog$/);
   await expect(openLink).toBeFocused();
+  await expect.poll(() => page.evaluate(() => {
+    const selection = localStorage.getItem("hc_selection_tray");
+    return selection ? JSON.parse(selection).state.ownerKey : null;
+  })).toBe("guest");
   await page.getByRole("button", { name: "+ 加入选款" }).first().click();
   await expect(page.getByText("已选 1 款")).toBeVisible();
 
@@ -448,10 +452,12 @@ test("Catalog 筛选无结果时保留仍有效的持久化选款", async ({ pag
     .toBe(true);
 });
 
-test("选款咨询提交前可核对全部作品名称与编号并逐项移除", async ({ page }) => {
+test("选款咨询可逐项移除，回到旧组合时等待复核并保留表单", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await seedSelection(page, [1, 2]);
+  await seedSelection(page, [2]);
   await page.goto("/catalog");
+  await expect(page.getByRole("button", { name: "查看已选 1 款并提交选款咨询" })).toBeVisible();
+  await page.getByRole("button", { name: "+ 加入选款", exact: true }).first().click();
 
   await page.getByRole("button", { name: "查看已选 2 款并提交选款咨询" }).click();
   const dialog = page.getByRole("dialog", { name: "提交选款咨询" });
@@ -466,14 +472,64 @@ test("选款咨询提交前可核对全部作品名称与编号并逐项移除",
   expect(removeBox).not.toBeNull();
   expect(removeBox!.width).toBeGreaterThanOrEqual(44);
   expect(removeBox!.height).toBeGreaterThanOrEqual(44);
-  await removeFirst.click();
 
+  const customerName = dialog.getByPlaceholder("您的称呼");
+  await customerName.fill("测试访客");
+  let releaseLookup!: () => void;
+  const blockedLookup = new Promise<void>((resolve) => { releaseLookup = resolve; });
+  let invalidResponse = true;
+  await page.route("**/api/products/public**", async (route) => {
+    if (new URL(route.request().url()).searchParams.get("ids") === "2" && invalidResponse) {
+      await blockedLookup;
+      return route.fulfill({ json: wrapped({ unexpected: true }) });
+    }
+    await route.fallback();
+  });
+  await removeFirst.click();
+  try {
+    await expect(dialog.getByRole("status")).toHaveText("正在确认已选作品");
+    await expect(dialog.getByRole("button", { name: "提交选款咨询（1 款）" })).toBeDisabled();
+    await expect(customerName).toHaveValue("测试访客");
+  } finally {
+    releaseLookup();
+  }
+  await expect(dialog.getByRole("alert")).toContainText("选款状态暂时无法确认");
+  await expect(dialog.getByRole("button", { name: "提交选款咨询（1 款）" })).toBeDisabled();
+  invalidResponse = false;
+  await dialog.getByRole("button", { name: "重新确认选款" }).click();
+  await expect(dialog.getByRole("button", { name: "提交选款咨询（1 款）" })).toBeEnabled();
+  await expect(customerName).toHaveValue("测试访客");
   await expect(dialog.getByText("已选 1 款作品", { exact: false })).toBeVisible();
   await expect(selectionList.getByText("作品 01", { exact: true })).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => {
     const raw = localStorage.getItem("hc_selection_tray");
     return raw ? JSON.parse(raw).state.selectedIds : [];
   })).toEqual([2]);
+});
+
+test("购物袋修改选款后等复核结果再允许交给顾问", async ({ page }) => {
+  await seedSelection(page, [1, 2]);
+  await page.route("**/api/settings/flags", (route) => route.fulfill({
+    json: wrapped({ commerceEnabled: false, cartEnabled: false, paymentEnabled: false }),
+  }));
+  let releaseLookup!: () => void;
+  const blockedLookup = new Promise<void>((resolve) => { releaseLookup = resolve; });
+  await page.route("**/api/products/public**", async (route) => {
+    if (new URL(route.request().url()).searchParams.get("ids") === "2") await blockedLookup;
+    await route.fallback();
+  });
+  await page.goto("/cart");
+  await page.getByRole("button", { name: "交给顾问", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "提交选款咨询" });
+  await dialog.getByRole("button", { name: "移除 作品 01" }).click();
+  const submit = dialog.getByRole("button", { name: "提交选款咨询（1 款）" });
+  try {
+    await expect(dialog.getByRole("status")).toHaveText("正在确认已选作品");
+    await expect(submit).toBeDisabled();
+  } finally {
+    releaseLookup();
+  }
+  await expect(submit).toBeEnabled();
 });
 
 test("Catalog 权威查询确认作品失效后清理旧选款且空目录不显示虚假数量", async ({ page }) => {
@@ -647,7 +703,7 @@ test("选款咨询失败保留填写内容，重试复用幂等键且阻止同�
   releaseRetry?.();
   const receiptDialog = page.getByRole("dialog", { name: "选款咨询已提交" });
   await expect(receiptDialog).toBeVisible();
-  await receiptDialog.getByRole("button", { name: "完成并清空选款" }).click();
+  await receiptDialog.getByRole("button", { name: "完成并移除本次选款" }).click();
   await expect(receiptDialog).toHaveCount(0);
   await expect(page.getByText("已选 1 款")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => {
@@ -969,7 +1025,7 @@ test("Catalog 在 390px 保持正方形作品格、可用对话框宽度并恢�
   await search.fill("");
   await search.blur();
 
-  const productCell = page.locator(".catalog-cell").first();
+  const productCell = page.locator("[data-catalog-product-media]").first();
   const productCellBox = await productCell.boundingBox();
   expect(productCellBox).not.toBeNull();
   expect(productCellBox!.width / productCellBox!.height).toBeCloseTo(1, 1);

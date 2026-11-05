@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { RealCategory } from "@/hooks/useProductData";
 import { catalogTokens as T } from "./catalogTokens";
 import { getPrimaryCats, getRealSubs } from "./catalogCategories";
@@ -176,6 +176,20 @@ export function Toolbar({
   onOpenFilter: (trigger: HTMLButtonElement) => void;
 }) {
   const [openDD, setOpenDD] = useState<string | null>(null);
+  const materialTriggerRef = useRef<HTMLButtonElement>(null);
+  const materialPopoverId = useId();
+
+  useEffect(() => {
+    if (openDD !== "material") return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setOpenDD(null);
+      materialTriggerRef.current?.focus();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [openDD]);
 
   return (
     <>
@@ -210,8 +224,18 @@ export function Toolbar({
           >
             更多筛选
           </button>
-          <div className="catalog-toolbar__material" style={{ position: "relative" }}>
+          <div
+            className="catalog-toolbar__material"
+            style={{ position: "relative" }}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpenDD(null);
+            }}
+          >
             <button
+              type="button"
+              ref={materialTriggerRef}
+              aria-expanded={openDD === "material"}
+              aria-controls={openDD === "material" ? materialPopoverId : undefined}
               onClick={() =>
                 setOpenDD(openDD === "material" ? null : "material")
               }
@@ -238,6 +262,9 @@ export function Toolbar({
                   onClick={() => setOpenDD(null)}
                 />
                 <div
+                  id={materialPopoverId}
+                  role="group"
+                  aria-label="材质筛选"
                   style={{
                     position: "absolute",
                     top: "100%",

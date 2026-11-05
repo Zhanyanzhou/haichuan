@@ -19,14 +19,14 @@ import {
 import type { PuckBlock } from "./PuckDocumentRenderer";
 import type { PublicContentLocale } from "@/i18n/publicLocale";
 import RouteLoading from "@/components/common/RouteLoading";
+import { loadPuckDocumentRenderer } from "./loadPublicPageRenderer";
 import {
   PublicImageFactsProvider,
   readPublicImageFacts,
 } from "./publicImageFacts";
 
-// 页面装修器及其编辑器依赖仅在确有已发布内容时加载，避免进入纯展示页首屏。
-const PuckDocumentRenderer = lazy(() => import("./PuckDocumentRenderer"));
-const AntdProvider = lazy(() => import("@/components/common/AntdProvider"));
+// 渲染器保留独立分块；已登记品牌页可与内容读取并行预取，后台不主动加载。
+const PuckDocumentRenderer = lazy(loadPuckDocumentRenderer);
 
 export type PublicPageFallbackContent = {
   eyebrow: string;
@@ -317,19 +317,17 @@ export default function PublishedPageDecoration({
             <div
               aria-busy="true"
               aria-live="polite"
-              style={{ minHeight: 120, display: "grid", placeItems: "center", color: "#5F6568", fontSize: 12 }}
+              style={{ minHeight: replaceChildren ? "100svh" : 120, display: "grid", placeItems: "center", color: "#5F6568", fontSize: 12 }}
             >
               {english ? "Rendering page content" : "正在渲染页面内容"}
             </div>
           }
         >
-          <AntdProvider>
-            <PuckDocumentRenderer
-              data={data}
-              pageKey={pageKey}
-              primaryHeading={replaceChildren ? pageLabel : undefined}
-            />
-          </AntdProvider>
+          <PuckDocumentRenderer
+            data={data}
+            pageKey={pageKey}
+            primaryHeading={replaceChildren ? pageLabel : undefined}
+          />
         </Suspense>
       </section>
     );

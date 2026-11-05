@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { validateDynamicTemplateDefinition } from "../template-definition";
+import { validateDynamicTemplateDefinition } from "../template-definition/validateTemplateDefinition";
 import {
   dynamicTemplateVersionKey,
   type ResolvedDynamicTemplateDefinition,

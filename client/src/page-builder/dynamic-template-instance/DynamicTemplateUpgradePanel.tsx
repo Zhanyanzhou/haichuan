@@ -1,12 +1,15 @@
 import { App as AntdApp, Alert, Button, Modal, Tag } from "antd";
 import RouteLoading from "@/components/common/RouteLoading";
+import { useEditorCanvasActive } from "../workspace/editorCanvasActivity";
 import { useEffect, useMemo, useState } from "react";
 import { unwrapResponse } from "@/utils/unwrap";
 import {
   dynamicTemplateApi,
   type PublishedDynamicTemplateResource,
-  type TemplateCatalogResource,
+  type PublishedDynamicTemplateSummaryResource,
 } from "@/services/clients/dynamicTemplateClient";
+import { currentSessionEpoch } from "@/services/sessionEpoch";
+import { createPublishedCatalogDefinitionLoader } from "../template-editor/publishedCatalogDefinitionLoader";
 import DynamicTemplateRenderer from "../template-definition/DynamicTemplateRenderer";
 import type { TemplateDefinitionV2 } from "../template-definition";
 import { registerResolvedDynamicTemplate } from "./registry";
@@ -24,13 +27,19 @@ import type {
 import "./DynamicTemplateUpgradePanel.css";
 
 const CATALOG_CACHE_TTL_MS = 30_000;
-let publishedTemplatesCache: PublishedDynamicTemplateResource[] | null = null;
+let publishedTemplatesCache: PublishedDynamicTemplateSummaryResource[] | null = null;
 let publishedTemplatesCacheKey = "";
 let publishedTemplatesCachedAt = 0;
-let publishedTemplatesRequest: Promise<PublishedDynamicTemplateResource[]> | null = null;
+let publishedTemplatesRequest: Promise<PublishedDynamicTemplateSummaryResource[]> | null = null;
 let publishedTemplatesLoadGeneration = 0;
+let publishedTemplatesSessionEpoch = currentSessionEpoch("admin");
+let publishedDefinitionLoader = createPublishedCatalogDefinitionLoader();
+const processedCatalogEvents = new WeakSet<Event>();
 
 export function invalidatePublishedTemplateCatalogCache() {
+  publishedDefinitionLoader.dispose();
+  publishedDefinitionLoader = createPublishedCatalogDefinitionLoader();
+  publishedTemplatesSessionEpoch = currentSessionEpoch("admin");
   publishedTemplatesCache = null;
   publishedTemplatesCacheKey = "";
   publishedTemplatesCachedAt = 0;
@@ -39,7 +48,9 @@ export function invalidatePublishedTemplateCatalogCache() {
 }
 
 function dropPublishedTemplateFromCache(templateId: string) {
-  // 抬升世代并丢弃在途 Promise，避免归档前的 listCatalog 回包把已移除模板写回缓存。
+  publishedDefinitionLoader.dispose();
+  publishedDefinitionLoader = createPublishedCatalogDefinitionLoader();
+  // 抬升世代并丢弃在途 Promise，避免归档前的目录回包把已移除模板写回缓存。
   publishedTemplatesRequest = null;
   publishedTemplatesLoadGeneration += 1;
   if (!publishedTemplatesCache) return;
@@ -53,6 +64,7 @@ function readRemovedCatalogTemplateId(event: Event): string | null {
 }
 
 async function loadPublishedTemplates(forceRefresh = false) {
+  if (publishedTemplatesSessionEpoch !== currentSessionEpoch("admin")) invalidatePublishedTemplateCatalogCache();
   if (forceRefresh) {
     invalidatePublishedTemplateCatalogCache();
   } else if (publishedTemplatesRequest) {
@@ -64,15 +76,14 @@ async function loadPublishedTemplates(forceRefresh = false) {
     return publishedTemplatesCache;
   }
   const generation = publishedTemplatesLoadGeneration;
-  const request = dynamicTemplateApi.listCatalog({ dedupe: false })
+  // 更新检查只需要正式版本，不读取模板设计的完整个人草稿目录。
+  const request = dynamicTemplateApi.listPublished({ dedupe: !forceRefresh, view: "summary" })
     .then((response) => {
       if (generation !== publishedTemplatesLoadGeneration) {
         return publishedTemplatesCache ?? [];
       }
-      const catalog = unwrapResponse<TemplateCatalogResource>(response);
-      const templates = catalog?.items.flatMap((item) => (
-        item.kind === "published" ? [item.template] : []
-      )) ?? [];
+      const published = unwrapResponse<PublishedDynamicTemplateSummaryResource[]>(response);
+      const templates = Array.isArray(published) ? published : [];
       publishedTemplatesCache = templates;
       publishedTemplatesCacheKey = publishedCatalogIdentity(templates);
       publishedTemplatesCachedAt = Date.now();
@@ -91,8 +102,8 @@ type TemplateVersionCheckState =
   | { status: "loading" }
   | { status: "catalog-error"; message: string }
   | { status: "catalog-missing" }
-  | { status: "identity-conflict"; latest: PublishedDynamicTemplateResource }
-  | { status: "current"; latest: PublishedDynamicTemplateResource }
+  | { status: "identity-conflict"; latest: PublishedDynamicTemplateSummaryResource }
+  | { status: "current"; latest: PublishedDynamicTemplateSummaryResource }
   | { status: "upgrade-available"; latest: PublishedDynamicTemplateResource };
 
 export default function DynamicTemplateUpgradePanel({
@@ -113,17 +124,24 @@ export default function DynamicTemplateUpgradePanel({
   ) => void;
 }) {
   const { message } = AntdApp.useApp();
+  const canvasActive = useEditorCanvasActive();
   const [versionCheck, setVersionCheck] = useState<TemplateVersionCheckState>({ status: "loading" });
   const [reloadRequest, setReloadRequest] = useState(0);
   const [previewOpen, setPreviewOpen] = useState(false);
+  useEffect(() => {
+    if (!canvasActive) setPreviewOpen(false);
+  }, [canvasActive]);
 
   useEffect(() => {
+    if (!canvasActive) return;
     let cancelled = false;
+    let checkSequence = 0;
     const refreshLatest = (forceRefresh = false) => {
+      const checkId = ++checkSequence;
       setVersionCheck({ status: "loading" });
       void loadPublishedTemplates(forceRefresh)
-        .then((templates) => {
-          if (cancelled) return;
+        .then(async (templates) => {
+          if (cancelled || checkId !== checkSequence) return;
           const latest = templates.find((item) => item.templateId === instance.templateId);
           if (!latest) {
             setVersionCheck({ status: "catalog-missing" });
@@ -139,13 +157,13 @@ export default function DynamicTemplateUpgradePanel({
             setVersionCheck({ status: "identity-conflict", latest });
             return;
           }
-          setVersionCheck({
-            status: latest.version > instance.templateVersion ? "upgrade-available" : "current",
-            latest,
-          });
+          if (latest.version > instance.templateVersion) {
+            const resolved = await publishedDefinitionLoader.read(latest);
+            if (!cancelled && checkId === checkSequence) setVersionCheck({ status: "upgrade-available", latest: resolved });
+          } else setVersionCheck({ status: "current", latest });
         })
         .catch(() => {
-          if (!cancelled) {
+          if (!cancelled && checkId === checkSequence) {
             setVersionCheck({
               status: "catalog-error",
               message: "暂时无法检查模板新版本，当前页面版本未改变",
@@ -153,15 +171,20 @@ export default function DynamicTemplateUpgradePanel({
           }
         });
     };
-    refreshLatest(true);
+    refreshLatest(reloadRequest > 0);
     const refreshAfterCatalogChange = (event: Event) => {
+      if (!processedCatalogEvents.has(event)) {
+        processedCatalogEvents.add(event);
+        const removed = readRemovedCatalogTemplateId(event);
+        if (removed) dropPublishedTemplateFromCache(removed);
+        else invalidatePublishedTemplateCatalogCache();
+      }
       const removedTemplateId = readRemovedCatalogTemplateId(event);
       if (removedTemplateId) {
-        dropPublishedTemplateFromCache(removedTemplateId);
         refreshLatest(false);
         return;
       }
-      refreshLatest(true);
+      refreshLatest(false);
     };
     window.addEventListener(DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT, refreshAfterCatalogChange);
     return () => {
@@ -169,6 +192,7 @@ export default function DynamicTemplateUpgradePanel({
       window.removeEventListener(DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT, refreshAfterCatalogChange);
     };
   }, [
+    canvasActive,
     currentDefinitionChecksum,
     currentSchemaVersion,
     instance.templateId,
@@ -176,7 +200,7 @@ export default function DynamicTemplateUpgradePanel({
     reloadRequest,
   ]);
 
-  const latest = versionCheck.status === "current" || versionCheck.status === "upgrade-available"
+  const latest = versionCheck.status === "upgrade-available"
     ? versionCheck.latest
     : null;
 
@@ -240,7 +264,7 @@ export default function DynamicTemplateUpgradePanel({
   }
 
   const applyUpgrade = () => {
-    if (upgrade.blockers.length > 0) return;
+    if (!canvasActive || upgrade.blockers.length > 0) return;
     registerResolvedDynamicTemplate({
       templateId: latest.templateId,
       version: latest.version,
@@ -293,6 +317,7 @@ export function DynamicTemplateUpgradeReviewModal({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const canvasActive = useEditorCanvasActive();
   const [selectedIndex, setSelectedIndex] = useState(0);
   useEffect(() => {
     if (open) setSelectedIndex(0);
@@ -303,12 +328,12 @@ export function DynamicTemplateUpgradeReviewModal({
     <Modal
       className="dynamic-template-upgrade-review"
       title={title}
-      open={open}
+      open={open && canvasActive}
       width={1120}
       okText="确认升级页面草稿"
       cancelText="保留当前版本"
       okButtonProps={{ disabled: blocked || plans.length === 0 }}
-      onOk={onConfirm}
+      onOk={() => { if (canvasActive) onConfirm(); }}
       onCancel={onCancel}
     >
       <p>确认后只修改当前内存草稿并增加一条页面历史；不会自动保存、发布或回写母模板。</p>

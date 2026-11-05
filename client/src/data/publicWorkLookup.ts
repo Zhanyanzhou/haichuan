@@ -32,9 +32,9 @@ function readCatalogTotal(value: unknown): number | null {
  * 先读公开作品。只有接口没有这件作品、且当前可见目录总数为 0 时，才回退到演示款。
  * 目录计数失败时不展示演示款，避免把正式目录的故障伪装成演示内容。
  */
-export async function lookupPublicWork(reference: string): Promise<PublicWorkResolution> {
+export async function lookupPublicWork(reference: string, signal?: AbortSignal): Promise<PublicWorkResolution> {
   try {
-    const response = await productApi.getPublicById(reference, { suppressGlobalError: true });
+    const response = await productApi.getPublicById(reference, { suppressGlobalError: true, signal });
     const published = readPublishedProduct(unwrapResponse<unknown>(response));
     if (published) return { kind: "published", product: published };
   } catch (error) {
@@ -49,7 +49,7 @@ export async function lookupPublicWork(reference: string): Promise<PublicWorkRes
       page: 1,
       pageSize: 1,
       sortBy: "sortOrder",
-    });
+    }, signal);
     const total = readCatalogTotal(unwrapResponse<unknown>(response));
     if (total === 0) return { kind: "virtual", product: virtual };
     return { kind: "missing" };

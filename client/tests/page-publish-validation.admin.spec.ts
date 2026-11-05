@@ -632,7 +632,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       "选款中心",
       "珠宝定制",
       "关于海川",
-      "预约咨询",
+      "联系海川",
     ]);
   });
 
@@ -779,6 +779,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       await expect(page.getByLabel("内容语言", { exact: true })).toHaveCount(0);
       const toolbar = page.locator(".homepage-editor__toolbar");
       const switcher = toolbar.locator(".homepage-editor__viewport-switcher");
+      await expect(switcher).toBeVisible();
       const toolbarBox = await toolbar.boundingBox();
       const switcherBox = await switcher.boundingBox();
       if (!toolbarBox || !switcherBox) throw new Error("顶栏或设备切换缺少几何尺寸");
@@ -813,6 +814,46 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
         path: screenshot,
         contentType: "image/png",
       });
+    }
+  });
+
+  test("窄屏装修的设备、工作模式、面板和缩放控件可直接操作", async ({ page }) => {
+    await mockEditorApis(page, { valid: true });
+
+    for (const width of [320, 390, 768, 1024]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto("/admin/editor/home");
+      const mobile = page.getByRole("button", { name: /移动端布局/ });
+      await mobile.click();
+      await expect(mobile).toHaveAttribute("aria-pressed", "true");
+
+      const inspector = page.getByRole("dialog", { name: "属性面板" });
+      const expandInspector = page.getByRole("button", { name: "展开属性面板", exact: true });
+      if (await expandInspector.isVisible()) {
+        await expandInspector.click();
+      }
+      await inspector.getByRole("button", { name: "收起属性面板" }).click();
+      await expect(inspector).toBeHidden();
+      await expect(page.getByRole("button", { name: "收起属性面板" })).toBeHidden();
+
+      for (const name of [
+        "页面装修",
+        "模板设计",
+        "展开模板组件库",
+        "展开图层面板",
+        "展开属性面板",
+        "适应画布",
+        "缩小画布",
+        "放大画布",
+      ]) {
+        await page.getByRole("button", { name, exact: true }).click({ trial: true });
+      }
+
+      await page.getByRole("button", { name: "预览当前画布" }).click();
+      await mobile.click({ trial: true });
+      await page.getByLabel("切换装修页面").click({ trial: true });
+      await page.getByRole("button", { name: "退出当前画布预览" }).click();
+      await expectNoHorizontalOverflow(page);
     }
   });
 
@@ -1295,6 +1336,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     const remoteDraft = validDraft();
     remoteDraft.puckData.content[0].props.title = "远端编辑者的新草稿";
     remoteDraft.updatedAt = "2026-08-14T00:00:03.000Z";
+    remoteDraft.contentHash = "e".repeat(64);
     const requests = await mockEditorApis(page, {
       valid: true,
       publishFailure: true,
@@ -1334,6 +1376,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     const remoteDraft = validDraft();
     remoteDraft.puckData.content[0].props.title = "确认后加载的远端草稿";
     remoteDraft.updatedAt = "2026-08-14T00:00:03.000Z";
+    remoteDraft.contentHash = "e".repeat(64);
     const requests = await mockEditorApis(page, {
       valid: true,
       publishFailuresBeforeSuccess: 1,
@@ -1856,7 +1899,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     },
     {
       pageKey: "contact",
-      pageLabel: "预约咨询",
+      pageLabel: "联系海川",
       width: 390,
       height: 844,
       brandBlock: {

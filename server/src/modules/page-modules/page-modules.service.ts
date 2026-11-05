@@ -60,7 +60,7 @@ import {
   withPageLocaleRevisionMetadata,
   withPageLocaleDraftMetadata,
 } from "./page-document-localization";
-import { MediaAuthorizationResolverService } from "../upload/media-authorization-resolver.service";
+import { MediaAuthorizationResolverService, type MediaFileVerificationScope } from "../upload/media-authorization-resolver.service";
 import { resolveMediaStorageRoots } from "../upload/media-storage-paths";
 import { readCachedDisplayImageMetadata } from "../../common/media/display-image-metadata";
 import type { StaffPrincipal } from "../../common/security/authenticated-principal";
@@ -181,6 +181,27 @@ type LocalizedPageDraft = {
   updatedAt: Date;
   legacy: boolean;
 };
+
+/** 只覆盖一次读取/预检，按数据库客户端和文档对象隔离；不得跨写入阶段复用。 */
+type PageReadValidationScope = {
+  byDb: WeakMap<PageValidationDb, {
+    fileVerification: MediaFileVerificationScope;
+    hydratedDefinitions: Map<unknown, Promise<unknown>>;
+  }>;
+};
+
+function createPageReadValidationScope(): PageReadValidationScope {
+  return { byDb: new WeakMap() };
+}
+
+function pageReadCache(scope: PageReadValidationScope, db: PageValidationDb) {
+  let cache = scope.byDb.get(db);
+  if (!cache) {
+    cache = { fileVerification: new Map(), hydratedDefinitions: new Map() };
+    scope.byDb.set(db, cache);
+  }
+  return cache;
+}
 
 type PageValidationDb = Pick<
   Prisma.TransactionClient,
@@ -376,6 +397,21 @@ export class PageModulesService {
   private async hydrateDynamicTemplateDefinitions(
     puckData: unknown,
     db: PageValidationDb = this.prisma,
+    scope?: PageReadValidationScope,
+  ): Promise<unknown> {
+    if (!scope) return this.loadDynamicTemplateDefinitions(puckData, db);
+    const cache = pageReadCache(scope, db);
+    let pending = cache.hydratedDefinitions.get(puckData);
+    if (!pending) {
+      pending = this.loadDynamicTemplateDefinitions(puckData, db);
+      cache.hydratedDefinitions.set(puckData, pending);
+    }
+    return pending;
+  }
+
+  private async loadDynamicTemplateDefinitions(
+    puckData: unknown,
+    db: PageValidationDb,
   ) {
     if (!isRecord(puckData)) return puckData;
     const references = collectDynamicTemplateInstanceReferences(puckData);
@@ -1116,6 +1152,7 @@ export class PageModulesService {
     // 公开读取只接受页面合同登记的 key。即使历史导入或人工数据库操作
     // 留下额外记录，也不能把它们作为公开 PageDocument 暴露。
     if (!getContentTemplatePageRule(pageKey)) return null;
+    const scope = createPageReadValidationScope();
     const snapshot = await this.getLocalizedPublishedPageSnapshot(pageKey, locale);
     if (!snapshot || snapshot.status === "INVALID") return snapshot;
     if (!hasCurrentContentTemplatePublicationAttestation(snapshot.metadata)) {
@@ -1129,7 +1166,7 @@ export class PageModulesService {
         version: snapshot.version,
       };
     }
-    if (!await this.isPublishedMediaManifestCurrent(snapshot.publishedRevisionId)) {
+    if (!await this.isPublishedMediaManifestCurrent(snapshot.publishedRevisionId, scope)) {
       return {
         pageKey,
         locale,
@@ -1145,6 +1182,7 @@ export class PageModulesService {
       snapshot.puckData,
       snapshot.metadata,
       pageKey,
+      scope,
     );
     if (!validation.valid) {
       return {
@@ -1162,7 +1200,7 @@ export class PageModulesService {
     return {
       pageKey,
       locale,
-      puckData: await this.hydrateDynamicTemplateDefinitions(snapshot.puckData),
+      puckData: await this.hydrateDynamicTemplateDefinitions(snapshot.puckData, this.prisma, scope),
       metadata: this.getPublicPageMetadata(
         stripPageLocaleRevisionMetadata(snapshot.metadata),
       ),
@@ -1181,6 +1219,7 @@ export class PageModulesService {
     actor: PageDocumentStaffActorInput,
   ) {
     return this.withAuthorizedStaffRead(actor, async (tx) => {
+      const scope = createPageReadValidationScope();
       const snapshot = await this.getLocalizedPublishedPageSnapshot(pageKey, locale, tx);
       if (!snapshot || snapshot.status === "INVALID") return snapshot;
       const publicationAttested = hasCurrentContentTemplatePublicationAttestation(
@@ -1191,6 +1230,7 @@ export class PageModulesService {
         snapshot.puckData,
         snapshot.metadata,
         pageKey,
+        scope,
       );
       const attestationIssues: ContentTemplateIssue[] = publicationAttested
         ? []
@@ -1204,7 +1244,7 @@ export class PageModulesService {
       const publicationIssues = [...attestationIssues, ...pageReadiness.issues];
       return {
         ...snapshot,
-        puckData: await this.hydrateDynamicTemplateDefinitions(snapshot.puckData, tx),
+        puckData: await this.hydrateDynamicTemplateDefinitions(snapshot.puckData, tx, scope),
         metadata: stripPageLocaleRevisionMetadata(
           withoutContentTemplatePublicationAttestation(snapshot.metadata),
         ),
@@ -2184,6 +2224,7 @@ export class PageModulesService {
       revision: string;
     }>;
   }> {
+    const scope = createPageReadValidationScope();
     const snapshot = await this.getPublishedPageDocumentSnapshot(pageKey);
     if (!snapshot) return null;
     if (!hasCurrentContentTemplatePublicationAttestation(snapshot.metadata)) {
@@ -2198,7 +2239,7 @@ export class PageModulesService {
     }
     if (
       !snapshot.publishedRevisionId
-      || !await this.isPublishedMediaManifestCurrent(snapshot.publishedRevisionId)
+      || !await this.isPublishedMediaManifestCurrent(snapshot.publishedRevisionId, scope)
     ) {
       return {
         pageKey: snapshot.pageKey,
@@ -2214,6 +2255,7 @@ export class PageModulesService {
       snapshot.puckData,
       snapshot.metadata,
       pageKey,
+      scope,
     );
     if (!validation.valid) {
       return {
@@ -2229,7 +2271,7 @@ export class PageModulesService {
     const mediaFacts = await this.readPublishedImageFacts(snapshot.publishedRevisionId);
     return {
       pageKey: snapshot.pageKey,
-      puckData: await this.hydrateDynamicTemplateDefinitions(snapshot.puckData),
+      puckData: await this.hydrateDynamicTemplateDefinitions(snapshot.puckData, this.prisma, scope),
       // 公开端只需要 SEO 字段；内容责任人与其他后台元数据不得随页面响应泄漏。
       metadata: this.getPublicPageMetadata(snapshot.metadata),
       status: snapshot.status,
@@ -2308,6 +2350,7 @@ export class PageModulesService {
 
   /** 后台编辑器需要完整发布元数据，才能正确比较草稿并还原线上版本。 */
   async getPublishedPageDocumentForAdmin(pageKey: string) {
+    const scope = createPageReadValidationScope();
     const snapshot = await this.getPublishedPageDocumentSnapshot(pageKey);
     if (!snapshot) return null;
     const publicationAttested =
@@ -2326,6 +2369,7 @@ export class PageModulesService {
       snapshot.puckData,
       snapshot.metadata,
       pageKey,
+      scope,
     );
     const publicationIssues = [
       ...attestationIssues,
@@ -2341,7 +2385,7 @@ export class PageModulesService {
     };
     return {
       ...snapshot,
-      puckData: await this.hydrateDynamicTemplateDefinitions(snapshot.puckData),
+      puckData: await this.hydrateDynamicTemplateDefinitions(snapshot.puckData, this.prisma, scope),
       metadata: withoutContentTemplatePublicationAttestation(snapshot.metadata),
       publicationAttested,
       publicationReadiness,
@@ -2590,6 +2634,7 @@ export class PageModulesService {
     puckDataOverride?: unknown,
     metadataOverride?: unknown,
   ) {
+    const scope = createPageReadValidationScope();
     let puckData = puckDataOverride;
     let metadata = metadataOverride;
     if (puckData === undefined || metadata === undefined) {
@@ -2610,6 +2655,7 @@ export class PageModulesService {
       puckData,
       metadata,
       pageKey,
+      scope,
     );
   }
 
@@ -2621,6 +2667,7 @@ export class PageModulesService {
     actor?: PageDocumentStaffActorInput,
   ) {
     return this.withAuthorizedStaffRead(actor, async (tx) => {
+      const scope = createPageReadValidationScope();
     let puckData = puckDataOverride;
     let metadata = metadataOverride;
     if (puckData === undefined || metadata === undefined) {
@@ -2641,6 +2688,7 @@ export class PageModulesService {
       puckData,
       metadata,
       pageKey,
+      scope,
     );
     });
   }
@@ -2652,7 +2700,8 @@ export class PageModulesService {
     puckData: unknown,
     metadata: unknown,
   ) {
-    return this.collectPageDocumentValidation(db, puckData, metadata, pageKey);
+    const scope = createPageReadValidationScope();
+    return this.collectPageDocumentValidation(db, puckData, metadata, pageKey, scope);
   }
 
   private async resolvePagePublicationMedia(
@@ -2660,12 +2709,13 @@ export class PageModulesService {
     puckData: unknown,
     metadata: unknown,
     pageKey: string,
+    scope?: PageReadValidationScope,
   ): Promise<{
     references: PublicationMediaReference[];
     resolution: MediaPublicationResolution;
   } | null> {
     if (!this.mediaAuthorizationResolver) return null;
-    const hydrated = await this.hydrateDynamicTemplateDefinitions(puckData, db);
+    const hydrated = await this.hydrateDynamicTemplateDefinitions(puckData, db, scope);
     const pageRule = getContentTemplatePageRule(pageKey);
     const exactReferences = collectDynamicTemplateInstanceReferences(puckData);
     const versions = exactReferences.length === 0
@@ -2744,8 +2794,8 @@ export class PageModulesService {
     const resolution = await this.mediaAuthorizationResolver.resolveReferences(
       uniqueReferences,
       db === this.prisma
-        ? { mode: "ENFORCE" }
-        : { transaction: db as Prisma.TransactionClient, mode: "ENFORCE" },
+        ? { mode: "ENFORCE", fileVerificationScope: scope ? pageReadCache(scope, db).fileVerification : undefined }
+        : { transaction: db as Prisma.TransactionClient, mode: "ENFORCE", fileVerificationScope: scope ? pageReadCache(scope, db).fileVerification : undefined },
     ) as MediaPublicationResolution;
     return { references: uniqueReferences, resolution };
   }
@@ -2814,7 +2864,7 @@ export class PageModulesService {
     return buildManagedMediaShadowReport(publicationMedia.resolution);
   }
 
-  private async isPublishedMediaManifestCurrent(revisionId: number): Promise<boolean> {
+  private async isPublishedMediaManifestCurrent(revisionId: number, scope?: PageReadValidationScope): Promise<boolean> {
     if (!this.mediaAuthorizationResolver) return true;
     const manifest = await this.prisma.pageDocumentRevisionMediaAsset.findMany({
       where: { pageDocumentRevisionId: revisionId },
@@ -2836,7 +2886,7 @@ export class PageModulesService {
         sourceType: "PAGE_DOCUMENT_REVISION",
         sourceId: String(revisionId),
       })),
-      { mode: "ENFORCE" },
+      { mode: "ENFORCE", fileVerificationScope: scope ? pageReadCache(scope, this.prisma).fileVerification : undefined },
     ) as MediaPublicationResolution;
     if (!resolution.eligible || resolution.items.length !== manifest.length) return false;
     const itemByPath = new Map(resolution.items.map((item) => [item.context.path, item]));
@@ -2855,12 +2905,14 @@ export class PageModulesService {
     puckData: unknown,
     metadata: unknown,
     pageKey: string,
+    scope?: PageReadValidationScope,
   ): Promise<{ valid: boolean; errors: string[]; issues: ContentTemplateIssue[] }> {
     const publicationMedia = await this.resolvePagePublicationMedia(
       db,
       puckData,
       metadata,
       pageKey,
+      scope,
     );
     const resolution = publicationMedia?.resolution;
     const issues = [
@@ -2868,7 +2920,7 @@ export class PageModulesService {
       ...(await this.collectPuckDataErrors(db, puckData, pageKey)),
       ...(await this.collectSiteSettingsReadinessIssues(db, puckData, pageKey)),
       ...this.collectMetadataIssues(metadata),
-      ...(await this.collectMediaRightsIssues(db, puckData, metadata, pageKey)),
+      ...(await this.collectMediaRightsIssues(db, puckData, metadata, pageKey, scope)),
       ...this.managedMediaIssues(resolution),
       ...collectMediaByteBudgetIssues(resolution?.items),
     ];
@@ -4306,8 +4358,9 @@ export class PageModulesService {
     puckData: unknown,
     metadata: unknown,
     pageKey: string,
+    scope?: PageReadValidationScope,
   ): Promise<ContentTemplateIssue[]> {
-    const hydrated = await this.hydrateDynamicTemplateDefinitions(puckData, db);
+    const hydrated = await this.hydrateDynamicTemplateDefinitions(puckData, db, scope);
     const pageRule = getContentTemplatePageRule(pageKey);
     const seenUrls = new Set<string>();
     const references = [

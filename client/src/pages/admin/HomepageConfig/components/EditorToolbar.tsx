@@ -6,6 +6,8 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useEditorCanvasActive } from "@/page-builder/workspace/editorCanvasActivity";
+import { useEditorWorkspaceOwner, type EditorWorkspaceOwner } from "@/page-builder/workspace/editorWorkspaceOwner";
 import { useGetPuck, type Data, type UiState } from "@puckeditor/core";
 import { App as AntdApp, Input, Modal } from "antd";
 import {
@@ -29,8 +31,17 @@ import {
 } from "@/page-builder/config/editorPages";
 import { RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
 import { BLOCK_META } from "@/page-builder/config/blockMeta";
+import {
+  DYNAMIC_TEMPLATE_BLOCK_TYPE,
+  DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY,
+  getRequiredDynamicTemplateDefinitionKeys,
+  type ResolvedDynamicTemplateDefinitionMap,
+} from "@/page-builder/dynamic-template-instance/types";
+import { getResolvedDynamicTemplateDefinitions, inspectResolvedDynamicTemplateDefinitions } from "@/page-builder/dynamic-template-instance/registry";
+import { dynamicTemplateApi, type PublishedDynamicTemplateVersionResource } from "@/services/clients/dynamicTemplateClient";
 import { migratePuckData } from "@/page-builder/utils/migratePuckData";
 import { USE_MOCK } from "@/services/mockData";
+import { unwrapResponse } from "@/utils/unwrap";
 import {
   focusCanvasBlock,
   useEditorHistoryTransaction,
@@ -153,9 +164,16 @@ export default function EditorToolbar({
   restoreViewport?: { width: number; height: number } | null;
 }) {
   const { message, modal } = AntdApp.useApp();
+  const canvasActive = useEditorCanvasActive();
+  const { owner: workspaceOwner, isCurrent: isCurrentWorkspaceOwner } = useEditorWorkspaceOwner(
+    `${pageKey}:${viewingPublished ? "published" : "draft"}`,
+    canvasActive,
+  );
   const [toolbarHost, setToolbarHost] = useState<HTMLElement | null>(null);
   const [requestChangesOpen, setRequestChangesOpen] = useState(false);
   const [requestChangesNote, setRequestChangesNote] = useState("");
+  const requestChangesOwnerRef = useRef<EditorWorkspaceOwner | null>(null);
+  const ownedConfirmationsRef = useRef(new Map<EditorWorkspaceOwner, Set<ReturnType<typeof modal.confirm>>>());
   const getPuck = useGetPuck();
   const appData = useHomepagePuck((state) => state.appState.data);
   const viewports = useHomepagePuck((state) => state.appState.ui.viewports);
@@ -164,6 +182,7 @@ export default function EditorToolbar({
   const canRedo = useHomepagePuck((state) => state.history.hasFuture);
   const historyPending = useEditorHistoryTransaction((state) => state.pending);
   const previewSelectionRef = useRef<{
+    owner: EditorWorkspaceOwner;
     itemSelector: UiState["itemSelector"];
     blockId?: string;
     visualSelection: VisualNodeSelection | null;
@@ -171,6 +190,44 @@ export default function EditorToolbar({
     panelMode: "content" | "design";
   } | null>(null);
   const wasPreviewModeRef = useRef(previewMode);
+  const destroyOwnedConfirmations = useCallback((owner: EditorWorkspaceOwner) => {
+    const confirmations = ownedConfirmationsRef.current.get(owner);
+    ownedConfirmationsRef.current.delete(owner);
+    confirmations?.forEach((confirmation) => confirmation.destroy());
+  }, []);
+  useEffect(() => {
+    requestChangesOwnerRef.current = null;
+    setRequestChangesOpen(false);
+    setRequestChangesNote("");
+    return () => {
+      destroyOwnedConfirmations(workspaceOwner);
+      if (previewSelectionRef.current?.owner === workspaceOwner) previewSelectionRef.current = null;
+    };
+  }, [destroyOwnedConfirmations, workspaceOwner]);
+  // 只登记工具栏自己创建的确认框，失活时不销毁其他工作区的确认或草稿。
+  const openOwnedConfirmation = useCallback((options: Parameters<typeof modal.confirm>[0]) => {
+    if (!isCurrentWorkspaceOwner(workspaceOwner)) return;
+    const confirmations = ownedConfirmationsRef.current.get(workspaceOwner)
+      ?? new Set<ReturnType<typeof modal.confirm>>();
+    ownedConfirmationsRef.current.set(workspaceOwner, confirmations);
+    const confirmation: ReturnType<typeof modal.confirm> = modal.confirm({
+      ...options,
+      onOk: () => {
+        if (!isCurrentWorkspaceOwner(workspaceOwner)) {
+          confirmation?.destroy();
+          return;
+        }
+        return options.onOk?.();
+      },
+      afterClose: () => {
+        if (confirmation) confirmations.delete(confirmation);
+        if (confirmations.size === 0) ownedConfirmationsRef.current.delete(workspaceOwner);
+        if (isCurrentWorkspaceOwner(workspaceOwner)) options.afterClose?.();
+      },
+    });
+    confirmations.add(confirmation);
+    return confirmation;
+  }, [isCurrentWorkspaceOwner, modal, workspaceOwner]);
   const currentViewport = viewports.current;
   // 服务端会在保存任何内容变化时撤销旧审核并回到 DRAFT。
   // 本地修改尚未保存时也必须立即呈现这一事实，否则已发布/已批准页面会
@@ -285,8 +342,10 @@ export default function EditorToolbar({
     : "线上版本需要重新校验；打开页面设置查看详情";
 
   useEffect(() => {
-    onDataChange(appData);
-  }, [appData, onDataChange]);
+    // 常驻画布切页时，同一轮 effect 中同步器可能已经替换 store；读取最新
+    // 快照，避免把本次 render 捕获的上一页数据回传给新页面控制器。
+    if (canvasActive) onDataChange(getPuck().appState.data);
+  }, [appData, canvasActive, getPuck, onDataChange]);
 
   useEffect(() => {
     setToolbarHost(document.getElementById("admin-editor-toolbar-slot"));
@@ -352,7 +411,7 @@ export default function EditorToolbar({
   );
 
   useWorkspaceHistoryShortcuts({
-    disabled: viewingPublished || previewMode,
+    disabled: !canvasActive || viewingPublished || previewMode,
     onNavigate: navigateHistory,
   });
 
@@ -372,6 +431,7 @@ export default function EditorToolbar({
         : undefined;
       const visualState = useVisualEditorSession.getState();
       previewSelectionRef.current = {
+        owner: workspaceOwner,
         itemSelector,
         blockId: typeof selectedBlock?.props?.id === "string"
           ? selectedBlock.props.id
@@ -388,7 +448,7 @@ export default function EditorToolbar({
       });
     }
     onPreviewModeChange(nextPreviewMode);
-  }, [dispatch, getPuck, onCanvasDataSync, onPreviewModeChange, previewMode]);
+  }, [dispatch, getPuck, onCanvasDataSync, onPreviewModeChange, previewMode, workspaceOwner]);
 
   useEffect(() => {
     const wasPreviewing = wasPreviewModeRef.current;
@@ -396,8 +456,9 @@ export default function EditorToolbar({
     if (!wasPreviewing || previewMode) return;
     const snapshot = previewSelectionRef.current;
     previewSelectionRef.current = null;
-    if (!snapshot) return;
-    window.requestAnimationFrame(() => {
+    if (!snapshot || !isCurrentWorkspaceOwner(snapshot.owner)) return;
+    const restorationFrame = window.requestAnimationFrame(() => {
+      if (!isCurrentWorkspaceOwner(snapshot.owner)) return;
       const puck = getPuck();
       const stableIndex = snapshot.blockId
         ? puck.appState.data.content.findIndex(
@@ -416,10 +477,11 @@ export default function EditorToolbar({
       visualState.setMode(snapshot.visualMode);
       if (snapshot.blockId) focusCanvasBlock(snapshot.blockId);
     });
-  }, [dispatch, getPuck, previewMode]);
+    return () => window.cancelAnimationFrame(restorationFrame);
+  }, [dispatch, getPuck, isCurrentWorkspaceOwner, previewMode, workspaceOwner]);
 
   useEffect(() => {
-    if (!previewMode) return undefined;
+    if (!canvasActive || !previewMode) return undefined;
     const exitPreviewOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
@@ -427,17 +489,32 @@ export default function EditorToolbar({
     };
     window.addEventListener("keydown", exitPreviewOnEscape);
     return () => window.removeEventListener("keydown", exitPreviewOnEscape);
-  }, [onPreviewModeChange, previewMode]);
+  }, [canvasActive, onPreviewModeChange, previewMode]);
 
   /* ── 装修方案导入/导出(纯编辑器侧,便于跨环境迁移与备份) ── */
 
   const exportPageDecoration = useCallback(() => {
+    if (!isCurrentWorkspaceOwner(workspaceOwner)) return;
+    // Puck 的公开 data 只保留 root/content/zones；导出时从当前页面已验证的
+    // 解析缓存补齐实际引用的精确版本，避免导入时依赖另一页面的内存缓存。
+    const requiredVersions = getRequiredDynamicTemplateDefinitionKeys(appData);
+    const registeredDefinitions = getResolvedDynamicTemplateDefinitions();
+    if (requiredVersions.some((key) => !registeredDefinitions[key])) {
+      message.error("当前页面的精确模板版本尚未解析，暂时无法导出方案");
+      return;
+    }
+    const exportData = requiredVersions.length > 0 ? {
+      ...appData,
+      [DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY]: Object.fromEntries(
+        requiredVersions.map((key) => [key, registeredDefinitions[key]]),
+      ),
+    } : appData;
     const payload = {
       kind: "haichuan-page-decoration",
       version: 1,
       pageKey,
       exportedAt: new Date().toISOString(),
-      puckData: appData,
+      puckData: exportData,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
       type: "application/json",
@@ -450,12 +527,14 @@ export default function EditorToolbar({
     anchor.click();
     URL.revokeObjectURL(url);
     message.success("方案已导出为 JSON");
-  }, [appData, message, pageKey]);
+  }, [appData, isCurrentWorkspaceOwner, message, pageKey, workspaceOwner]);
 
   const importPageDecoration = useCallback(
     async (file: File) => {
+      if (viewingPublished || !isCurrentWorkspaceOwner(workspaceOwner)) return;
       try {
         const text = await file.text();
+        if (!isCurrentWorkspaceOwner(workspaceOwner)) return;
         const raw = JSON.parse(text);
         const puck = raw?.puckData ?? raw;
         const declaredPageKey = typeof raw?.pageKey === "string" ? raw.pageKey : null;
@@ -479,6 +558,7 @@ export default function EditorToolbar({
         // 再由 ensureEditorPageStructure 按当前页面合同移除或重建。
         const knownTypes = new Set([
           ...Object.keys(BLOCK_META),
+          DYNAMIC_TEMPLATE_BLOCK_TYPE,
           "网站全局设置",
           "业务功能区",
         ]);
@@ -526,14 +606,56 @@ export default function EditorToolbar({
           message.error("导入失败：当前页面能力过滤后没有可编辑的品牌内容模块");
           return;
         }
+        const dynamicBlocks = normalizedBlocks.filter((block) => (block as { type?: string }).type === DYNAMIC_TEMPLATE_BLOCK_TYPE);
+        if (dynamicBlocks.some((block) => {
+          const props = (block as { props?: Record<string, unknown> }).props;
+          return !props || typeof props.templateId !== "string" || !props.templateId
+            || !Number.isInteger(props.templateVersion) || Number(props.templateVersion) < 1;
+        })) {
+          message.error("导入失败：模板实例缺少有效的模板 ID 或精确版本号");
+          return;
+        }
+        const importedDefinitions = inspectResolvedDynamicTemplateDefinitions(structured[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY]);
+        const requiredVersions = getRequiredDynamicTemplateDefinitionKeys(structured);
+        const invalidVersions = requiredVersions.filter((key) => !importedDefinitions.definitions[key]);
+        if (invalidVersions.length > 0) {
+          message.error(`导入失败：页面引用的精确模板版本缺失或定义无效（${invalidVersions.join("、")}）`);
+          return;
+        }
+        // 文件内的定义和 checksum 都由文件提供，不能证明其为正式模板。
+        // 逐个读取引用的不可变精确版本，不取最新版本，也不将文件定义注册为权威。
+        const authoritativeDefinitions: ResolvedDynamicTemplateDefinitionMap = {};
+        for (const key of requiredVersions) {
+          const imported = importedDefinitions.definitions[key];
+          let exactVersion: PublishedDynamicTemplateVersionResource | null;
+          try {
+            const response = await dynamicTemplateApi.getPublishedVersion(imported.templateId, imported.version);
+            if (!isCurrentWorkspaceOwner(workspaceOwner)) return;
+            exactVersion = unwrapResponse<PublishedDynamicTemplateVersionResource | null>(response);
+          } catch {
+            if (isCurrentWorkspaceOwner(workspaceOwner)) message.error("导入失败：暂时无法读取方案引用的精确模板版本，当前草稿未修改");
+            return;
+          }
+          const verified = inspectResolvedDynamicTemplateDefinitions({ [key]: exactVersion }).definitions[key];
+          if (!verified || verified.definitionChecksum !== imported.definitionChecksum
+            || verified.schemaVersion !== imported.schemaVersion) {
+            message.error(`导入失败：精确模板版本 ${key} 与服务端记录不一致，当前草稿未修改`);
+            return;
+          }
+          authoritativeDefinitions[key] = verified;
+        }
+        const importData = requiredVersions.length > 0
+          ? { ...structured, [DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY]: authoritativeDefinitions }
+          : structured;
         const pageLabel = getEditorPage(pageKey).label;
-        modal.confirm({
+        openOwnedConfirmation({
           title: "导入装修方案？",
           content: (
             <div>
               <p>
                 当前画布内容将被导入的方案整体替换；尚未保存的修改会丢失，发布前不影响线上页面。
               </p>
+              {requiredVersions.length > 0 ? <p>文字、图片和允许的页面调整按方案恢复；模板结构沿用原已发布版本。</p> : null}
               {removedBlockCount > 0 ? (
                 <p>
                   将移除 {removedBlockCount} 个不适用于{pageLabel}的系统或模板区块；固定业务区会按当前页面合同重新建立。
@@ -544,8 +666,8 @@ export default function EditorToolbar({
           okText: "导入并替换画布",
           cancelText: "取消",
           onOk: () => {
-            dispatch({ type: "setData", data: structured, recordHistory: true });
-            onCanvasDataSync(structured);
+            dispatch({ type: "setData", data: importData, recordHistory: true });
+            onCanvasDataSync(importData);
             message.success(
               removedBlockCount > 0
                 ? `方案已导入并移除 ${removedBlockCount} 个不适用区块，请检查后保存草稿`
@@ -554,10 +676,10 @@ export default function EditorToolbar({
           },
         });
       } catch {
-        message.error("导入失败：文件不是合法的 JSON");
+        if (isCurrentWorkspaceOwner(workspaceOwner)) message.error("导入失败：文件不是合法的 JSON");
       }
     },
-    [dispatch, message, modal, onCanvasDataSync, pageKey],
+    [dispatch, isCurrentWorkspaceOwner, message, onCanvasDataSync, openOwnedConfirmation, pageKey, viewingPublished, workspaceOwner],
   );
 
   const draftMenuItems = viewingPublished
@@ -667,6 +789,8 @@ export default function EditorToolbar({
       }
     }
   };
+
+  if (!canvasActive) return null;
 
   const toolbar = (
     <header className="homepage-editor__toolbar">
@@ -827,7 +951,7 @@ export default function EditorToolbar({
                     <button
                       type="button"
                       onClick={() => {
-                        modal.confirm({
+                        openOwnedConfirmation({
                           title: "确认审核本人提交的页面？",
                           content: "仅超级管理员可使用。确认后会记录本次页面版本和内容指纹，后续修改仍需重新提交并再次确认。",
                           okText: "确认本人审核并批准",
@@ -852,6 +976,8 @@ export default function EditorToolbar({
                   <button
                     type="button"
                     onClick={() => {
+                      if (!isCurrentWorkspaceOwner(workspaceOwner)) return;
+                      requestChangesOwnerRef.current = workspaceOwner;
                       setRequestChangesNote("");
                       setRequestChangesOpen(true);
                     }}
@@ -922,18 +1048,22 @@ export default function EditorToolbar({
       {toolbarHost ? createPortal(toolbar, toolbarHost) : toolbar}
       <Modal
         title="退回修改？"
-        open={requestChangesOpen}
+        open={requestChangesOpen && requestChangesOwnerRef.current === workspaceOwner && isCurrentWorkspaceOwner(workspaceOwner)}
         okText="确认退回修改"
         cancelText="取消"
         okButtonProps={{ danger: true, disabled: !requestChangesNote.trim() }}
         destroyOnHidden
         onCancel={() => {
+          if (!isCurrentWorkspaceOwner(workspaceOwner) || requestChangesOwnerRef.current !== workspaceOwner) return;
+          requestChangesOwnerRef.current = null;
           setRequestChangesOpen(false);
           setRequestChangesNote("");
         }}
         onOk={() => {
+          if (!isCurrentWorkspaceOwner(workspaceOwner) || requestChangesOwnerRef.current !== workspaceOwner) return;
           const note = requestChangesNote.trim();
           if (!note) return Promise.reject();
+          requestChangesOwnerRef.current = null;
           onRequestChanges(note);
           setRequestChangesOpen(false);
           setRequestChangesNote("");
@@ -946,7 +1076,9 @@ export default function EditorToolbar({
           autoSize={{ minRows: 3, maxRows: 6 }}
           maxLength={500}
           showCount
-          onChange={(event) => setRequestChangesNote(event.target.value)}
+          onChange={(event) => {
+            if (isCurrentWorkspaceOwner(workspaceOwner) && requestChangesOwnerRef.current === workspaceOwner) setRequestChangesNote(event.target.value);
+          }}
         />
       </Modal>
     </>

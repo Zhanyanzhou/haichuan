@@ -788,6 +788,26 @@ export class UploadService implements OnModuleInit {
     const source = requirePublicAuthorization
       ? await this.getPageMediaContentByStorageKey(storageKey, true)
       : await this.readLegacyPublicImage(storageKey);
+    return this.getResponsiveImageFromVerifiedSource(storageKey, width, source);
+  }
+
+  /** 后台只读派生图：员工会话、素材状态和源文件完整性必须先于任何派生缓存命中。 */
+  async getResponsiveStaffPageImage(
+    storageKey: string,
+    width: number,
+    actor?: MediaStaffActorInput,
+  ): Promise<{ buffer: Buffer; mimeType: string; etag: string }> {
+    if (!isResponsivePublicImageWidth(width)) throw new BadRequestException('图片宽度无效');
+    const staff = normalizeMediaStaffActor(actor as MediaStaffActorInput);
+    const source = await this.getPageMediaContentByStorageKey(storageKey, false, staff);
+    return this.getResponsiveImageFromVerifiedSource(storageKey, width, source);
+  }
+
+  private async getResponsiveImageFromVerifiedSource(
+    storageKey: string,
+    width: number,
+    source: { buffer: Buffer; mimeType: string; fingerprint: string },
+  ): Promise<{ buffer: Buffer; mimeType: string; etag: string }> {
     const cacheKey = responsivePublicImageMemoryKey(storageKey, width, source.fingerprint);
     const cached = this.responsivePublicMediaCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) return cached.value;

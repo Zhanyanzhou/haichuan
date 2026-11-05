@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { TemplateCatalogItemResource } from "@/services/clients/dynamicTemplateClient";
+import type { TemplateCatalogSummaryItemResource } from "@/services/clients/dynamicTemplateClient";
 import type { TemplateDefinitionV2 } from "@/page-builder/template-definition";
 
 type PublishedTemplateSectionRoleState = {
@@ -30,12 +30,12 @@ function sectionRoleOf(definition?: TemplateDefinitionV2 | null) {
   return definition?.metadata.sectionRole ?? definition?.templateRecipe?.sectionRole;
 }
 
-export function rememberCatalogTemplateRoles(items: TemplateCatalogItemResource[]) {
+export function rememberCatalogTemplateRoles(items: TemplateCatalogSummaryItemResource[]) {
   usePublishedTemplateSectionRoles.getState().remember(items.flatMap((item) => {
     if (item.kind === "published") {
       return [{
         templateId: item.template.templateId,
-        sectionRole: sectionRoleOf(item.template.definition),
+        sectionRole: sectionRoleOf(item.template.definition) ?? item.template.sectionRole,
       }];
     }
     return [{

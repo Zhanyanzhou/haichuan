@@ -1717,6 +1717,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     });
     const writes: Array<Record<string, unknown>> = [];
     const validations: string[] = [];
+    const validatedZones: Record<string, unknown> = {};
     const routerWarnings: string[] = [];
     page.on("console", (entry) => {
       if (entry.type() === "warning" && entry.text().includes("blocker on a POP navigation")) {
@@ -1730,8 +1731,9 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
       const pageKey = url.searchParams.get("pageKey") || "home";
       const method = request.method();
       if (url.pathname.endsWith("/document/validate")) {
-        const body = request.postDataJSON() as { pageKey?: string };
-        validations.push(body.pageKey || "");
+        const body = request.postDataJSON() as { pageKey: string; puckData?: { zones?: unknown } };
+        validations.push(body.pageKey);
+        validatedZones[body.pageKey] = body.puckData?.zones ?? {};
         return route.fulfill(json({ valid: true, errors: [], issues: [] }));
       }
       if (method === "PUT") {
@@ -1752,7 +1754,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
         return route.fulfill(
           json(
             pageKey === "home"
-              ? draftDoc
+              ? { ...draftDoc, puckData: { ...draftDoc.puckData, zones: { "legacy:slot": [] } } }
               : {
                   ...draftDoc,
                   pageKey: "custom",
@@ -1778,6 +1780,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     // 工具栏先于 650ms 防抖发布校验出现。直接等待初始 home 校验完成，
     // 不再用未经审核时必然禁用的发布按钮间接推断校验状态。
     await expect.poll(() => validations).toEqual(["home"]);
+    expect(validatedZones.home).toEqual({ "legacy:slot": [] });
     validations.length = 0;
 
     await page.evaluate(() => {
@@ -1797,6 +1800,8 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
 
     releaseCustom();
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+    await expect.poll(() => validatedZones.custom).toEqual({});
+    await expect(page.getByRole("status", { name: /页面草稿已保存/ })).toBeVisible();
     expect(writes).toEqual([]);
     expect(routerWarnings).toEqual([]);
   });

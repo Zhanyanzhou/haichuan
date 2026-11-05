@@ -69,7 +69,7 @@ export default function PublicContactDetails({ resource, preview = false, presen
           <section className="contact-methods__channel" aria-labelledby={`${channelId}-wechat`}>
             <h2 id={`${channelId}-wechat`}>微信咨询</h2>
             <p>添加商家微信，交流选款与定制需求。</p>
-            <div className={`contact-methods__qr${qrCode ? "" : " contact-methods__qr--empty"}`} aria-busy={Boolean(qrCode) && !qrReady && !qrFailed}>
+            <div className={`contact-methods__qr${qrCode && !qrFailed ? "" : " contact-methods__qr--empty"}`} aria-busy={Boolean(qrCode) && !qrReady && !qrFailed}>
               {qrCode && !qrFailed ? <img src={qrCode} alt="公司微信加好友二维码" width="240" height="240" decoding="async"
                 className={qrReady ? "is-ready" : "is-loading"} onLoad={() => setQrReady(true)} onError={() => setQrFailed(true)} /> : null}
               {qrCode && !qrReady && !qrFailed ? <p role="status">正在加载二维码…</p> : null}

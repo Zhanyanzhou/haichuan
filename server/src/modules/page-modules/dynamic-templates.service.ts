@@ -30,10 +30,11 @@ import {
   createPageLocaleContentHash,
   stripPageLocaleRevisionMetadata,
 } from "./page-document-localization";
-import { withoutContentTemplatePublicationAttestation } from "./generated/contentTemplates.generated";
+import { CONTENT_TEMPLATE_PAGE_RULES, withoutContentTemplatePublicationAttestation } from "./generated/contentTemplates.generated";
 import {
   buildConsultationStarterDefinition,
   CONSULTATION_STARTER_SPECS,
+  CONSULTATION_STARTER_SOURCE_PREFIX,
 } from "./consultation-starter-templates";
 import { MediaAuthorizationResolverService } from "../upload/media-authorization-resolver.service";
 import {
@@ -904,21 +905,62 @@ export class DynamicTemplatesService {
     });
   }
 
-  async listPublished(actor: DynamicTemplateStaffActorInput) {
-    return this.withAuthorizedStaffRead(actor, false, (transaction) => (
-      this.listPublishedWithClient(transaction)
+  private publishedCatalogView<T extends { definition: TemplateDefinitionV2 }>(templates: T[], view?: string) {
+    if (view !== "summary") return templates;
+    return templates.map(({ definition, ...template }) => ({
+      ...template,
+      sectionRole: definition.metadata.sectionRole ?? definition.templateRecipe?.sectionRole,
+      canvasSize: definition.metadata.canvasSize,
+    }));
+  }
+
+  private assertCatalogView(view?: string) {
+    if (view !== undefined && view !== "summary") throw new BadRequestException("模板目录视图无效");
+  }
+
+  async listPublished(actor: DynamicTemplateStaffActorInput): Promise<Awaited<ReturnType<DynamicTemplatesService["listPublishedWithClient"]>>>;
+  async listPublished(actor: DynamicTemplateStaffActorInput, view: string): Promise<unknown[]>;
+  async listPublished(actor: DynamicTemplateStaffActorInput, view?: string) {
+    this.assertCatalogView(view);
+    return this.withAuthorizedStaffRead(actor, false, async (transaction) => (
+      this.publishedCatalogView(await this.listPublishedWithClient(transaction), view)
     ));
   }
 
-  async listCatalog(actor: DynamicTemplateStaffActorInput) {
+  /** 与页面装修添加库的既有准入保持一致；recommendedFor 仅为推荐，不限制页面。 */
+  private isPageEditorCatalogTemplate(template: {
+    templateId: string;
+    definition: TemplateDefinitionV2;
+    sourceReference: string | null;
+  }): boolean {
+    return !template.templateId.startsWith("hc_consult_")
+      && !template.definition.metadata.tags.includes("consultation-starter")
+      && !template.sourceReference?.startsWith(CONSULTATION_STARTER_SOURCE_PREFIX)
+      && template.templateId !== "tpl_hero"
+      && !template.definition.metadata.tags.includes("hero-test-sample")
+      && !template.sourceReference?.startsWith("content-template:hero");
+  }
+
+  async listCatalog(actor: DynamicTemplateStaffActorInput, pageKey?: string, view?: string) {
+    this.assertCatalogView(view);
+    if (view === "summary" && pageKey === undefined) throw new BadRequestException("页面目录摘要必须指定页面");
+    if (pageKey !== undefined && (
+      typeof pageKey !== "string"
+      || !Object.prototype.hasOwnProperty.call(CONTENT_TEMPLATE_PAGE_RULES, pageKey)
+    )) {
+      throw new BadRequestException("页面未在装修合同登记");
+    }
     return this.withAuthorizedStaffRead(actor, false, async (transaction, staff) => {
-      const published = await this.listPublishedWithClient(transaction);
-      const editable = staff.role === "SUPER_ADMIN"
+      const published = (await this.listPublishedWithClient(transaction)).filter((template) => (
+        pageKey === undefined || this.isPageEditorCatalogTemplate(template)
+      ));
+      // 页面装修只添加正式模板；设计模式继续读取当前员工自己的草稿目录。
+      const editable = pageKey === undefined && staff.role === "SUPER_ADMIN"
         ? await this.listMineWithClient(staff.id, transaction)
         : [];
       return {
         items: [
-          ...published.map((template) => ({ kind: "published" as const, template })),
+          ...this.publishedCatalogView(published, view).map((template) => ({ kind: "published" as const, template })),
           ...editable.map((template) => ({ kind: "editable" as const, template })),
         ],
       };

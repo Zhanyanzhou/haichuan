@@ -1,11 +1,10 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { getBrowserPublicContentLocale } from "@/i18n/publicLocale";
 import {
   getContentTemplateIssues,
 } from "@/page-builder/generated/contentTemplates.generated";
 import { isVisiblePrimaryStageBlock } from "@/page-builder/utils/primaryStagePolicy";
-import MatureContentTemplateRenderer from "@/page-builder/template-definition/MatureContentTemplateRenderer";
 import { getMatureContentTemplateSlotType } from "@/page-builder/template-definition/validateTemplateDefinition";
 import {
   normalizeLegacyRenderColors,
@@ -14,14 +13,16 @@ import type { PuckBlock, PuckDocument, PuckProps } from "@/page-builder/types";
 import {
   DYNAMIC_TEMPLATE_BLOCK_TYPE,
   DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY,
-  DynamicTemplateInstanceView,
   dynamicTemplateVersionKey,
-  buildDynamicTemplatePublicSurface,
-  isDynamicTemplateInstancePubliclyVisible,
   readResolvedDynamicTemplateDefinitions,
   type DynamicTemplateInstanceProps,
   type ResolvedDynamicTemplateDefinitionMap,
-} from "@/page-builder/dynamic-template-instance";
+} from "@/page-builder/dynamic-template-instance/types";
+import DynamicTemplateInstanceView from "@/page-builder/dynamic-template-instance/DynamicTemplateInstanceView";
+import {
+  buildDynamicTemplatePublicSurface,
+  isDynamicTemplateInstancePubliclyVisible,
+} from "@/page-builder/dynamic-template-instance/publicVisibility";
 import {
   resolveTemplateBreakpoint,
   toTemplateContentBreakpoint,
@@ -33,6 +34,9 @@ import {
 } from "@/page-builder/template-definition/renderPlan";
 
 export type { PuckBlock, PuckDocument } from "@/page-builder/types";
+
+// 原生动态模板不应为兼容首屏下载成熟模板及其编辑适配层。
+const MatureContentTemplateRenderer = lazy(() => import("@/page-builder/template-definition/MatureContentTemplateRenderer"));
 
 function UnsupportedContentTemplateState({
   type,
@@ -173,6 +177,7 @@ function renderBlock(
   resolvedDynamicTemplates: ResolvedDynamicTemplateDefinitionMap,
   deviceOverride?: TemplateContentBreakpoint,
   pageKey?: string,
+  publiclyRenderable?: boolean,
 ) {
   const normalized = normalizeLegacyRenderColors(block.props || {});
   const props: PuckProps = normalized && typeof normalized === "object" && !Array.isArray(normalized)
@@ -183,12 +188,12 @@ function renderBlock(
   if (props.isVisible === false) return null;
   if (
     mode === "public"
-    && !isPubliclyRenderableBlock(
+    && !(publiclyRenderable ?? isPubliclyRenderableBlock(
       { ...block, props },
       resolvedDynamicTemplates,
       deviceOverride ?? "desktop",
       pageKey,
-    )
+    ))
   ) return null;
 
   if (block.type === DYNAMIC_TEMPLATE_BLOCK_TYPE) {
@@ -247,9 +252,8 @@ function renderBlock(
       && !Array.isArray(props.__instanceOverrides)
       ? props.__instanceOverrides as Record<string, unknown>
       : undefined;
-    return (
+    const renderer = (
       <MatureContentTemplateRenderer
-        key={key}
         slotType={matureSlotType}
         content={props}
         layoutData={layoutData}
@@ -258,6 +262,13 @@ function renderBlock(
         priority={priority}
         homeSurface={homeSurface}
       />
+    );
+    // 兼容首屏的第二个分块到达前，沿用首页现有首图，避免以区块空白占位取代它。
+    if (mode === "public" && homeSurface && priority && block.type === "首屏主视觉") return renderer;
+    return (
+      <Suspense key={key} fallback={<div aria-busy="true" style={{ minHeight: priority ? "100svh" : 120 }} />}>
+        {renderer}
+      </Suspense>
     );
   }
 
@@ -275,6 +286,7 @@ function GuardedBlock({
   resolvedDynamicTemplates,
   deviceOverride,
   pageKey,
+  publiclyRenderable,
 }: {
   block: PuckBlock;
   index: number;
@@ -286,6 +298,7 @@ function GuardedBlock({
   resolvedDynamicTemplates: ResolvedDynamicTemplateDefinitionMap;
   deviceOverride?: TemplateContentBreakpoint;
   pageKey?: string;
+  publiclyRenderable?: boolean;
 }) {
   return renderBlock(
     block,
@@ -298,6 +311,7 @@ function GuardedBlock({
     resolvedDynamicTemplates,
     deviceOverride,
     pageKey,
+    publiclyRenderable,
   );
 }
 
@@ -340,14 +354,19 @@ export default function PuckDocumentRenderer({
     resolvedDynamicTemplates,
     viewportWidth,
   );
+  // 只复用同一次同步渲染里的判断；下一次渲染重新校验，不缓存编辑中的可变定义。
+  const publicRenderability = new Map<PuckBlock, boolean>();
+  const publiclyRenderable = (block: PuckBlock) => {
+    if (!publicRenderability.has(block)) {
+      publicRenderability.set(block, isPubliclyRenderableBlock(
+        block, resolvedDynamicTemplates, deviceForBlock(block), resolvedPageKey,
+      ));
+    }
+    return publicRenderability.get(block)!;
+  };
   const isRenderablePrimaryStage = (block: PuckBlock) => (
     isPrimaryStage(block)
-    && (mode !== "public" || isPubliclyRenderableBlock(
-      block,
-      resolvedDynamicTemplates,
-      deviceForBlock(block),
-      resolvedPageKey,
-    ))
+    && (mode !== "public" || publiclyRenderable(block))
   );
   const allBlocks = [...content, ...zoneBlocks];
   const dynamicPrimaryStageHasHeading = (block: PuckBlock) => {
@@ -410,6 +429,7 @@ export default function PuckDocumentRenderer({
           resolvedDynamicTemplates={resolvedDynamicTemplates}
           deviceOverride={mode === "public" ? deviceForBlock(block) : undefined}
           pageKey={resolvedPageKey}
+          publiclyRenderable={mode === "public" ? publiclyRenderable(block) : undefined}
         />
       </ErrorBoundary>
     );

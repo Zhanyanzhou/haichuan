@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Route } from "@playwright/test";
+import { readFile, writeFile } from "node:fs/promises";
 import { installAdminSession } from "./fixtures/session-auth";
 import { LAUNCH_TEMPLATE_MASTERS } from "../src/page-builder/template-creation/launchTemplateSet";
 import { applyStandardTemplateCanvasPair } from "../src/page-builder/template-definition/templateDimensions";
@@ -773,6 +774,7 @@ async function prepareEditor(page: Page, options: { frameMaster?: "16:9" | "2:1"
   }
   let currentDocument = draft;
   let catalogReadCount = 0;
+  let versionReadCount = 0;
   let pageMediaReadCount = 0;
   let versionCheckFailureActive = Boolean(options.failVersionCheck);
   let validationRequestCount = 0;
@@ -946,6 +948,7 @@ async function prepareEditor(page: Page, options: { frameMaster?: "16:9" | "2:1"
       }));
     }
     if (path.endsWith("/page-modules/dynamic-templates/published")) {
+      versionReadCount += 1;
       if (versionCheckFailureActive) return route.fulfill(json(null, 503));
       return route.fulfill(json(options.catalogMissing ? [] : [latestPublishedTemplate]));
     }
@@ -1107,6 +1110,7 @@ async function prepareEditor(page: Page, options: { frameMaster?: "16:9" | "2:1"
       },
       templateSavedPayload: () => templateSavedPayload,
       catalogReadCount: () => catalogReadCount,
+      versionReadCount: () => versionReadCount,
       pageMediaReadCount: () => pageMediaReadCount,
       recoverVersionCheck: () => {
         versionCheckFailureActive = false;
@@ -1126,6 +1130,7 @@ async function prepareEditor(page: Page, options: { frameMaster?: "16:9" | "2:1"
       restoreCurrentVersion: () => undefined,
       templateSavedPayload: () => templateSavedPayload,
       catalogReadCount: () => catalogReadCount,
+      versionReadCount: () => versionReadCount,
       pageMediaReadCount: () => pageMediaReadCount,
       recoverVersionCheck: () => {
         versionCheckFailureActive = false;
@@ -1149,6 +1154,7 @@ async function prepareEditor(page: Page, options: { frameMaster?: "16:9" | "2:1"
     restoreCurrentVersion: () => undefined,
     templateSavedPayload: () => templateSavedPayload,
     catalogReadCount: () => catalogReadCount,
+      versionReadCount: () => versionReadCount,
     pageMediaReadCount: () => pageMediaReadCount,
     recoverVersionCheck: () => {
       versionCheckFailureActive = false;
@@ -1159,11 +1165,567 @@ async function prepareEditor(page: Page, options: { frameMaster?: "16:9" | "2:1"
   };
 }
 
+async function prepareToolbarOwnerPages(page: Page, inReview = false) {
+  const fixture = await prepareEditor(page, { adminRole: inReview ? "ADMIN" : "SUPER_ADMIN" });
+  const products = { ...structuredClone(fixture.currentDocument()), submittedBy: 2 };
+  products.reviewStatus = inReview ? "IN_REVIEW" : "APPROVED";
+  const about = structuredClone(products);
+  about.pageKey = "about";
+  about.puckData.content[0].props.contentBySlotId.slot_heading = "关于页的原有内容";
+  const documents: Record<string, typeof products> = { products, about };
+  const reviewBodies: Array<Record<string, unknown>> = [];
+  await page.route("**/api/page-modules/dynamic-templates/published/*/versions/*", (route) => {
+    const parts = new URL(route.request().url()).pathname.split("/");
+    const key = `${decodeURIComponent(parts[parts.length - 3])}@${parts[parts.length - 1]}`;
+    const exact = products.puckData.resolvedDynamicTemplates[key as keyof typeof products.puckData.resolvedDynamicTemplates];
+    return route.fulfill(exact ? json(exact) : json(null, 404));
+  });
+  await page.route("**/api/page-modules/document/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() === "GET" && url.pathname.endsWith("/published/admin")) return route.fulfill(json(null));
+    if (request.method() === "GET" && url.pathname.endsWith("/admin")) {
+      return route.fulfill(json(documents[url.searchParams.get("pageKey") || "products"]));
+    }
+    if (request.method() === "PUT" && url.pathname.endsWith("/review")) {
+      const body = request.postDataJSON() as Record<string, unknown>;
+      reviewBodies.push(body);
+      const current = documents[String(body.pageKey)];
+      return route.fulfill(json({ ...current, reviewStatus: "CHANGES_REQUESTED", reviewNote: body.reviewNote }));
+    }
+    return route.fallback();
+  });
+  const validationBeforeReload = fixture.validationRequestCount();
+  await page.reload();
+  await expect(page.getByLabel("切换装修页面")).toHaveValue("products");
+  await expect.poll(() => fixture.validationRequestCount()).toBeGreaterThan(validationBeforeReload);
+  return { fixture, documents, reviewBodies };
+}
+
+async function navigateToolbarOwnerPage(page: Page, pageKey: "products" | "about") {
+  await page.evaluate((key) => window.dispatchEvent(new MessageEvent("message", {
+    origin: window.location.origin,
+    data: { type: "homepage-editor:page-navigation", path: `/${key}` },
+  })), pageKey);
+  await expect(page.getByLabel("切换装修页面")).toHaveValue(pageKey);
+}
+
 test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹具）", () => {
   // 本组验证页面实例业务链路，使用当前四区停靠边界避免把功能断言耦合到覆盖层状态。
   // 需要验证紧凑工作区交接的场景会在用例内显式切到 1200px。
   test.use({ viewport: { width: 1440, height: 900 } });
   test.skip(appMode === "mock", "development 模式拦截自有 API；不作为真实 API 写入证据");
+
+  test("工具栏导入兼容：实际导出当前动态页面后可原样导入且精确版本不变", async ({ page }, testInfo) => {
+    const { fixture, documents } = await prepareToolbarOwnerPages(page);
+    const downloadReady = page.waitForEvent("download");
+    await page.getByRole("button", { name: "更多编辑操作" }).click();
+    await page.getByRole("menuitem", { name: /导出方案 JSON/ }).click();
+    const download = await downloadReady;
+    const exportPath = testInfo.outputPath("exported-current-dynamic-page.json");
+    await download.saveAs(exportPath);
+    const payload = JSON.parse(await readFile(exportPath, "utf8"));
+    expect(payload.pageKey).toBe("products");
+    expect(payload.puckData.content[0].type).toBe(DYNAMIC_TEMPLATE_BLOCK_TYPE);
+    expect(payload.puckData.content[0].props.templateId).toBe(documents.products.puckData.content[0].props.templateId);
+    expect(payload.puckData.content[0].props.templateVersion).toBe(1);
+    expect(payload.puckData.resolvedDynamicTemplates["tpl_page_upgrade@1"].definitionChecksum).toBe("checksum-v1");
+    await fixture.inspector.getByRole("textbox", { name: "标题", exact: true }).fill("导入前未保存的临时文字");
+    await page.locator("#homepage-editor-import-file").setInputFiles(exportPath);
+    const confirmation = page.getByRole("dialog", { name: "导入装修方案？" });
+    await expect(confirmation).toContainText("当前画布内容将被导入的方案整体替换");
+    expect(fixture.pageWrites).toEqual([]);
+    await confirmation.getByRole("button", { name: "导入并替换画布" }).click();
+    await expect(page.frameLocator(".homepage-editor__canvas-scale iframe").getByText("页面实例填写内容", { exact: true })).toBeVisible();
+    await expect(page.frameLocator(".homepage-editor__canvas-scale iframe").getByText("导入前未保存的临时文字", { exact: true })).toHaveCount(0);
+    expect(fixture.pageWrites).toEqual([]);
+    await page.getByRole("button", { name: "保存当前装修草稿", exact: true }).click();
+    await expect.poll(() => fixture.savedPayload()).not.toBeNull();
+    const saved = fixture.savedPayload() as { puckData: { content: Array<{ props: { templateId: string; templateVersion: number } }> } };
+    expect(saved.puckData.content[0].props.templateId).toBe(documents.products.puckData.content[0].props.templateId);
+    expect(saved.puckData.content[0].props.templateVersion).toBe(1);
+  });
+
+  for (const scenario of ["unknown-type", "missing-version", "damaged-definition"] as const) {
+    test(`工具栏导入兼容：${scenario}在确认前拒绝且保留当前草稿`, async ({ page }) => {
+      const { fixture, documents } = await prepareToolbarOwnerPages(page);
+      const imported = structuredClone(documents.products);
+      if (scenario === "unknown-type") imported.puckData.content[0].type = "未登记模块类型";
+      if (scenario === "missing-version") imported.puckData.content[0].props.templateVersion = 999;
+      if (scenario === "damaged-definition") {
+        imported.puckData.resolvedDynamicTemplates["tpl_page_upgrade@1"].definition.nodes.node_root.childIds = ["missing-node"];
+      }
+      await page.locator("#homepage-editor-import-file").setInputFiles({
+        name: `${scenario}.json`,
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify({ pageKey: "products", puckData: imported.puckData })),
+      });
+      await expect(page.locator(".ant-message-notice-content")).toContainText(
+        scenario === "unknown-type" ? "包含未知模块类型" : "精确模板版本缺失或定义无效",
+      );
+      await expect(page.getByRole("dialog", { name: "导入装修方案？" })).toHaveCount(0);
+      await expect(page.frameLocator(".homepage-editor__canvas-scale iframe").getByText("页面实例填写内容", { exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "撤销", exact: true })).toBeDisabled();
+      expect(fixture.pageWrites).toEqual([]);
+      expect(fixture.templateWrites).toEqual([]);
+    });
+  }
+
+  test("工具栏导入权威：保留checksum的合法定义篡改不进入画布且保存重载稳定", async ({ page }) => {
+    const { fixture, documents } = await prepareToolbarOwnerPages(page);
+    const imported = structuredClone(documents.products);
+    imported.puckData.content[0].props.contentBySlotId.slot_heading = "仅导入真实页面内容";
+    imported.puckData.resolvedDynamicTemplates["tpl_page_upgrade@1"].definition.nodes.node_container.responsive.desktop.gap = { value: 19, unit: "rem" };
+    const exactReads: string[] = [];
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname.endsWith("/published/tpl_page_upgrade/versions/1")) exactReads.push(request.url());
+    });
+    await page.locator("#homepage-editor-import-file").setInputFiles({
+      name: "same-checksum-tampered-definition.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify({ pageKey: "products", puckData: imported.puckData })),
+    });
+    const confirmation = page.getByRole("dialog", { name: "导入装修方案？" });
+    await expect(confirmation).toContainText("模板结构沿用原已发布版本");
+    await confirmation.getByRole("button", { name: "导入并替换画布" }).click();
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    await expect(canvas.getByText("仅导入真实页面内容", { exact: true })).toBeVisible();
+    await expect(canvas.locator('[data-template-node-id="node_container"]')).toHaveCSS("gap", "16px");
+    expect(exactReads).toHaveLength(1);
+    expect(fixture.pageWrites).toEqual([]);
+    expect(fixture.templateWrites).toEqual([]);
+    await page.getByRole("button", { name: "保存当前装修草稿", exact: true }).click();
+    await expect.poll(() => fixture.savedPayload()).not.toBeNull();
+    documents.products = { ...documents.products, ...structuredClone(fixture.currentDocument()) };
+    await page.reload();
+    await expect(canvas.getByText("仅导入真实页面内容", { exact: true })).toBeVisible();
+    await expect(canvas.locator('[data-template-node-id="node_container"]')).toHaveCSS("gap", "16px");
+    expect(fixture.currentDocument().puckData.content[0].props.templateVersion).toBe(1);
+    expect(fixture.templateWrites).toEqual([]);
+  });
+
+  test("工具栏导入权威：精确版本API失败不打开确认且不改变当前草稿", async ({ page }) => {
+    const { fixture, documents } = await prepareToolbarOwnerPages(page);
+    await page.route("**/api/page-modules/dynamic-templates/published/*/versions/*", (route) => route.fulfill(json(null, 503)));
+    await page.locator("#homepage-editor-import-file").setInputFiles({
+      name: "unavailable-exact-version.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify({ pageKey: "products", puckData: documents.products.puckData })),
+    });
+    await expect(page.locator(".ant-message-notice-content")).toContainText("暂时无法读取方案引用的精确模板版本");
+    await expect(page.getByRole("dialog", { name: "导入装修方案？" })).toHaveCount(0);
+    await expect(page.frameLocator(".homepage-editor__canvas-scale iframe").getByText("页面实例填写内容", { exact: true })).toBeVisible();
+    expect(fixture.pageWrites).toEqual([]);
+    expect(fixture.templateWrites).toEqual([]);
+  });
+
+  test("工具栏导入权威：精确版本API在途A→B→A后旧结果不能打开确认", async ({ page }) => {
+    const { fixture, documents } = await prepareToolbarOwnerPages(page);
+    let notifyRead!: () => void;
+    let releaseRead!: () => void;
+    const readStarted = new Promise<void>((resolve) => { notifyRead = resolve; });
+    const gate = new Promise<void>((resolve) => { releaseRead = resolve; });
+    await page.route("**/api/page-modules/dynamic-templates/published/tpl_page_upgrade/versions/1", async (route) => {
+      notifyRead();
+      await gate;
+      return route.fulfill(json(documents.products.puckData.resolvedDynamicTemplates["tpl_page_upgrade@1"]));
+    });
+    await page.locator("#homepage-editor-import-file").setInputFiles({
+      name: "inflight-exact-version.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify({ pageKey: "products", puckData: documents.products.puckData })),
+    });
+    await readStarted;
+    await navigateToolbarOwnerPage(page, "about");
+    await navigateToolbarOwnerPage(page, "products");
+    releaseRead();
+    const staleDialogAppeared = await page.getByRole("dialog", { name: "导入装修方案？" })
+      .waitFor({ state: "visible", timeout: 1000 }).then(() => true, () => false);
+    expect(staleDialogAppeared).toBe(false);
+    expect(fixture.pageWrites).toEqual([]);
+    expect(fixture.templateWrites).toEqual([]);
+  });
+
+  test("工具栏owner回归：同页查看线上版本阻止在途和新收到的导入文件", async ({ page }) => {
+    const { fixture, documents } = await prepareToolbarOwnerPages(page);
+    const published = { ...structuredClone(documents.products), status: "PUBLISHED", contentHash: "b".repeat(64) };
+    published.puckData.content[0].props.contentBySlotId.slot_heading = "当前线上只读内容";
+    await page.route("**/api/page-modules/document/published/admin**", (route) => route.fulfill(json(published)));
+    const validationBeforeReload = fixture.validationRequestCount();
+    await page.reload();
+    await expect(page.getByLabel("切换装修页面")).toHaveValue("products");
+    await expect.poll(() => fixture.validationRequestCount()).toBeGreaterThan(validationBeforeReload);
+    await page.evaluate(() => {
+      const nativeText = File.prototype.text;
+      const target = window as unknown as { __releaseReadonlyImport?: () => Promise<void> };
+      File.prototype.text = function () {
+        const text = nativeText.call(this);
+        if (this.name !== "delayed-readonly-transition.json") return text;
+        return new Promise<string>((resolve) => {
+          target.__releaseReadonlyImport = async () => { resolve(await text); };
+        });
+      };
+    });
+    const buffer = Buffer.from(JSON.stringify({ pageKey: "products", puckData: documents.products.puckData }));
+    const fileInput = page.locator("#homepage-editor-import-file");
+    await fileInput.setInputFiles({ name: "delayed-readonly-transition.json", mimeType: "application/json", buffer });
+    await expect.poll(() => page.evaluate(() => Boolean((window as unknown as { __releaseReadonlyImport?: unknown }).__releaseReadonlyImport))).toBe(true);
+    await page.getByRole("button", { name: "更多编辑操作" }).click();
+    await page.getByRole("menuitem", { name: /查看线上版本/ }).click();
+    const publishedCopy = page.frameLocator(".homepage-editor__canvas-scale iframe").getByText("当前线上只读内容", { exact: true });
+    await expect(publishedCopy).toBeVisible();
+    await page.evaluate(() => (window as unknown as { __releaseReadonlyImport: () => Promise<void> }).__releaseReadonlyImport());
+    // 模拟系统文件选择器在工作区已改为只读时，才把选中文件交给仍存在的 input。
+    await fileInput.setInputFiles({ name: "late-picker-selection.json", mimeType: "application/json", buffer });
+    const staleDialogAppeared = await page.getByRole("dialog", { name: "导入装修方案？" })
+      .waitFor({ state: "visible", timeout: 1000 }).then(() => true, () => false);
+    expect(staleDialogAppeared).toBe(false);
+    await expect(publishedCopy).toBeVisible();
+    expect(fixture.pageWrites).toEqual([]);
+    expect(fixture.templateWrites).toEqual([]);
+  });
+
+  for (const roundTrip of [false, true]) {
+    const journey = roundTrip ? "A→B→A" : "A→B";
+    test(`工具栏owner回归：file.text等待期间${journey}不弹出过期导入确认`, async ({ page }) => {
+      const { fixture, documents } = await prepareToolbarOwnerPages(page);
+      const imported = structuredClone(documents.products);
+      imported.puckData.content[0].props.contentBySlotId.slot_heading = "过期异步导入不应出现";
+      await page.evaluate(() => {
+        const nativeText = File.prototype.text;
+        const target = window as unknown as { __releaseToolbarImport?: () => Promise<void> };
+        File.prototype.text = function () {
+          const text = nativeText.call(this);
+          if (this.name !== "delayed-decoration.json") return text;
+          return new Promise<string>((resolve) => {
+            target.__releaseToolbarImport = async () => { resolve(await text); };
+          });
+        };
+      });
+      await page.locator("#homepage-editor-import-file").setInputFiles({
+        name: "delayed-decoration.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify({ pageKey: "products", puckData: imported.puckData })),
+      });
+      await expect.poll(() => page.evaluate(() => Boolean((window as unknown as { __releaseToolbarImport?: unknown }).__releaseToolbarImport))).toBe(true);
+      await navigateToolbarOwnerPage(page, "about");
+      if (roundTrip) await navigateToolbarOwnerPage(page, "products");
+      await page.evaluate(async () => {
+        await (window as unknown as { __releaseToolbarImport: () => Promise<void> }).__releaseToolbarImport();
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      });
+      const staleDialogAppeared = await page.getByRole("dialog", { name: "导入装修方案？" })
+        .waitFor({ state: "visible", timeout: 1000 })
+        .then(() => true, () => false);
+      expect(staleDialogAppeared, "异步文件读取结束后的观察窗口内也不能出现旧工作区确认").toBe(false);
+      await expect(page.getByRole("dialog", { name: "导入装修方案？" })).toHaveCount(0);
+      await expect(page.frameLocator(".homepage-editor__canvas-scale iframe").getByText("过期异步导入不应出现", { exact: true })).toHaveCount(0);
+      expect(fixture.pageWrites).toEqual([]);
+      expect(fixture.templateWrites).toEqual([]);
+    });
+
+    test(`工具栏owner回归：导入确认已打开时${journey}销毁所属确认且不替换新页`, async ({ page }, testInfo) => {
+      const { fixture, documents } = await prepareToolbarOwnerPages(page);
+      const imported = structuredClone(documents.products);
+      imported.puckData.content[0].props.contentBySlotId.slot_heading = "旧确认不能替换新页面";
+      await page.locator("#homepage-editor-import-file").setInputFiles({
+        name: "pending-confirmation.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify({ pageKey: "products", puckData: imported.puckData })),
+      });
+      const confirmation = page.getByRole("dialog", { name: "导入装修方案？" });
+      await expect(confirmation).toBeVisible();
+      await navigateToolbarOwnerPage(page, "about");
+      if (roundTrip) await navigateToolbarOwnerPage(page, "products");
+      await expect(confirmation).toHaveCount(0).catch(async (error) => {
+        // 失败时继续取证：确认仍可操作会直接写入复用的 Puck，不能只当作残留视觉。
+        await confirmation.getByRole("button", { name: "导入并替换画布" }).click();
+        const polluted = page.frameLocator(".homepage-editor__canvas-scale iframe")
+          .getByText("旧确认不能替换新页面", { exact: true });
+        await expect(polluted).toBeVisible();
+        await testInfo.attach("stale-confirm-mutated-current-canvas", {
+          body: JSON.stringify({ journey, oldConfirmationApplied: true, pageWrites: fixture.pageWrites }),
+          contentType: "application/json",
+        });
+        throw error;
+      });
+      await expect(page.frameLocator(".homepage-editor__canvas-scale iframe").getByText("旧确认不能替换新页面", { exact: true })).toHaveCount(0);
+      expect(fixture.pageWrites).toEqual([]);
+      expect(fixture.templateWrites).toEqual([]);
+    });
+
+    test(`工具栏owner回归：退回修改弹窗${journey}后清空旧备注且只向当前页提交`, async ({ page }) => {
+      const { reviewBodies } = await prepareToolbarOwnerPages(page, true);
+      await page.getByRole("button", { name: "退回修改", exact: true }).click();
+      const confirmation = page.getByRole("dialog", { name: "退回修改？" });
+      await confirmation.getByRole("textbox").fill("旧页面的退回原因");
+      await navigateToolbarOwnerPage(page, "about");
+      if (roundTrip) await navigateToolbarOwnerPage(page, "products");
+      await expect(confirmation).toBeHidden();
+      expect(reviewBodies).toEqual([]);
+      await page.getByRole("button", { name: "退回修改", exact: true }).click();
+      await expect(confirmation.getByRole("textbox")).toHaveValue("");
+      await confirmation.getByRole("textbox").fill("当前页面的退回原因");
+      await confirmation.getByRole("button", { name: "确认退回修改" }).click();
+      await expect.poll(() => reviewBodies).toEqual([
+        expect.objectContaining({ pageKey: roundTrip ? "products" : "about", action: "REQUEST_CHANGES", reviewNote: "当前页面的退回原因" }),
+      ]);
+    });
+  }
+
+  test("刷新店铺装修时加载标识与失败提示保持在视口中心", async ({ page }) => {
+    const fixture = await prepareEditor(page);
+    await page.goto("/admin/editor/home");
+    const loadingMark = page
+      .getByRole("status", { name: "正在加载店铺装修…" })
+      .locator(".site-route-loading__indicator");
+    const loadError = page.getByRole("alert").filter({ hasText: "无法打开店铺装修" });
+    const documentRead = "**/api/page-modules/document/admin?*";
+
+    for (const viewport of [{ width: 1920, height: 950 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(viewport);
+      let finishRead!: () => void;
+      const delayedRead = new Promise<void>((resolve) => { finishRead = resolve; });
+      const handleRead = async (route: Route) => {
+        await delayedRead;
+        await route.fulfill(json(null, 503));
+      };
+      await page.route(documentRead, handleRead);
+      try {
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await expect(loadingMark).toBeVisible();
+        const mark = (await loadingMark.boundingBox())!;
+        expect.soft(mark.x + mark.width / 2).toBeCloseTo(viewport.width / 2, 0);
+        expect.soft(mark.y + mark.height / 2).toBeCloseTo(viewport.height / 2, 0);
+      } finally {
+        finishRead();
+      }
+      await expect(loadError).toBeVisible();
+      const error = (await loadError.boundingBox())!;
+      expect.soft(error.x + error.width / 2).toBeCloseTo(viewport.width / 2, 0);
+      expect.soft(error.y + error.height / 2).toBeCloseTo(viewport.height / 2, 0);
+      await page.unroute(documentRead, handleRead);
+    }
+    expect(fixture.pageWrites).toEqual([]);
+    expect(fixture.templateWrites).toEqual([]);
+  });
+
+  test("性能回归：切换装修页面等待接口时保留同一画布且保存不会串入上一页", async ({ page }) => {
+    const fixture = await prepareEditor(page);
+    const frame = page.locator(".homepage-editor__canvas-scale iframe");
+    await expect(frame).toBeVisible();
+    await frame.evaluate((node) => { node.setAttribute("data-session-proof", "original-frame"); });
+    const aboutDocument = structuredClone(fixture.currentDocument());
+    aboutDocument.pageKey = "about";
+    aboutDocument.puckData.content[0].props.contentBySlotId.slot_heading = "关于页面独立内容";
+    let releaseRead!: () => void;
+    let notifyRead!: () => void;
+    const delayedRead = new Promise<void>((resolve) => { releaseRead = resolve; });
+    const readStarted = new Promise<void>((resolve) => { notifyRead = resolve; });
+    await page.route("**/api/page-modules/document/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("pageKey") !== "about") return route.fallback();
+      if (url.pathname.endsWith("/published/admin")) return route.fulfill(json(null));
+      if (!url.pathname.endsWith("/admin")) return route.fallback();
+      notifyRead();
+      await delayedRead;
+      return route.fulfill(json(aboutDocument));
+    });
+    await page.getByLabel("切换装修页面").selectOption("about");
+    await readStarted;
+    await expect(page.getByText("正在加载店铺装修…", { exact: true })).toBeVisible();
+    await expect(page.locator('[data-session-proof="original-frame"]')).toHaveCount(1);
+    await expect(frame).toBeHidden();
+    expect(fixture.pageWrites).toEqual([]);
+    releaseRead();
+    await expect(page.getByLabel("切换装修页面")).toHaveValue("about");
+    await expect(frame).toBeVisible();
+    await expect(frame).toHaveAttribute("data-session-proof", "original-frame");
+    await expect(page.frameLocator(".homepage-editor__canvas-scale iframe").getByText("关于页面独立内容", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "撤销", exact: true })).toBeDisabled();
+    await page.getByRole("button", { name: "保存当前装修草稿", exact: true }).click();
+    await expect.poll(() => fixture.savedPayload()).not.toBeNull();
+    const saved = fixture.savedPayload() as { pageKey: string; puckData: { content: Array<{ props: { contentBySlotId: Record<string, string> } }> } };
+    expect(saved.pageKey).toBe("about");
+    expect(saved.puckData.content[0].props.contentBySlotId.slot_heading).toBe("关于页面独立内容");
+  });
+
+  test("性能回归：切页读取失败保留隔离画布，重试后恢复同一实例", async ({ page }) => {
+    const fixture = await prepareEditor(page);
+    const frame = page.locator(".homepage-editor__canvas-scale iframe");
+    await expect(frame).toBeVisible();
+    await frame.evaluate((node) => { node.setAttribute("data-session-proof", "recoverable-frame"); });
+    const aboutDocument = structuredClone(fixture.currentDocument());
+    aboutDocument.pageKey = "about";
+    aboutDocument.puckData.content[0].props.contentBySlotId.slot_heading = "重试后的关于页面";
+    let failRead = true;
+    await page.route("**/api/page-modules/document/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("pageKey") !== "about") return route.fallback();
+      if (url.pathname.endsWith("/published/admin")) return route.fulfill(json(null));
+      if (!url.pathname.endsWith("/admin")) return route.fallback();
+      return route.fulfill(failRead ? json(null, 503) : json(aboutDocument));
+    });
+    await page.getByLabel("切换装修页面").selectOption("about");
+    await expect(page.getByRole("alert")).toContainText("无法打开店铺装修");
+    await expect(page.locator('[data-session-proof="recoverable-frame"]')).toHaveCount(1);
+    await expect(frame).toBeHidden();
+    await expect(page.getByRole("button", { name: "保存当前装修草稿", exact: true })).toBeHidden();
+    expect(fixture.pageWrites).toEqual([]);
+    failRead = false;
+    await page.getByRole("button", { name: "重新加载", exact: true }).click();
+    await expect(frame).toBeVisible();
+    await expect(frame).toHaveAttribute("data-session-proof", "recoverable-frame");
+    await expect(page.frameLocator(".homepage-editor__canvas-scale iframe").getByText("重试后的关于页面", { exact: true })).toBeVisible();
+    expect(fixture.pageWrites).toEqual([]);
+  });
+
+  test("性能回归：768画布重复测量保持稳定且恢复后没有ResizeObserver循环", async ({ page }, testInfo) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    const fixture = await prepareEditor(page);
+    const frame = page.locator(".homepage-editor__canvas-scale iframe");
+    await frame.evaluate((node) => { node.setAttribute("data-session-proof", "tablet-frame"); });
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await expect(frame).toBeVisible();
+    const aboutDocument = structuredClone(fixture.currentDocument());
+    aboutDocument.pageKey = "about";
+    let releaseRead!: () => void;
+    let notifyRead!: () => void;
+    const gate = new Promise<void>((resolve) => { releaseRead = resolve; });
+    const started = new Promise<void>((resolve) => { notifyRead = resolve; });
+    await page.route("**/api/page-modules/document/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("pageKey") !== "about") return route.fallback();
+      if (url.pathname.endsWith("/published/admin")) return route.fulfill(json(null));
+      if (!url.pathname.endsWith("/admin")) return route.fallback();
+      notifyRead();
+      await gate;
+      return route.fulfill(json(aboutDocument));
+    });
+    await page.getByLabel("切换装修页面").selectOption("about");
+    await started;
+    await expect(frame).toBeHidden();
+    releaseRead();
+    await expect(frame).toBeVisible();
+    await expect(page.getByLabel("切换装修页面")).toHaveValue("about");
+    // 几何稳定性采样跨多个真实渲染帧，避免仅凭单次DOM读数漏掉反馈振荡。
+    await page.waitForTimeout(300);
+    const samples: Array<{ stageWidth: number; frameWidth: number; stageHeight: number; documentHeight: number }> = [];
+    for (let sample = 0; sample < 6; sample += 1) {
+      await page.waitForTimeout(120);
+      samples.push(await page.evaluate(() => {
+        const stage = document.querySelector<HTMLElement>(".homepage-editor__canvas-scroll")!;
+        const frame = stage.querySelector<HTMLIFrameElement>("iframe")!;
+        return {
+          stageWidth: stage.getBoundingClientRect().width,
+          frameWidth: frame.getBoundingClientRect().width,
+          stageHeight: stage.getBoundingClientRect().height,
+          documentHeight: stage.querySelector<HTMLElement>(".homepage-editor__canvas-document")!.getBoundingClientRect().height,
+        };
+      }));
+    }
+    const geometryPath = testInfo.outputPath("tablet-repeated-geometry.json");
+    await writeFile(geometryPath, JSON.stringify({ viewport: [768, 1024], samples, pageErrors: errors }, null, 2));
+    await testInfo.attach("tablet-repeated-geometry", { path: geometryPath, contentType: "application/json" });
+    for (const key of ["stageWidth", "frameWidth", "stageHeight", "documentHeight"] as const) {
+      const values = samples.map((sample) => sample[key]);
+      expect(Math.min(...values), `${key}必须保持非零`).toBeGreaterThan(0);
+      expect(Math.max(...values) - Math.min(...values), `${key}不应在多帧间振荡`).toBeLessThan(1);
+    }
+    expect(errors.filter((message) => /ResizeObserver/i.test(message))).toEqual([]);
+    await expect(frame).toHaveAttribute("data-session-proof", "tablet-frame");
+    await page.screenshot({ path: testInfo.outputPath("tablet-stable-canvas.png") });
+  });
+
+  test("性能回归：升级审查打开时外部切页暂停旧portal并保持零写入", async ({ page }, testInfo) => {
+    const catalogPageKeys: Array<string | null> = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (url.pathname.endsWith("/dynamic-templates/catalog")) catalogPageKeys.push(url.searchParams.get("pageKey"));
+    });
+    const fixture = await prepareEditor(page);
+    const frame = page.locator(".homepage-editor__canvas-scale iframe");
+    await frame.evaluate((node) => { node.setAttribute("data-session-proof", "portal-frame"); });
+    const aboutDocument = structuredClone(fixture.currentDocument());
+    aboutDocument.pageKey = "about";
+    aboutDocument.puckData.content[0].props.contentBySlotId.slot_heading = "新页面没有旧升级操作";
+    let releaseRead!: () => void;
+    let notifyRead!: () => void;
+    const gate = new Promise<void>((resolve) => { releaseRead = resolve; });
+    const started = new Promise<void>((resolve) => { notifyRead = resolve; });
+    await page.route("**/api/page-modules/document/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("pageKey") !== "about") return route.fallback();
+      if (url.pathname.endsWith("/published/admin")) return route.fulfill(json(null));
+      if (!url.pathname.endsWith("/admin")) return route.fallback();
+      notifyRead();
+      await gate;
+      return route.fulfill(json(aboutDocument));
+    });
+    await fixture.inspector.getByRole("button", { name: "查看差异", exact: true }).click();
+    const upgradeDialog = page.getByRole("dialog", { name: "模板版本升级：v1 → v2" });
+    await expect(upgradeDialog).toBeVisible();
+    // 复现来自同源画布导航的跨页动作：不需要先关闭已打开的只读审查。
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", {
+      origin: window.location.origin,
+      data: { type: "homepage-editor:page-navigation", path: "/about" },
+    })));
+    await started;
+    await expect(upgradeDialog).toBeHidden();
+    await expect(page.getByRole("button", { name: "保存当前装修草稿" })).toBeHidden();
+    await expect(frame).toBeHidden();
+    expect(fixture.pageWrites).toEqual([]);
+    expect(fixture.templateWrites).toEqual([]);
+    releaseRead();
+    await expect(page.getByLabel("切换装修页面")).toHaveValue("about");
+    await expect(frame).toBeVisible();
+    await expect(frame).toHaveAttribute("data-session-proof", "portal-frame");
+    await expect(page.frameLocator(".homepage-editor__canvas-scale iframe").getByText("新页面没有旧升级操作", { exact: true })).toBeVisible();
+    await expect(upgradeDialog).toBeHidden();
+    await expect.poll(() => catalogPageKeys.includes("about")).toBe(true);
+    expect(catalogPageKeys).toContain("products");
+    expect(fixture.pageWrites).toEqual([]);
+    expect(fixture.templateWrites).toEqual([]);
+    const observationsPath = testInfo.outputPath("portal-handoff-observations.json");
+    await writeFile(observationsPath, JSON.stringify({ catalogPageKeys, pageWrites: fixture.pageWrites, templateWrites: fixture.templateWrites }, null, 2));
+    await testInfo.attach("portal-handoff-observations", { path: observationsPath, contentType: "application/json" });
+    await page.screenshot({ path: testInfo.outputPath("portal-page-handoff-restored.png") });
+  });
+
+  test("性能回归：首发母版选择在失活后关闭且恢复不重开", async ({ page }) => {
+    const fixture = await prepareEditor(page);
+    await page.getByRole("button", { name: "模板设计", exact: true }).click();
+    await page.getByRole("button", { name: "从首发母版开始", exact: true }).click();
+    const picker = page.getByRole("dialog", { name: "选择首发母版" });
+    await expect(picker).toBeVisible();
+    const aboutDocument = structuredClone(fixture.currentDocument());
+    aboutDocument.pageKey = "about";
+    let releaseRead!: () => void;
+    let notifyRead!: () => void;
+    const gate = new Promise<void>((resolve) => { releaseRead = resolve; });
+    const started = new Promise<void>((resolve) => { notifyRead = resolve; });
+    await page.route("**/api/page-modules/document/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("pageKey") !== "about") return route.fallback();
+      if (url.pathname.endsWith("/published/admin")) return route.fulfill(json(null));
+      if (!url.pathname.endsWith("/admin")) return route.fallback();
+      notifyRead();
+      await gate;
+      return route.fulfill(json(aboutDocument));
+    });
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", {
+      origin: window.location.origin,
+      data: { type: "homepage-editor:page-navigation", path: "/about" },
+    })));
+    await started;
+    await expect(picker).toBeHidden();
+    releaseRead();
+    await expect(page.getByRole("button", { name: "从首发母版开始", exact: true })).toBeVisible();
+    await expect(picker).toBeHidden();
+    expect(fixture.pageWrites).toEqual([]);
+    expect(fixture.templateWrites).toEqual([]);
+  });
 
   for (const scenario of mixedUpgradeScenarios) {
     test(`${scenario.label}进入混合批量计划时整批无可应用文档`, () => {
@@ -2185,7 +2747,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
   test("目录未找到当前模板时明确为不可判断且重试不写页面", async ({ page }) => {
     const {
       inspector,
-      catalogReadCount,
+      versionReadCount,
       pageWrites,
       templateWrites,
     } = await prepareEditor(page, { catalogMissing: true });
@@ -2195,9 +2757,9 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect(missing).toContainText("当前页面继续锁定 tpl_page_upgrade v1，页面草稿未修改");
     await expect(inspector.getByRole("button", { name: "查看差异" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "撤销" })).toBeDisabled();
-    const readsBeforeRetry = catalogReadCount();
+    const readsBeforeRetry = versionReadCount();
     await missing.getByRole("button", { name: "重新检查" }).click();
-    await expect.poll(() => catalogReadCount()).toBeGreaterThan(readsBeforeRetry);
+    await expect.poll(() => versionReadCount()).toBeGreaterThan(readsBeforeRetry);
     await expect(missing).toContainText("目录未找到当前模板，无法判断是否最新");
     expect(pageWrites).toEqual([]);
     expect(templateWrites).toEqual([]);
@@ -2238,15 +2800,15 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
   test("版本检查失败只显示可恢复提示，不改变当前页面实例", async ({ page }) => {
     const {
       inspector,
-      catalogReadCount,
+      versionReadCount,
       pageWrites,
       templateWrites,
     } = await prepareEditor(page, { failVersionCheck: true });
     await expect(inspector).toContainText("固定版本 tpl_page_upgrade v1");
     await expect(inspector).toContainText("暂时无法检查模板新版本，当前页面版本未改变");
-    const readsBeforeRetry = catalogReadCount();
+    const readsBeforeRetry = versionReadCount();
     await inspector.getByRole("button", { name: "重新检查" }).click();
-    await expect.poll(() => catalogReadCount()).toBeGreaterThan(readsBeforeRetry);
+    await expect.poll(() => versionReadCount()).toBeGreaterThan(readsBeforeRetry);
     await expect(inspector).toContainText("暂时无法检查模板新版本，当前页面版本未改变");
     await expect(inspector.getByRole("button", { name: "保存页面草稿" })).toHaveCount(0);
     await expect(inspector.getByRole("status", { name: /页面草稿已保存/ })).toBeVisible();
@@ -2257,7 +2819,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
   test("版本检查失败后重新检查可恢复升级，并在保存重载后回读目标版本", async ({ page }) => {
     const {
       inspector,
-      catalogReadCount,
+      versionReadCount,
       recoverVersionCheck,
       currentDocument,
       pageWrites,
@@ -2268,7 +2830,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect(inspector).toContainText("暂时无法检查模板新版本，当前页面版本未改变");
     recoverVersionCheck();
     await inspector.getByRole("button", { name: "重新检查" }).click();
-    await expect.poll(() => catalogReadCount()).toBeGreaterThan(1);
+    await expect.poll(() => versionReadCount()).toBeGreaterThan(1);
     await expect(inspector).toContainText("发现新版本 v2");
     expect(pageWrites).toEqual([]);
 
@@ -3174,6 +3736,10 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
 
   test("空浏览器投影直接读共享素材，失败可重试且保留当前引用", async ({ page }) => {
     await page.addInitScript(() => localStorage.removeItem("haichuan.page-media"));
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      "base64",
+    );
     const sharedAsset = {
       id: 41,
       url: "/uploads/page-assets/shared-operation.png",
@@ -3187,9 +3753,26 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       status: "READY",
       available: true,
     };
+    const fallbackAsset = {
+      ...sharedAsset,
+      id: 42,
+      url: "/uploads/page-assets/shared-thumb-fallback.png",
+      name: "缩略图回退素材.png",
+    };
+    const thumbnailProbes: Array<{ storageKey: string | null; width: string | null }> = [];
     const { inspector, savedPayload, pageMediaReadCount } = await prepareEditor(page, {
       image: true,
-      pageMedia: { failFirst: true, items: [sharedAsset] },
+      pageMedia: { failFirst: true, items: [sharedAsset, fallbackAsset] },
+    });
+    // 共享列表与预览都是自有 API 夹具，不能让图片读取逃到真实后端触发401登出。
+    await page.route("**/api/upload/media/preview-by-storage-key**", (route) => {
+      const url = new URL(route.request().url());
+      const probe = { storageKey: url.searchParams.get("storageKey"), width: url.searchParams.get("width") };
+      thumbnailProbes.push(probe);
+      if (probe.storageKey === "page-assets/shared-thumb-fallback.png" && probe.width === "480") {
+        return route.fulfill({ status: 404, body: "thumbnail unavailable" });
+      }
+      return route.fulfill({ status: 200, contentType: "image/png", body: png });
     });
     const mediaField = inspector.locator('[data-media-field="slot_image"]');
     expect(pageMediaReadCount()).toBe(0);
@@ -3207,6 +3790,15 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       .toBeEnabled();
     expect(pageMediaReadCount()).toBe(2);
     await expect(mediaField.getByText("当前引用需核对", { exact: true })).toHaveCount(0);
+    const thumbnail = mediaField.getByRole("button", { name: `使用素材：${sharedAsset.name}` }).locator("img");
+    await expect(thumbnail).toHaveAttribute("src", /[?&]width=480(?:&|$)/);
+    const fallbackButton = mediaField.getByRole("button", { name: `使用素材：${fallbackAsset.name}` });
+    await fallbackButton.scrollIntoViewIfNeeded();
+    const fallbackThumbnail = fallbackButton.locator("img");
+    await expect(fallbackThumbnail).toHaveAttribute("src", /preview-by-storage-key\?storageKey=page-assets%2Fshared-thumb-fallback\.png$/);
+    await expect.poll(() => fallbackThumbnail.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+    expect(thumbnailProbes.filter((probe) => probe.storageKey === "page-assets/shared-thumb-fallback.png" && probe.width === "480")).toHaveLength(1);
+    expect(thumbnailProbes.filter((probe) => probe.storageKey === "page-assets/shared-thumb-fallback.png" && probe.width === null)).toHaveLength(1);
 
     await mediaField.getByRole("button", { name: `使用素材：${sharedAsset.name}` }).dispatchEvent("click");
     await expect(mediaField.locator('img[alt="预览"]')).toBeVisible();

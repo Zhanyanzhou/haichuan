@@ -64,6 +64,8 @@ export default defineConfig(({ mode, command }) => {
       },
       rolldownOptions: {
         output: {
+          // 显式编辑器分块不捕获共享依赖时，保持跨分块的模块执行顺序。
+          strictExecutionOrder: true,
           // 只固定共享框架块；Ant Design 保持按懒加载路由拆分，避免公开页下载整个后台组件库。
           codeSplitting: {
             groups: [
@@ -76,6 +78,12 @@ export default defineConfig(({ mode, command }) => {
                 name: "motion",
                 test: /[\\/]node_modules[\\/]framer-motion[\\/]/,
                 priority: 10,
+              },
+              {
+                name: "puck-editor",
+                test: /[\\/]node_modules[\\/]@puckeditor[\\/]core[\\/]/,
+                priority: 20,
+                includeDependenciesRecursively: false,
               },
             ],
           },

@@ -7,7 +7,6 @@ import {
   Matches,
   MaxLength,
   MinLength,
-  ValidateIf,
 } from 'class-validator';
 import {
   ACCOUNT_PASSWORD_MAX_LENGTH,
@@ -88,20 +87,6 @@ export class ResetPasswordDto extends AccountPasswordDto {
 }
 
 export class RequestSmsCodeDto extends CustomerPhoneDto {}
-
-export class UpdateCustomerProfileDto {
-  @IsOptional()
-  @IsString()
-  @IsNotEmpty({ message: '姓名格式不正确' })
-  @MaxLength(50)
-  name?: string;
-
-  @IsOptional()
-  @ValidateIf((_object, value) => value !== '')
-  @IsEmail({}, { message: '请填写正确的邮箱地址' })
-  @MaxLength(100)
-  email?: string;
-}
 
 export class CloseCustomerAccountDto {
   @IsOptional()

@@ -27,6 +27,7 @@ import {
   resolvePageHeaderMode,
 } from "@/page-builder/config/editorPages";
 import PublishedPageDecoration from "@/page-builder/runtime/PublishedPageDecoration";
+import { preloadPublicPageRenderer } from "@/page-builder/runtime/loadPublicPageRenderer";
 import {
   usePublishedPageDocument,
   type PublishedPageDocumentResource,
@@ -48,11 +49,30 @@ import { useStructuredData } from "@/hooks/useStructuredData";
 import { LEGAL_ENTITY } from "@/config/legalEntity";
 import { isDialablePhone, SIGNED_PUBLIC_CONTACT } from "@/config/publicContact";
 import RouteLoading from "@/components/common/RouteLoading";
+import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { clearCatalogReturnContext } from "@/pages/public/Catalog/catalogReturnContext";
 import { useDirectionalSiteHeader } from "./useDirectionalSiteHeader";
 
 const loadSiteSearchDialog = () => import("./SiteSearchDialog");
 const SiteSearchDialog = lazy(loadSiteSearchDialog);
+const preloadSiteSearchDialog = () => { void loadSiteSearchDialog().catch(() => {}); };
+
+function SiteSearchPlaceholder({ onClose, failed = false }: { onClose: () => void; failed?: boolean }) {
+  return (
+    <div id="site-search-dialog" className="site-search__panel">
+      <div className="site-search__field">
+        {failed ? (
+          <p role="status" className="site-search__note">搜索暂时无法打开，请刷新页面后重试。</p>
+        ) : (
+          <RouteLoading scope="inline" surface="public" label="正在打开搜索" />
+        )}
+        <button type="button" className="site-search__close" aria-label="关闭搜索" onClick={onClose} autoFocus>
+          <span aria-hidden="true">×</span>
+        </button>
+      </div>
+    </div>
+  );
+}
 
 const NON_PUBLIC_SYSTEM_HERO_MEDIA = new Set([
   "/images/system/product-placeholder.svg",
@@ -325,6 +345,11 @@ export default function PublicLayout() {
     : undefined;
   const isHome = contentPathname === "/" || previewPage?.key === "home";
   const pageDefinition = getEditorPageByPath(contentPathname) ?? previewPage;
+  useEffect(() => {
+    if (!previewPage && pageDefinition && !pageDefinition.dynamic) {
+      preloadPublicPageRenderer();
+    }
+  }, [pageDefinition, previewPage]);
   const standalonePublishedHeaderDocumentResource = usePublishedPageDocument(
     previewPage ? undefined : pageDefinition?.key,
     localizedPath.locale,
@@ -397,22 +422,23 @@ export default function PublicLayout() {
   const [searchOpen, setSearchOpen] = useState(false);
   const menuToggleRef = useRef<HTMLButtonElement>(null);
   const searchButtonRef = useRef<HTMLButtonElement>(null);
+  const searchOpenerRef = useRef<HTMLButtonElement | null>(null);
   const closeSearch = useCallback(() => {
     setSearchOpen(false);
-    const searchButton = searchButtonRef.current;
-    const searchButtonVisible = Boolean(searchButton && searchButton.getClientRects().length > 0);
-    (searchButtonVisible ? searchButton : menuToggleRef.current)?.focus();
+    const opener = searchOpenerRef.current;
+    (opener?.getClientRects().length ? opener : searchButtonRef.current)?.focus({ preventScroll: true });
   }, []);
-  const revealSearch = useCallback(() => {
+  const revealSearch = useCallback((opener: HTMLButtonElement | null) => {
     if (location.pathname === "/catalog") {
       document.getElementById("catalog-search-input")?.focus();
       return;
     }
+    searchOpenerRef.current = opener;
     setSearchOpen(true);
   }, [location.pathname]);
   const requestSearchFromMenu = useCallback(() => {
     setMenuOpen(false);
-    revealSearch();
+    revealSearch(menuToggleRef.current);
   }, [revealSearch]);
   const { headerRef, surfaceScrolled, concealed } = useDirectionalSiteHeader({
     menuOpen: menuOpen || searchOpen,
@@ -822,12 +848,11 @@ export default function PublicLayout() {
             aria-expanded={searchOpen}
             aria-controls="site-search-dialog"
             className="site-header__nav-item site-header__nav-item--search"
-            onMouseEnter={() => { void loadSiteSearchDialog(); }}
-            onFocus={() => { void loadSiteSearchDialog(); }}
+            onMouseEnter={preloadSiteSearchDialog}
+            onFocus={preloadSiteSearchDialog}
             onClick={() => {
-              void loadSiteSearchDialog();
               if (searchOpen) closeSearch();
-              else revealSearch();
+              else revealSearch(searchButtonRef.current);
             }}
           >
             <SearchIcon />
@@ -836,9 +861,11 @@ export default function PublicLayout() {
           )}
         </nav>
         {searchOpen ? (
-          <Suspense fallback={null}>
-            <SiteSearchDialog open onClose={closeSearch} />
-          </Suspense>
+          <ErrorBoundary fallback={<SiteSearchPlaceholder failed onClose={closeSearch} />}>
+            <Suspense fallback={<SiteSearchPlaceholder onClose={closeSearch} />}>
+              <SiteSearchDialog open onClose={closeSearch} />
+            </Suspense>
+          </ErrorBoundary>
         ) : null}
       </header>
 
@@ -884,7 +911,7 @@ export default function PublicLayout() {
           replaceChildren={Boolean(decorationPage && !decorationPage.dynamic)}
           publicFallback={decorationFallback}
         >
-          <Suspense fallback={<RouteLoading />}>
+          <Suspense fallback={<RouteLoading surface="public" routeProgress />}>
             <Outlet context={publishedHeaderDocument} />
           </Suspense>
         </PublishedPageDecoration>

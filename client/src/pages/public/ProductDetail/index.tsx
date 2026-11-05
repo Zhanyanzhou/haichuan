@@ -22,7 +22,7 @@ import {
   reviewApi,
 } from "@/services/api";
 import { USE_MOCK } from "@/services/mockData";
-import { lookupPublicWork } from "@/data/publicWorkLookup";
+import { lookupPublicWork, type PublicWorkResolution } from "@/data/publicWorkLookup";
 import { unwrapResponse } from "@/utils/unwrap";
 import type { Product, ProductSKU } from "@/types";
 import {
@@ -418,12 +418,16 @@ export default function ProductDetail() {
     || "/catalog";
   const setPageMeta = usePageMetaStore((s) => s.setMeta);
   const clearPageMeta = usePageMetaStore((s) => s.clear);
-  const [loading, setLoading] = useState(true);
-  const [product, setProduct] = useState<Product | null>(null);
-  const productRef = useRef(product);
-  productRef.current = product;
-  const [isVirtualWork, setIsVirtualWork] = useState(false);
-  const [loadFailure, setLoadFailure] = useState<"not-found" | "error" | null>(null);
+  const isSignedIn = useCustomerAuthStore((state) => state.isLoggedIn);
+  const customerId = useCustomerAuthStore((state) => state.customer?.id ?? null);
+  const workKey = JSON.stringify([id, isSignedIn, customerId]);
+  const [work, setWork] = useState<{ key: string; resolution: PublicWorkResolution } | null>(null);
+  // 路由或会员身份变化时立即停止使用旧投影，不等待取数 effect 执行。
+  const resolution = work?.key === workKey ? work.resolution : null;
+  const loading = Boolean(id && !resolution);
+  const product = resolution?.kind === "published" || resolution?.kind === "virtual" ? resolution.product : null;
+  const isVirtualWork = resolution?.kind === "virtual";
+  const loadFailure = resolution?.kind === "error";
   const [qty, setQty] = useState(1);
   const [selectedSku, setSelectedSku] = useState<ProductSKU | null>(null);
   const [mainImage, setMainImage] = useState(0);
@@ -446,9 +450,6 @@ export default function ProductDetail() {
   } = useCommerceCapabilities();
   const commerceEnabled = commerceFlags?.commerceEnabled ?? false;
   const cartEnabled = commerceFlags?.cartEnabled ?? false;
-  const isSignedIn = useCustomerAuthStore((state) => state.isLoggedIn);
-  const customerId = useCustomerAuthStore((state) => state.customer?.id ?? null);
-  const productAudience = isSignedIn ? "member" : "public";
   // 心愿单仅对登录客户启用；游客仍可浏览公开安全字段。
   const [favorited, setFavorited] = useState(false);
   const [favBusy, setFavBusy] = useState(false);
@@ -467,6 +468,9 @@ export default function ProductDetail() {
       productId: product?.id ?? null,
       customerId,
     };
+    return () => {
+      activeInteractionRef.current = { routeId: null, productId: null, customerId: null };
+    };
   }, [id, product?.id, customerId]);
 
   useEffect(() => {
@@ -477,7 +481,11 @@ export default function ProductDetail() {
     addPendingRef.current = false;
     setFavBusy(false);
     setAddingToCart(false);
-  }, [id, customerId]);
+    setMainImage(0);
+    setSelectedSku(null);
+    setQty(1);
+    setPurchaseError("");
+  }, [workKey]);
 
   // 初始收藏态：拉一次心愿单判断当前作品是否在列（心愿单量级小，整表判断成本可忽略）。
   // 登录墙 return 之前 hooks 已执行，必须显式判断登录态，避免游客每次必发一个注定 401 的请求。
@@ -535,54 +543,19 @@ export default function ProductDetail() {
   };
 
   useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      if (!id) {
-        setProduct(null);
-        setIsVirtualWork(false);
-        setLoadFailure("not-found");
-        setLoading(false);
-        return;
-      }
-      const current = productRef.current;
-      const sameWork = Boolean(
-        current
-        && (String(current.id) === id || current.code === id),
-      );
-      if (!sameWork) {
-        setLoading(true);
-        setLoadFailure(null);
-      }
-      try {
-        const resolution = await lookupPublicWork(id);
-        if (cancelled) return;
-        const data = resolution.kind === "published" || resolution.kind === "virtual"
-          ? resolution.product
-          : null;
-        setProduct(data);
-        setIsVirtualWork(resolution.kind === "virtual");
-        setLoadFailure(data ? null : resolution.kind === "error" ? "error" : "not-found");
-        if (!sameWork) {
-          setMainImage(0);
-          setSelectedSku(null);
-          setQty(1);
-          setPurchaseError("");
-        }
-      } catch {
-        if (!cancelled && !sameWork) {
-          setProduct(null);
-          setIsVirtualWork(false);
-          setLoadFailure("error");
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [id, productAudience, customerId, revision]);
+    if (!id) return;
+    const controller = new AbortController();
+    setWork((previous) => previous?.key === workKey ? previous : null);
+    void lookupPublicWork(id, controller.signal).then(
+      (result) => {
+        if (!controller.signal.aborted) setWork({ key: workKey, resolution: result });
+      },
+      () => {
+        if (!controller.signal.aborted) setWork({ key: workKey, resolution: { kind: "error" } });
+      },
+    );
+    return () => controller.abort();
+  }, [id, workKey, revision]);
 
   useEffect(() => {
     if (!product?.id || isVirtualWork) {
@@ -623,10 +596,10 @@ export default function ProductDetail() {
       });
     } else if (!loading) {
       setPageMeta({
-        title: loadFailure === "error"
+        title: loadFailure
           ? "作品暂时无法加载 | 海川珠宝"
           : "作品暂不可浏览 | 海川珠宝",
-        description: loadFailure === "error"
+        description: loadFailure
           ? "作品信息暂时无法取得，请稍后重试。"
           : "该作品可能已下架，或尚未公开。",
         noIndex: true,
@@ -719,9 +692,11 @@ export default function ProductDetail() {
 
   if (loading)
     return (
-      <RouteLoading scope="region" surface="public" label="正在加载作品" />
+      <div className="product-detail-page__state">
+        <RouteLoading scope="region" surface="public" label="正在加载作品" />
+      </div>
     );
-  if (!product && loadFailure === "error")
+  if (!product && loadFailure)
     return (
       <div
         className="product-detail-page__state flex flex-col items-center justify-center gap-4 bg-white px-6 text-center"
@@ -734,7 +709,10 @@ export default function ProductDetail() {
           <button
             type="button"
             className="btn btn-primary"
-            onClick={() => setRevision((value) => value + 1)}
+            onClick={() => {
+              setWork(null);
+              setRevision((value) => value + 1);
+            }}
           >
             重新尝试
           </button>
@@ -1012,6 +990,7 @@ export default function ProductDetail() {
             >
               {mainImageUrl ? (
                 <SecureImage
+                  key={mainImageUrl}
                   src={withPublicMediaWidth(mainImageUrl, 1200)}
                   alt={publicTitle}
                   className="product-detail-page__photo"
@@ -1035,6 +1014,7 @@ export default function ProductDetail() {
               <div className="product-detail-page__zoom-pane" aria-hidden="true">
                 <div className="product-detail-page__zoom-photo-frame">
                   <SecureImage
+                    key={mainImageUrl}
                     src={buildDetailZoomSrc(mainImageUrl)}
                     alt=""
                     className="product-detail-page__zoom-photo"
