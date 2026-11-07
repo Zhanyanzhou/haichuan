@@ -727,7 +727,7 @@ export function useTemplateWorkspaceController({
       return;
     }
     // 首次进入只切换工作区，不猜测运营要编辑哪个历史模板。
-    // 目录与顶部“新建模板”由用户配置方案后建立新会话。
+    // 复制模板或选中目录项后，才建立新会话。
     activateTemplateSession(false);
   }, [activateTemplateSession, canManageTemplates, isViewingPublished, message, onEnterWorkspace]);
 
@@ -773,9 +773,9 @@ export function useTemplateWorkspaceController({
       return useTemplateEditorSession.getState().draft;
     }
     if (target.kind === "dynamic-new") {
-      const generated = target.definition ? validateDynamicTemplateDefinition(target.definition) : null;
-      if (!generated?.valid || !generated.definition) {
-        message.error("模板方案未通过结构校验，请返回配置修改。当前草稿未改变。");
+      const generated = validateDynamicTemplateDefinition(target.definition);
+      if (!generated.valid || !generated.definition) {
+        message.error("无法打开这份模板。当前草稿未改变。");
         return null;
       }
       const newDraft = {
@@ -789,7 +789,7 @@ export function useTemplateWorkspaceController({
       activateTemplateSession();
       const session = useTemplateEditorSession.getState();
       session.open(newDraft, { isNew: true });
-      if (target.canvasSize || target.definition) useTemplateEditorSession.getState().setDevice("desktop");
+      session.setDevice("desktop");
       session.selectObject(newDraft.definition.rootNodeId);
       return useTemplateEditorSession.getState().draft;
     }

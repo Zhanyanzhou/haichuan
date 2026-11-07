@@ -13,6 +13,7 @@ const checkOnly = process.argv.includes("--check");
 
 const sourceText = await readFile(sourcePath, "utf8");
 const source = JSON.parse(sourceText);
+const definitionSchema = JSON.parse(await readFile(path.join(root, "contracts/page-builder/template-definition.schema.json"), "utf8"));
 
 /**
  * 递归按键名稳定排序后序列化，保证同一语义合同不因对象键序或空白产生不同输出与摘要。
@@ -158,6 +159,9 @@ function validatePageRules(rules) {
   const publicPaths = rules.map((rule) => rule.publicPath);
   invariant(new Set(publicPaths).size === publicPaths.length, "pageRules.publicPath 不得重复");
   const templatesByKey = new Map(source.templates.map((template) => [template.key, template]));
+  const supportedSectionRoles = new Set(definitionSchema.$defs.metadata.properties.sectionRole.enum);
+  supportedSectionRoles.delete("editorial-media"); // D.41 仅保留历史读取。
+  supportedSectionRoles.add("page-intro"); // D.41 已定义页面准入，模板定义与创建尚未启用。
   const activeTemplateKeys = source.templates
     .filter((template) => template.implementationStatus === "active")
     .map((template) => template.key);
@@ -169,6 +173,13 @@ function validatePageRules(rules) {
       `pageRules.${rule.pageKey}.publicPath 必须是 ${expectedPublicPath}`,
     );
     invariant(typeof rule.pageRole === "string" && rule.pageRole.length > 0, `pageRules.${rule.pageKey}.pageRole 缺失`);
+    invariant(
+      Array.isArray(rule.allowedSectionRoles)
+        && rule.allowedSectionRoles.length > 0
+        && new Set(rule.allowedSectionRoles).size === rule.allowedSectionRoles.length
+        && rule.allowedSectionRoles.every((role) => supportedSectionRoles.has(role)),
+      `pageRules.${rule.pageKey}.allowedSectionRoles 缺失、重复或包含未启用的角色`,
+    );
     invariant(
       rule.contentPlacement === "root-only",
       `pageRules.${rule.pageKey}.contentPlacement 必须为 root-only`,
@@ -189,12 +200,6 @@ function validatePageRules(rules) {
       `pageRules.${rule.pageKey} 必须允许全部 active 模板，模板组件库统一跨页面通用`,
     );
     invariant([0, 1].includes(rule.businessRegionCount), `pageRules.${rule.pageKey}.businessRegionCount 只能为 0 或 1`);
-    invariant(
-      rule.businessRegionCount === 1
-        ? rule.businessRegionPosition === "after-first-brand-block"
-        : rule.businessRegionPosition === undefined,
-      `pageRules.${rule.pageKey}.businessRegionPosition 与固定业务区数量不一致`,
-    );
     invariant(
       ["overlay-light", "solid"].includes(rule.headerMode?.configured)
         && rule.headerMode?.fallback === "solid",
@@ -1113,8 +1118,8 @@ export type ContentTemplatePageRule = {
   pageRole: string;
   contentPlacement: "root-only";
   allowedTemplateKeys: readonly ContentTemplateKey[];
+  allowedSectionRoles: readonly string[];
   businessRegionCount: 0 | 1;
-  businessRegionPosition?: "after-first-brand-block";
   headerMode: {
     configured: "overlay-light" | "solid";
     overlayRequiresFirstTemplate?: "hero";
@@ -1995,6 +2000,12 @@ export function contentTemplateObjectHasCapability(
 
 export function getContentTemplatePageRule(pageKey: string) {
   return (CONTENT_TEMPLATE_PAGE_RULES as Record<string, ContentTemplatePageRule | undefined>)[pageKey];
+}
+
+/** 旧版本可能没有区块角色，继续沿用既有目录准入。显式声明的角色按页面合同匹配。 */
+export function isContentTemplateSectionRoleAllowedOnPage(pageKey: string, sectionRole: string | undefined): boolean {
+  if (!Object.prototype.hasOwnProperty.call(CONTENT_TEMPLATE_PAGE_RULES, pageKey)) return false;
+  return sectionRole === undefined || getContentTemplatePageRule(pageKey)?.allowedSectionRoles.includes(sectionRole) === true;
 }
 
 const CONTENT_TEMPLATE_PAGE_PATH_SET = new Set<string>(

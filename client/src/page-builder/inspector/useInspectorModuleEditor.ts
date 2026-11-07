@@ -33,9 +33,9 @@ export interface InspectorModuleEditor {
   updateFromCurrent: (factory: (props: PuckProps) => PuckProps) => void;
   /** 将一次恢复操作写成明确的 before/after 历史事务。 */
   updateHistoryTransaction: (
-    patch: PuckProps | ((props: PuckProps) => PuckProps),
+    patch: PuckProps | ((props: PuckProps) => PuckProps | undefined),
     documentPatch?: Record<string, unknown> | ((document: Record<string, unknown>) => Record<string, unknown>),
-  ) => void;
+  ) => boolean;
   /** 恢复事务闭合期间为 true，供恢复按钮阻止重复提交。 */
   historyTransactionPending: boolean;
   /** 撤销本模块自面板打开/上次撤销以来的修改 */
@@ -165,17 +165,18 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
     patchOrFactory,
     documentPatchOrFactory,
   ) => {
-    if (index < 0 || historyTransactionPending) return;
+    if (index < 0 || useEditorHistoryTransaction.getState().pending) return false;
     const before = getPuck();
     const beforeData = latestDataRef.current;
     const beforeIndex = beforeData.content.findIndex(
       (item) => item.props?.id === props.id,
     );
-    if (beforeIndex < 0) return;
+    if (beforeIndex < 0) return false;
     const beforeItem = beforeData.content[beforeIndex];
     const patch = typeof patchOrFactory === "function"
       ? patchOrFactory(beforeItem.props)
       : patchOrFactory;
+    if (!patch) return false;
     const afterContent = panelMode === "design"
       ? applySharedTemplateDesignPatch(
           beforeData.content as typeof content,
@@ -239,6 +240,7 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
       setHistoryTransactionPending(false);
     };
     window.setTimeout(() => finishTransaction(), 260);
+    return true;
   };
 
   const revert = () => {

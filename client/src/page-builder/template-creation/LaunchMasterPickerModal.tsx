@@ -11,10 +11,6 @@ import "./LaunchMasterPickerModal.css";
 /**
  * 首发七母模板的选取入口：把 `launchTemplateSet.ts` 里的七份定义交给模板编辑器。
  *
- * 与七步向导（`NewTemplateRecipeModal`）的分工：向导从零配一块新模板，这里从已写好的
- * `TemplateDefinitionV2` 起步——正是 `launch-template-set.md` 第 5 节说的"直接改机器合同"
- * 那条路。两条路最终都汇进编辑器的 `dynamic-new` 分支，不各自造一条创建链路。
- *
  * 本面板只做选择：选中后调用 `onSelect` 把派生出的定义交出去，自己不写任何东西。
  */
 export default function LaunchMasterPickerModal({ onCancel, onSelect }: {
@@ -24,7 +20,7 @@ export default function LaunchMasterPickerModal({ onCancel, onSelect }: {
   const { token } = theme.useToken();
   const [open, setOpen] = useState(true);
   const [selected, setSelected] = useState<LaunchTemplateMasterEntry["role"] | null>(null);
-  // 动态挂载的 Modal 没有稳定 trigger 节点，显式记住本次打开前的键盘位置（同 NewTemplateRecipeModal）。
+  // 动态挂载的弹窗显式记住打开前的键盘位置。
   const [trigger] = useState(() => (document.activeElement instanceof HTMLElement ? document.activeElement : null));
   const close = () => {
     setOpen(false);

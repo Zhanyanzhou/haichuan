@@ -58,6 +58,7 @@ interface VisualEditorSessionState {
     blockId: string;
     nodeId: string;
     kind: VisualNodeKind;
+    field?: "alt";
   } | null;
   canvasGeometryByBlock: Record<string, Partial<Record<"desktop" | "mobile", VisualCanvasGeometrySnapshot>>>;
   selectNode: (selection: VisualNodeSelection) => void;
@@ -65,7 +66,7 @@ interface VisualEditorSessionState {
   setMode: (mode: VisualEditorMode) => void;
   setPanelMode: (panelMode: "content" | "design") => void;
   requestLayerShift: (direction: -1 | 1) => void;
-  requestContentAction: (selection: VisualNodeSelection) => void;
+  requestContentAction: (selection: VisualNodeSelection, field?: "alt") => void;
   reportCanvasGeometry: (snapshot: VisualCanvasGeometrySnapshot) => void;
   clearCanvasGeometry: (blockId: string) => void;
   clearCanvasGeometryNamespace: (namespace: string) => void;
@@ -176,13 +177,14 @@ export const useVisualEditorSession = create<VisualEditorSessionState>((set, _ge
           }
         : state,
     ),
-  requestContentAction: (selection) =>
+  requestContentAction: (selection, field) =>
     set((state) => ({
       contentActionRequest: {
         revision: (state.contentActionRequest?.revision ?? 0) + 1,
         blockId: selection.blockId,
         nodeId: selection.nodeId,
         kind: selection.kind,
+        field,
       },
     })),
   reportCanvasGeometry: (snapshot) =>

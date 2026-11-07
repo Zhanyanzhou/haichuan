@@ -117,7 +117,7 @@ export default function PagePublishCheckPanel({
                 ? "草稿仍完整保留，可明确重试"
             : errorCount > 0
               ? `${errorCount} 项错误待处理`
-              : "已满足发布门禁"}</span>
+              : targets.length > 0 ? `${targets.length} 项提醒，可继续发布` : "已满足发布门禁"}</span>
         </div>
         <button type="button" onClick={onClose} aria-label="关闭本次发布检查">
           <CloseOutlined />

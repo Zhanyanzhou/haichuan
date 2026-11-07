@@ -18,6 +18,8 @@ import { getEffectiveTemplateRootRules } from "./templateDimensions";
 import { resolveTemplateNodeRules, resolveTemplateSlotRules } from "./responsive";
 import { sectionCopyHiddenByDefault } from "./sectionCopyVisibility";
 import { hasTemplateImageContent } from "./imageContent";
+import { defaultTemplateImageFit } from "./designPropertySemantics";
+import { getWorkGridImageSlotIds } from "./layoutAuthoring";
 
 export interface DynamicTemplateRenderPlanNode {
   nodeId: string;
@@ -134,6 +136,7 @@ export function compileDynamicTemplateRenderPlan(
   const definition = validation.definition;
   const breakpoint = options.breakpoint ?? options.device;
   const sectionRole = definition.metadata.sectionRole ?? definition.templateRecipe?.sectionRole;
+  const workImageSlots = getWorkGridImageSlotIds(definition);
   const hiddenSlotIds = new Set(options.hiddenSlotIds ?? []);
   const instanceContent = options.contentBySlotId ?? {};
   const mediaSideDeclaration = definition.metadata.pageSettings?.mediaSide;
@@ -151,6 +154,10 @@ export function compileDynamicTemplateRenderPlan(
       ? getEffectiveTemplateRootRules(definition, breakpoint)
       : resolveTemplateNodeRules(definition, nodeId, breakpoint);
     const slot = node.slotId ? definition.slots[node.slotId] : undefined;
+    const slotRules = slot ? resolveTemplateSlotRules(definition, slot.slotId, breakpoint) : undefined;
+    const imageFit = slot?.type === "image"
+      ? slotRules?.objectFit ?? defaultTemplateImageFit(slot.semanticRole, workImageSlots.has(slot.slotId))
+      : undefined;
     const hasInstanceContent = Boolean(node.slotId
       && Object.prototype.hasOwnProperty.call(instanceContent, node.slotId));
     const instanceValue = node.slotId && hasInstanceContent
@@ -234,7 +241,7 @@ export function compileDynamicTemplateRenderPlan(
       name: node.name,
       ...(node.slotId ? { slotId: node.slotId } : {}),
       ...(slot ? { slot } : {}),
-      ...(slot ? { slotRules: resolveTemplateSlotRules(definition, slot.slotId, breakpoint) } : {}),
+      ...(slotRules ? { slotRules: imageFit ? { ...slotRules, objectFit: imageFit } : slotRules } : {}),
       ...(node.slotId && (hasInstanceContent
         || Object.prototype.hasOwnProperty.call(definition.defaultContent, node.slotId))
         ? { content }

@@ -43,14 +43,6 @@
   .admin-header {
     padding: 0 12px;
   }
-  .admin-header__site-link,
-  .admin-header__account {
-    min-width: 40px;
-    height: 40px;
-  }
-  .admin-header__account-group {
-    padding-left: 8px;
-  }
   .admin-sidebar {
     flex-basis: 100%;
     width: 100%;

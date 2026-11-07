@@ -25,7 +25,7 @@ import {
 } from "./dto/dynamic-template.dto";
 import { calculateDynamicTemplateDefinitionChecksum } from "./dynamic-template-definition-integrity";
 import { definitionFixture } from "./dynamic-template-test-fixture";
-import { CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE } from "./generated/contentTemplates.generated";
+import { CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE, isContentTemplateSectionRoleAllowedOnPage } from "./generated/contentTemplates.generated";
 import { PageModulesModule } from "./page-modules.module";
 import { PageModulesService } from "./page-modules.service";
 
@@ -3508,7 +3508,7 @@ test("组件库预览图拒绝外链、穿越路径、未入库图片和已归�
 });
 
 
-test("页面装修目录沿用既有准入，省略个人草稿但不按推荐页面缩减正式模板", async () => {
+test("页面装修目录兼容无角色的正式模板，省略个人草稿与测试样例", async () => {
   const normal = definitionFixture();
   normal.metadata.recommendedFor = ["about"];
   const starterId = definitionFixture(); starterId.templateId = "hc_consult_home";
@@ -3533,6 +3533,53 @@ test("页面装修目录沿用既有准入，省略个人草稿但不按推荐�
     const unrestricted = await harness.service.listCatalog(17);
     assert.equal(unrestricted.items.filter((item) => item.kind === "published").length, definitions.length);
     assert.equal(unrestricted.items.filter((item) => item.kind === "editable").length, role === "SUPER_ADMIN" ? definitions.length : 0);
+  }
+});
+
+test("正式目录与摘要均按发布版本的区块角色执行页面准入", async () => {
+  const workGrid = definitionFixture();
+  workGrid.templateId = "tpl_page_admission_works";
+  workGrid.metadata.sectionRole = "creation-grid";
+  workGrid.metadata.recommendedFor = ["contact"];
+  const service = definitionFixture();
+  service.templateId = "tpl_page_admission_service";
+  service.metadata.sectionRole = "service-invitation";
+  const retired = definitionFixture();
+  retired.templateId = "tpl_page_admission_retired";
+  retired.metadata.sectionRole = "editorial-media";
+  const preset = definitionFixture();
+  preset.templateId = "tpl_page_admission_preset";
+  preset.metadata.sectionRole = "page-hero";
+  preset.metadata.recommendedFor = ["home"];
+  const definitions = [workGrid, service, retired, preset];
+  const templates = definitions.map((definition, index) => ({
+    ...catalogTemplate(index + 1, 1, definition),
+    sourceReference: definition === preset ? "launch-page-preset:v1" : null,
+  }));
+  const versions = definitions.map((definition, index) => catalogVersion(index + 1, index + 1, 1, definition));
+  const harness = createPublishedCatalogService(templates, versions, "EDITOR");
+
+  for (const view of [undefined, "summary"]) {
+    for (const [pageKey, expected] of [
+      ["home", [preset.templateId, workGrid.templateId, service.templateId]],
+      ["products", [workGrid.templateId]],
+      ["catalog", []],
+      ["custom", [service.templateId]],
+      ["about", []],
+      ["contact", [service.templateId]],
+    ] as const) {
+      const result = await harness.service.listCatalog(17, pageKey, view);
+      assert.deepEqual(result.items.map((item) => item.template.templateId), expected, `${pageKey} ${view ?? "full"}`);
+    }
+  }
+  const designCatalog = await harness.service.listCatalog(17);
+  assert.deepEqual(designCatalog.items.map((item) => item.template.templateId), definitions.map((definition) => definition.templateId));
+});
+
+test("无角色的历史版本只能通过已登记页面的准入检查", () => {
+  assert.equal(isContentTemplateSectionRoleAllowedOnPage("home", undefined), true);
+  for (const pageKey of ["unknown", "", "__proto__", "constructor"]) {
+    assert.equal(isContentTemplateSectionRoleAllowedOnPage(pageKey, undefined), false);
   }
 });
 

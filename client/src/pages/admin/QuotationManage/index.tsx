@@ -388,7 +388,7 @@ function LinkedSkuSelector({
         showSearch
         filterOption={false}
         onSearch={searchProducts}
-        placeholder="搜索并关联商品（按名称/货号）"
+        placeholder="搜索并关联商品（按名称/款号）"
         size="small"
         style={{ width: "100%" }}
         value={productId || undefined}

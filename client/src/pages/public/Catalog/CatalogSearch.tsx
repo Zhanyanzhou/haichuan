@@ -6,7 +6,7 @@ import { trackSearch } from "@/hooks/useAnalytics";
 import { catalogTokens as T } from "./catalogTokens";
 
 type CatalogSuggestion = {
-  type: "品类" | "材质" | "作品" | "货号";
+  type: "品类" | "材质" | "作品" | "款号";
   value: string;
 };
 
@@ -16,8 +16,9 @@ function getCatalogSuggestions(
   categories: RealCategory[],
   materials: string[],
 ): CatalogSuggestion[] {
-  const needle = query.trim().toLocaleLowerCase();
-  if (!needle) return [];
+  const needle = query.normalize("NFKC").trim().toLocaleLowerCase();
+  if (!needle || products.length === 0) return [];
+  const matchedMaterials = new Set(products.map((product) => product.material.toLocaleLowerCase()));
   const suggestions: CatalogSuggestion[] = [];
   const seen = new Set<string>();
   const add = (type: CatalogSuggestion["type"], value: string | undefined) => {
@@ -36,19 +37,22 @@ function getCatalogSuggestions(
   };
   visitCategories(categories);
   for (const material of materials) {
-    if (material.toLocaleLowerCase().includes(needle)) add("材质", material);
+    const normalizedMaterial = material.toLocaleLowerCase();
+    if (matchedMaterials.has(normalizedMaterial) && normalizedMaterial.includes(needle)) {
+      add("材质", material);
+    }
   }
   for (const product of products) {
-    if (product.sku.toLocaleLowerCase().includes(needle)) add("货号", product.sku);
-    if (product.name?.toLocaleLowerCase().includes(needle)) {
-      add("作品", product.name);
-    }
+    if (product.sku.toLocaleLowerCase().includes(needle)) add("款号", product.sku);
+    // 作品已经由服务端按当前词义和筛选命中，直接采用权威结果。
+    add("作品", product.name);
   }
   return suggestions.slice(0, 8);
 }
 
 type CatalogSearchProps = {
   query: string;
+  resolvedQuery: string | null;
   products: CatalogProduct[];
   categories: RealCategory[];
   materials: string[];
@@ -57,6 +61,7 @@ type CatalogSearchProps = {
 
 export default function CatalogSearch({
   query,
+  resolvedQuery,
   products,
   categories,
   materials,
@@ -74,8 +79,10 @@ export default function CatalogSearch({
   const [isComposing, setIsComposing] = useState(false);
   const { history, addToHistory, removeOne, clearAll } = useSearchHistory();
   const suggestions = useMemo(
-    () => getCatalogSuggestions(draft, products, categories, materials),
-    [categories, draft, materials, products],
+    () => !isComposing && resolvedQuery !== null && draft.trim() === resolvedQuery.trim()
+      ? getCatalogSuggestions(draft, products, categories, materials)
+      : [],
+    [categories, draft, isComposing, materials, products, resolvedQuery],
   );
 
   useEffect(() => setActiveIndex(-1), [draft, suggestions]);
@@ -172,11 +179,12 @@ export default function CatalogSearch({
           role="search"
           onSubmit={(event) => {
             event.preventDefault();
+            if (isComposing) return;
             submit(draft);
           }}
         >
           <label className="sr-only" htmlFor="catalog-search-input">
-            关键词或货号
+            关键词或款号
           </label>
           <input
             ref={inputRef}
@@ -199,6 +207,7 @@ export default function CatalogSearch({
               if (!value.trim()) publishSearch("");
             }}
             onKeyDown={(event) => {
+              if (isComposing || event.nativeEvent.isComposing) return;
               if (event.key === "ArrowDown" && showSuggestions) {
                 event.preventDefault();
                 moveActiveSuggestion(1);
@@ -210,7 +219,8 @@ export default function CatalogSearch({
                 submit(suggestions[activeIndex].value);
               }
             }}
-            placeholder="搜索作品名称或编号"
+            placeholder="搜索名称、款号或款式"
+            maxLength={100}
             autoComplete="off"
             role="combobox"
             aria-autocomplete="list"

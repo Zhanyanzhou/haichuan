@@ -29,7 +29,6 @@ export function TemplateTrialPreviewControls({ definition, initialNodeId }: {
 }) {
   const previewMode = useTemplateEditorSession((state) => state.previewMode);
   const [selectedNodeId, setSelectedNodeId] = useState(initialNodeId ?? "");
-  const [expanded, setExpanded] = useState(Boolean(initialNodeId));
   const controlsRef = useRef<HTMLDivElement>(null);
   const nodes = Object.values(definition.nodes).filter((node) => node.slotId
     && SUPPORTED_TRIAL_SLOT_TYPES.has(definition.slots[node.slotId]?.type));
@@ -37,7 +36,6 @@ export function TemplateTrialPreviewControls({ definition, initialNodeId }: {
   useEffect(() => {
     if (!initialNodeId) return;
     setSelectedNodeId(initialNodeId);
-    setExpanded(true);
     let second = 0;
     const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => {
       controlsRef.current?.querySelector<HTMLElement>("[data-template-trial-content] input:not([type=file]):not([type=hidden]),[data-template-trial-content] textarea,[data-template-trial-content] button")?.focus();
@@ -45,8 +43,8 @@ export function TemplateTrialPreviewControls({ definition, initialNodeId }: {
     return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); };
   }, [initialNodeId]);
   if (!previewMode || !selected) return null;
-  return <details className="template-editor__preview-trial" open={expanded} onToggle={(event) => setExpanded(event.currentTarget.open)}>
-    <summary>自定义试排内容</summary>
+  return <section className="template-editor__preview-trial" aria-label="自定义试排内容">
+    <h3>自定义试排内容</h3>
     <div ref={controlsRef}>
       <p>填写后自动切到基础内容场景查看试排效果。</p>
       <label>试排对象<select aria-label="试排对象" value={selected.nodeId} onChange={(event) => setSelectedNodeId(event.target.value)}>
@@ -54,7 +52,7 @@ export function TemplateTrialPreviewControls({ definition, initialNodeId }: {
       </select></label>
       <TemplateTrialContentControls key={selected.nodeId} definition={definition} nodeId={selected.nodeId} />
     </div>
-  </details>;
+  </section>;
 }
 
 type TrialImageValue = { src: string; alt: string };

@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Modal } from "antd";
 import {
   categoryApi,
   type CategoryReferenceResult,
 } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import RouteLoading from "@/components/common/RouteLoading";
+import { singleReferencePickerModalProps } from "./referencePickerModal";
+import { createCatalogCategoryUrl } from "../utils/linkTarget";
 
 interface CategoryNode {
   id: number;
@@ -23,6 +26,7 @@ interface CategoryReferencesFieldProps {
   minItems: number;
   maxItems: number;
   readOnly?: boolean;
+  singlePicker?: { open: boolean; onClose: () => void };
 }
 
 const REASON_LABEL: Record<CategoryReferenceResult["reason"] | "FORBIDDEN" | "RESOLVE_FAILED", string> = {
@@ -54,6 +58,7 @@ export default function CategoryReferencesField({
   minItems,
   maxItems,
   readOnly,
+  singlePicker,
 }: CategoryReferencesFieldProps) {
   const slugs = useMemo(
     () => Array.isArray(value) ? [...new Set(value.map(String).filter(Boolean))] : [],
@@ -61,6 +66,7 @@ export default function CategoryReferencesField({
   );
   const [nodes, setNodes] = useState<Array<CategoryNode & { depth: number }>>([]);
   const [query, setQuery] = useState("");
+  const [draftSlug, setDraftSlug] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<"FORBIDDEN" | "LOAD_FAILED" | null>(null);
@@ -71,6 +77,17 @@ export default function CategoryReferencesField({
   const [selectedRevision, setSelectedRevision] = useState(0);
   const listRequestVersion = useRef(0);
   const selectedRequestVersion = useRef(0);
+  const pickerSearchRef = useRef<HTMLInputElement>(null);
+  const controlledPickerOpen = singlePicker?.open;
+  const canBrowse = controlledPickerOpen ?? true;
+  const currentSlug = slugs[0] ?? "";
+
+  useEffect(() => {
+    if (!controlledPickerOpen) return;
+    setDraftSlug(currentSlug);
+    setQuery("");
+    setDebouncedQuery("");
+  }, [controlledPickerOpen, currentSlug]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedQuery(query.trim().toLowerCase()), 260);
@@ -78,6 +95,7 @@ export default function CategoryReferencesField({
   }, [query]);
 
   useEffect(() => {
+    if (!canBrowse) return;
     const version = ++listRequestVersion.current;
     const controller = new AbortController();
     setLoading(true);
@@ -98,7 +116,7 @@ export default function CategoryReferencesField({
         if (version === listRequestVersion.current && !controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [listRevision]);
+  }, [listRevision, canBrowse]);
 
   useEffect(() => {
     if (slugs.length === 0) {
@@ -144,20 +162,16 @@ export default function CategoryReferencesField({
     onChange(next);
   };
 
-  return (
-    <div className="homepage-editor__product-picker" aria-label="选择真实商品分类">
-      <div className="homepage-editor__product-picker-method">
-        <span aria-hidden="true" />
-        <div><strong>从真实分类树选择</strong><small>页面只保存 Category.slug；名称、封面和链接从分类系统读取。</small></div>
-      </div>
+  const pickerResults = (
+    <>
       <div className="homepage-editor__product-picker-search">
-        <input value={query} disabled={readOnly} aria-label="搜索分类" placeholder="搜索分类名称或 slug" onChange={(event) => setQuery(event.target.value)} />
+        <input ref={pickerSearchRef} value={query} disabled={readOnly} aria-label="搜索分类" placeholder={singlePicker ? "搜索分类名称" : "搜索分类名称或 slug"} onChange={(event) => setQuery(event.target.value)} />
       </div>
       <div className="homepage-editor__product-picker-results" aria-live="polite" aria-busy={loading}>
         {loading ? <RouteLoading scope="inline" label="正在加载分类" />
           : error ? <div className="homepage-editor__product-picker-note is-error">{error === "FORBIDDEN" ? "当前账号无权浏览分类，请联系管理员" : "分类加载失败，原有引用未改变"}<button type="button" onClick={() => setListRevision((value) => value + 1)}>重试加载</button></div>
             : filtered.length ? filtered.map((node) => {
-                const selected = slugs.includes(node.slug);
+                const selected = singlePicker ? draftSlug === node.slug : slugs.includes(node.slug);
                 const unavailable = Boolean(node.deletedAt) || node.isActive === false;
                 const stateLabel = node.deletedAt
                   ? "已删除"
@@ -168,13 +182,94 @@ export default function CategoryReferencesField({
                       : !node.coverImage
                         ? "缺少封面"
                         : "可发布";
-                return <button key={node.slug} type="button" aria-label={`${selected ? "已选择" : "选择"}分类 ${node.name}`} disabled={readOnly || selected || slugs.length >= maxItems || Boolean(unavailable)} className="homepage-editor__product-picker-row" onClick={() => onChange([...slugs, node.slug])}>
+                return <button
+                  key={node.slug}
+                  type="button"
+                  aria-label={`${selected ? "已选择" : "选择"}分类 ${node.name}`}
+                  aria-pressed={singlePicker ? selected : undefined}
+                  disabled={readOnly || (!singlePicker && (selected || slugs.length >= maxItems)) || unavailable}
+                  className="homepage-editor__product-picker-row"
+                  onClick={() => {
+                    if (singlePicker) setDraftSlug(node.slug);
+                    else onChange([...slugs, node.slug]);
+                  }}
+                >
                   {node.coverImage ? <img src={node.coverImage} alt="" loading="lazy" /> : <span aria-hidden="true" />}
-                  <span style={{ paddingInlineStart: node.depth * 10 }}><strong>{node.name}</strong><small>{node.slug} · {stateLabel}</small></span>
+                  <span style={{ paddingInlineStart: node.depth * 10 }}>
+                    <strong>{node.name}</strong>
+                    {!singlePicker ? <small>{node.slug} · {stateLabel}</small>
+                      : stateLabel !== "可发布" ? <small>{stateLabel}</small> : null}
+                  </span>
                   <em>{selected ? "已选" : unavailable ? "不可用" : "选择"}</em>
                 </button>;
               }) : <div className="homepage-editor__product-picker-note">没有符合条件的分类</div>}
       </div>
+    </>
+  );
+
+  if (singlePicker) {
+    const resolved = selectedBySlug.get(currentSlug);
+    const draftNode = bySlug.get(draftSlug);
+    const canConfirm = draftNode && !draftNode.deletedAt && draftNode.isActive !== false && !loading && !error;
+    return (
+      <>
+        {currentSlug ? (
+          <div className="homepage-editor__product-picker-note" aria-live="polite">
+            <span>
+              {resolved?.name || bySlug.get(currentSlug)?.name || "已选分类"}
+              {!selectedError && !selectedLoading && resolved && resolved.reason !== "AVAILABLE"
+                ? ` · ${REASON_LABEL[resolved.reason]}`
+                : null}
+            </span>
+            {selectedError ? (
+              <button type="button" onClick={() => setSelectedRevision((value) => value + 1)}>重试解析分类</button>
+            ) : null}
+            {!selectedError && !selectedLoading && resolved?.reason === "AVAILABLE" ? (
+              <a
+                className="homepage-editor__linked-target-detail"
+                href={createCatalogCategoryUrl(currentSlug)}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="预览分类结果（新标签页）"
+              >
+                预览分类结果
+              </a>
+            ) : null}
+          </div>
+        ) : null}
+        <Modal
+          {...singleReferencePickerModalProps}
+          title="选择分类"
+          open={singlePicker.open}
+          okText="确认选择"
+          cancelText="取消"
+          okButtonProps={{ disabled: readOnly || !canConfirm, size: "large" }}
+          afterOpenChange={(open) => {
+            if (open) pickerSearchRef.current?.focus();
+          }}
+          onCancel={singlePicker.onClose}
+          onOk={() => {
+            if (readOnly || !canConfirm) return;
+            if (draftSlug !== currentSlug) onChange([draftSlug]);
+            singlePicker.onClose();
+          }}
+        >
+          <div className="homepage-editor__product-picker-dialog">
+            {pickerResults}
+            <p role="status">{draftNode ? `已选：${draftNode.name}` : "请选择一个分类。"}</p>
+          </div>
+        </Modal>
+      </>
+    );
+  }
+
+  return (
+    <div className="homepage-editor__product-picker" aria-label="选择真实商品分类">
+      <div className="homepage-editor__product-picker-method">
+        <span aria-hidden="true" />
+        <div><strong>从真实分类树选择</strong><small>页面只保存 Category.slug；名称、封面和链接从分类系统读取。</small></div>
+      </div>
+      {pickerResults}
       <div className="homepage-editor__product-picker-selected">
         <div className="homepage-editor__product-picker-title">已选分类 · 顺序即公开顺序<span>{slugs.length}/{maxItems} 个</span></div>
         {selectedLoading ? <div className="homepage-editor__product-picker-note">正在刷新已选分类状态，当前结果暂时保留</div> : null}

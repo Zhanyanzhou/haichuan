@@ -33,6 +33,21 @@ export function hasExplicitMobileTemplateComposition(definition: TemplateDefinit
     || (Object.prototype.hasOwnProperty.call(mobile, "wrap") && mobile.wrap === "wrap");
 }
 
+export function getWorkGridImageSlotIds(definition: TemplateDefinitionV2): Set<string> {
+  const slotIds = new Set<string>();
+  const role = definition.metadata.sectionRole ?? definition.templateRecipe?.sectionRole;
+  if (role !== "creation-grid") return slotIds;
+  for (const node of Object.values(definition.nodes)) {
+    if (node.type !== "Grid") continue;
+    const images = node.childIds.flatMap((childId) => {
+      const slotId = definition.nodes[childId]?.slotId;
+      return slotId && definition.slots[slotId]?.type === "image" ? [slotId] : [];
+    });
+    if (images.length >= 3 && images.length <= 6) images.forEach((slotId) => slotIds.add(slotId));
+  }
+  return slotIds;
+}
+
 /** 作品网格里正好四张图：手机两列两行。不因为槽位改了名字就改成单列。 */
 export function isFixedFourWorkGrid(definition: TemplateDefinitionV2, nodeId: string): boolean {
   const role = definition.metadata.sectionRole ?? definition.templateRecipe?.sectionRole;

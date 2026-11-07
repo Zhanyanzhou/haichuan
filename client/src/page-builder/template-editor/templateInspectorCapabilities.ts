@@ -101,7 +101,7 @@ export function isTemplateInspectorInternalIdentityField(field: string) {
  */
 export const TEMPLATE_INSPECTOR_CAPABILITIES: readonly TemplateInspectorCapability[] = [
   { field: "schemaVersion", label: "Schema 版本", group: "definition", access: "read-only", scopes: ROOT_SCOPE, reason: "由合同版本固定，不能在 Inspector 中改写。" },
-  { field: "templateId", label: "模板标识", group: "definition", access: "read-only", scopes: ROOT_SCOPE, reason: "模板身份只由“新建模板”流程生成。" },
+  { field: "templateId", label: "模板标识", group: "definition", access: "read-only", scopes: ROOT_SCOPE, reason: "模板标识由系统分配。" },
   { field: "name", label: "模板名称", group: "definition", access: "editable", scopes: ROOT_SCOPE },
   { field: "description", label: "模板说明", group: "definition", access: "editable", scopes: ROOT_SCOPE },
   { field: "metadata.category", label: "分类", group: "definition", access: "editable", scopes: ROOT_SCOPE },
@@ -321,7 +321,7 @@ export interface TemplateInspectorIssueTarget {
   device?: DynamicTemplateDevice;
   task: "design" | "page-scope";
   view: "context" | "page-fields";
-  destination: "inspector-field" | "structure-region" | "structure-slot" | "unavailable";
+  destination: "inspector-field" | "unavailable";
   access: TemplateInspectorFieldAccess;
   reason?: string;
 }
@@ -404,28 +404,16 @@ export function resolveTemplateInspectorIssueTarget(
   definition: TemplateDefinitionV2,
   issue: DynamicTemplateValidationIssue,
 ): TemplateInspectorIssueTarget {
-  if (issue.code === "PUBLISH_REQUIRES_REGION") {
+  if (issue.code === "PUBLISH_REQUIRES_REGION" || issue.code === "PUBLISH_REQUIRES_SLOT") {
     return {
       objectId: definition.rootNodeId,
       group: "definition",
-      field: "structure.create.region",
+      field: "structure",
       task: "design",
       view: "context",
-      destination: "structure-region",
+      destination: "unavailable",
       access: "managed",
-      reason: "需要在结构工具中由用户创建区域并决定后续层级。",
-    };
-  }
-  if (issue.code === "PUBLISH_REQUIRES_SLOT") {
-    return {
-      objectId: definition.rootNodeId,
-      group: "definition",
-      field: "structure.create.slot",
-      task: "design",
-      view: "context",
-      destination: "structure-slot",
-      access: "managed",
-      reason: "需要在结构工具中由用户选择父节点和内容槽位类型。",
+      reason: "请撤销本次编辑中的结构删除，或从目录打开已有完整结构的模板。",
     };
   }
   const nodeIdBySlotId = new Map(Object.values(definition.nodes).flatMap((node) => (

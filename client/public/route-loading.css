@@ -9,7 +9,7 @@
   color: #5f6568;
 }
 
-/* 后台内容区加载：铺满主工作区，而不是整个浏览器窗口。侧栏和顶栏留在外面，H 才落在看得见的画面中心。 */
+/* 后台内容区的遮罩保留顶栏和侧栏。 */
 .site-route-loading--admin-content {
   position: absolute;
   inset: 0;
@@ -32,7 +32,7 @@
   background: transparent;
 }
 
-/* 店铺装修工作区：H 落在顶栏和侧栏之间。侧栏收起时宽度变量为 0。 */
+/* 店铺装修遮罩覆盖工作区。侧栏收起时宽度变量为 0。 */
 .admin-main--workspace .site-route-loading--workspace,
 .admin-shell-v7--workspace .site-route-loading--workspace {
   position: fixed;
@@ -59,6 +59,11 @@
   height: auto;
   min-height: 0;
   background: var(--adm-content-bg, #ffffff);
+}
+
+.site-route-loading--region.site-route-loading--nonblocking {
+  background: transparent;
+  pointer-events: none;
 }
 
 .site-route-loading--public.site-route-loading--region:not([data-home-loading-status]) {
@@ -137,6 +142,12 @@
   white-space: normal;
 }
 
+/* 页面刷新经过静态壳、路由和数据加载时，标识与文案共用视口坐标。 */
+.site-route-loading:not(.site-route-loading--panel, .site-route-loading--inline)
+  > :is(.site-route-loading__indicator, .site-route-loading__text) {
+  position: fixed;
+}
+
 .site-route-loading--inline .site-route-loading__indicator {
   width: 40px;
   height: 40px;
@@ -153,7 +164,6 @@
 }
 
 .ant-spin-dot.hc-spin-mark {
-  position: relative !important;
   display: inline-grid !important;
   width: 16px !important;
   height: 16px !important;
@@ -162,6 +172,11 @@
   background: none !important;
   animation: none !important;
   transform: none !important;
+}
+
+/* 嵌套 Spin 使用 Ant Design 的绝对定位，按实际标识尺寸抵消 50% 的定位。 */
+.ant-spin-nested-loading .ant-spin > .ant-spin-dot.hc-spin-mark {
+  margin: -8px;
 }
 
 .hc-spin-mark__ring {

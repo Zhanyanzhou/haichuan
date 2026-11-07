@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Alert, App as AntdApp, Button, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag } from 'antd';
 import { CheckOutlined, CloseOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
+import { AdminLoadingState } from '@/components/common/AdminDataStates';
 import { afterSalesApi, orderApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
 import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
@@ -206,7 +207,7 @@ export default function AfterSalesManage() {
 
   const [list, setList] = useState<AfterSalesListItem[]>([]);
   const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [listLoading, setListLoading] = useState<'initial' | 'refreshing' | 'idle'>('initial');
   const [loadError, setLoadError] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -227,7 +228,7 @@ export default function AfterSalesManage() {
   const [createForm] = Form.useForm();
   const load = useCallback(async () => {
     const requestId = ++listRequestIdRef.current;
-    setLoading(true);
+    setListLoading((current) => current === 'initial' ? current : 'refreshing');
     setLoadError(false);
     try {
       const res = await afterSalesApi.getList({
@@ -245,7 +246,7 @@ export default function AfterSalesManage() {
       setLoadError(true);
       setList([]);
     } finally {
-      if (requestId === listRequestIdRef.current) setLoading(false);
+      if (requestId === listRequestIdRef.current) setListLoading('idle');
     }
   }, [page, pageSize, statusFilter, typeFilter, keyword]);
 
@@ -656,7 +657,9 @@ export default function AfterSalesManage() {
         />
       </div>
 
-      {loadError ? (
+      {listLoading === 'initial' ? (
+        <AdminLoadingState subject="售后数据" allowInteraction />
+      ) : loadError ? (
         <div className="text-center py-16">
           <p className="text-brand-muted mb-4">售后数据暂时无法加载</p>
           <Button type="primary" onClick={() => void load()}>重新加载</Button>
@@ -664,7 +667,7 @@ export default function AfterSalesManage() {
       ) : (
         <Table
           rowKey="id"
-          loading={loading}
+          loading={listLoading === 'refreshing'}
           dataSource={list}
           size="middle"
           pagination={{

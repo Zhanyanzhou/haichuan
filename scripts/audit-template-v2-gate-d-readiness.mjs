@@ -164,9 +164,8 @@ if (templateToolboxImports.length > 0) {
 const dynamicToolboxImports = clientFiles.filter((file) => (
   /from\s+["'][^"']*\/DynamicTemplateToolbox["']/.test(file.source)
 ));
-if (dynamicToolboxImports.length !== 1
-  || dynamicToolboxImports[0]?.path !== "client/src/page-builder/template-editor/DynamicTemplateStructurePanel.tsx") {
-  issues.push(`DynamicTemplateToolbox 活动引用不符合预期：${dynamicToolboxImports.map((file) => file.path).join(", ")}`);
+if (dynamicToolboxImports.length !== 0) {
+  issues.push(`D.54 已退役的 DynamicTemplateToolbox 仍被引用：${dynamicToolboxImports.map((file) => file.path).join(", ")}`);
 }
 
 if (issues.length > 0) {
@@ -186,7 +185,7 @@ if (issues.length > 0) {
     },
     retainedCompatibility: [
       "legacy page origin hydration and exact historical rendering",
-      "DynamicTemplateToolbox node palette",
+      "D.54 retired template add-region, add-slot, and launch-master start entries",
       "historical activation migration and ledger schema for database compatibility",
     ],
     remainingGates: [

@@ -3,6 +3,9 @@ import { resolveTemplateNodeRules, type TemplateBreakpoint } from "./responsive"
 
 /** Renderer 与设计控件共用的稳定行为默认；不把浏览器计算值伪装成模板值。 */
 export const TEMPLATE_MEDIA_DEFAULTS = { objectFit: "cover", objectPosition: "50% 50%" } as const;
+export function defaultTemplateImageFit(semanticRole?: string, workImage = false) {
+  return semanticRole === "logo" || workImage ? "contain" : TEMPLATE_MEDIA_DEFAULTS.objectFit;
+}
 export const TEMPLATE_TEXT_DEFAULTS = { overflow: "wrap" } as const;
 export const TEMPLATE_DESIGN_RANGES: Readonly<Record<string, readonly [number, number]>> = {
   columns: [1, 12], gap: [0, 10000], padding: [0, 10000], fontSize: [1, 10000],

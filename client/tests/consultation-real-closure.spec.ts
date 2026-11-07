@@ -106,7 +106,7 @@ async function submitProductConsultation(page: Page, message: string) {
     && url.searchParams.get("type") === "product"
     && url.searchParams.get("productRef") === realEnvironment.productCode
   ));
-  await expect(page.getByText(`货号：${realEnvironment.productCode}`, { exact: true })).toBeVisible();
+  await expect(page.getByText(`款号：${realEnvironment.productCode}`, { exact: true })).toBeVisible();
   await expect(page.getByText(productName, { exact: true }).first()).toBeVisible();
   await expect(page.locator("#cf-phone")).toHaveValue(realEnvironment.customerPhone);
   await expect(page.locator("#cf-type")).toHaveValue("选款建议");

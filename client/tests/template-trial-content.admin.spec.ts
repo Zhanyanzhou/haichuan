@@ -279,22 +279,25 @@ async function openBlankTemplate(page: Page) {
 }
 
 async function addTextualTrialSlots(page: Page, textGroupId: string) {
-  const tree = page.getByRole("tree", { name: "模板区域与槽位" });
-  await tree.locator(`[role="treeitem"][data-selection-target-id="${textGroupId}"]`).click();
-  await page.getByRole("complementary", { name: "模板结构", exact: true })
-    .getByRole("button", { name: "添加槽位", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "添加槽位", exact: true });
-  await dialog.getByRole("button", { name: "添加按钮槽位", exact: true }).click();
-  await dialog.getByRole("button", { name: "添加富文本槽位", exact: true }).click();
-  await dialog.getByRole("button", { name: "添加链接槽位", exact: true }).click();
-  await page.keyboard.press("Escape");
+  await page.evaluate(async (targetId) => {
+    const operations = "/src/page-builder/template-definition/operations.ts";
+    const session = "/src/page-builder/template-editor/templateEditorSession.ts";
+    const [{ addDynamicTemplateNode }, { useTemplateEditorSession }] = await Promise.all([
+      import(/* @vite-ignore */ operations), import(/* @vite-ignore */ session),
+    ]);
+    const state = useTemplateEditorSession.getState();
+    let definition = state.draft.definition;
+    for (const type of ["ButtonSlot", "RichTextSlot", "LinkSlot"]) {
+      definition = addDynamicTemplateNode(definition, targetId, type).definition;
+    }
+    state.setDynamicDefinition(definition);
+  }, textGroupId);
 }
 
 async function selectNode(page: Page, nodeId: string) {
   const enterPreview = page.getByRole("button", { name: "预览模板", exact: true });
   if (await enterPreview.isVisible()) await enterPreview.click();
   const objects = page.getByRole("combobox", { name: "试排对象", exact: true });
-  if (!await objects.isVisible()) await page.getByText("自定义试排内容", { exact: true }).click();
   await objects.selectOption(nodeId);
   await expect(page.getByRole("region", { name: "试排内容（仅本次编辑）" })).toBeVisible();
 }
@@ -594,7 +597,10 @@ test("模板试排内容只存在当前会话，并驱动画布与压力预览�
 
   await selectEditorNode(page, headingNode.nodeId);
   const beforeStyle = await readEditorFacts(page);
-  await page.getByRole("combobox", { name: "文字对齐", exact: true }).selectOption("center");
+  const centered = page.getByRole("group", { name: "文字对齐", exact: true })
+    .getByRole("button", { name: "居中", exact: true });
+  await centered.click();
+  await expect(centered).toHaveAttribute("aria-pressed", "true");
   expect((await readEditorFacts(page)).historyPast).toHaveLength(beforeStyle.historyPast.length + 1);
   await page.getByRole("button", { name: "撤销", exact: true }).click();
   expect((await readEditorFacts(page)).definition).toEqual(beforeStyle.definition);

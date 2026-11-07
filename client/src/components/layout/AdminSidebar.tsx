@@ -1,8 +1,12 @@
+import { useRef } from "react";
+import { useHref } from "react-router-dom";
 import { Avatar, Dropdown } from "antd";
 import {
   AccountBookOutlined,
   BarChartOutlined,
   CustomerServiceOutlined,
+  DownOutlined,
+  ExportOutlined,
   HomeOutlined,
   InsuranceOutlined,
   LogoutOutlined,
@@ -170,12 +174,11 @@ export function AdminSidebar({
   pathname,
   search,
   role,
-  userDisplayName,
+  account,
   onDomainClick,
   onToggleDomain,
   onItemClick,
   onTogglePin,
-  onLogout,
 }: {
   id?: string;
   collapsed?: boolean;
@@ -186,13 +189,20 @@ export function AdminSidebar({
   pathname: string;
   search: string;
   role?: string;
-  userDisplayName: string;
+  account?: {
+    name: string;
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+    onLogout: () => void;
+  };
   onDomainClick: (domain: NavDomain) => void;
   onToggleDomain: (key: string) => void;
   onItemClick: (route: string) => void;
   onTogglePin: (route: string) => void;
-  onLogout: () => void;
 }) {
+  const siteHref = useHref("/");
+  const accountButtonRef = useRef<HTMLButtonElement>(null);
+
   return (
     <aside
       id={id}
@@ -242,37 +252,59 @@ export function AdminSidebar({
             })}
           </nav>
 
-          <div className="admin-sidebar__footer">
-            <Dropdown
-              menu={{
-                items: [
-                  {
-                    key: "logout",
-                    icon: <LogoutOutlined />,
-                    label: "退出登录",
-                    danger: true,
+          {account && (
+            <div className="admin-sidebar__footer">
+              <Dropdown
+                autoFocus
+                open={account.open}
+                onOpenChange={account.onOpenChange}
+                trigger={["click"]}
+                placement="topLeft"
+                menu={{
+                  items: [
+                    {
+                      key: "site",
+                      icon: <ExportOutlined aria-hidden="true" />,
+                      label: <span>查看网站<span className="sr-only">，在新标签页打开</span></span>,
+                    },
+                    { type: "divider" },
+                    {
+                      key: "logout",
+                      icon: <LogoutOutlined aria-hidden="true" />,
+                      label: "退出登录",
+                      danger: true,
+                    },
+                  ],
+                  onClick: ({ key }) => {
+                    account.onOpenChange(false);
+                    if (key === "site") {
+                      accountButtonRef.current?.focus();
+                      window.open(siteHref, "_blank", "noopener,noreferrer");
+                    } else if (key === "logout") {
+                      account.onLogout();
+                    }
                   },
-                ],
-                onClick: ({ key }) => {
-                  if (key === "logout") onLogout();
-                },
-              }}
-              placement="topRight"
-            >
-              <div className="admin-sidebar__user">
-                <Avatar
-                  size={28}
-                  icon={<UserOutlined />}
-                  style={{
-                    backgroundColor: "var(--adm-gold-soft)",
-                    color: "var(--adm-action)",
-                    flexShrink: 0,
-                  }}
-                />
-                <span className="admin-sidebar__user-name">{userDisplayName}</span>
-              </div>
-            </Dropdown>
-          </div>
+                }}
+              >
+                <button
+                  ref={accountButtonRef}
+                  type="button"
+                  className="admin-sidebar__user"
+                  aria-label={`账户菜单，当前用户${account.name}`}
+                  aria-haspopup="menu"
+                  aria-expanded={account.open}
+                >
+                  <Avatar
+                    className="admin-sidebar__user-avatar"
+                    size={28}
+                    icon={<UserOutlined aria-hidden="true" />}
+                  />
+                  <span className="admin-sidebar__user-name">{account.name}</span>
+                  <DownOutlined className="admin-sidebar__user-chevron" aria-hidden="true" />
+                </button>
+              </Dropdown>
+            </div>
+          )}
         </>
       ) : null}
     </aside>

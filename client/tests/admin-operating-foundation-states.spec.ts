@@ -24,6 +24,113 @@ async function fulfillJson(route: Route, data: unknown, status = 200) {
 }
 
 test.describe("后台经营底座第一批状态", () => {
+  test("仪表盘两个区块同时等待时只显示各自的状态文字", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    let releaseStatistics!: () => void;
+    const pendingStatistics = new Promise<void>((resolve) => { releaseStatistics = resolve; });
+    await page.route("**/api/**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === "/api/auth/profile") return route.fallback();
+      if (path === "/api/statistics/dashboard" || path === "/api/statistics/trend") {
+        await pendingStatistics;
+      }
+      return fulfillJson(route, path === "/api/statistics/trend" ? [] : {});
+    });
+    await authenticateAdmin(page);
+    try {
+      await page.goto("/admin/dashboard", { waitUntil: "domcontentloaded" });
+      for (const label of ["正在加载趋势数据…", "正在加载提醒…"]) {
+        const status = page.getByRole("status").filter({ hasText: label });
+        await expect(status).toBeVisible();
+        await expect(status.locator(".site-route-loading__indicator")).toHaveCount(0);
+      }
+    } finally {
+      releaseStatistics();
+    }
+    await expect(page.getByText("正在加载趋势数据…", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("正在加载提醒…", { exact: true })).toHaveCount(0);
+  });
+
+  const listEntries = [
+    ["/admin/attributes", "/api/attributes/admin", "属性", []],
+    ["/admin/reviews", "/api/reviews", "评价列表", { list: [], total: 0 }],
+    ["/admin/leads", "/api/leads", "客户线索", { list: [], total: 0 }],
+    ["/admin/marketing", "/api/marketing/promotions", "促销活动", []],
+    ["/admin/marketing?tab=coupons", "/api/marketing/coupons", "优惠券", []],
+    ["/admin/trade/fulfillment", "/api/fulfillments", "履约数据", { list: [], total: 0 }],
+    ["/admin/trade/after-sales", "/api/after-sales-cases", "售后数据", { list: [], total: 0 }],
+    ["/admin/trade/payments", "/api/payments", "付款数据", { list: [], total: 0 }],
+    ["/admin/trade/refunds", "/api/refunds", "退款数据", { list: [], total: 0 }],
+    ["/admin/trade/anomalies", "/api/orders/anomalies", "异常订单", { list: [], total: 0 }],
+  ] as const;
+
+  for (const [path, endpoint, subject, data] of listEntries) {
+    test(`${subject}首次加载只显示一个居中的页面标识`, async ({ page }) => {
+      const viewport = path === "/admin/attributes"
+        ? { width: 390, height: 844 }
+        : { width: 1440, height: 900 };
+      await page.setViewportSize(viewport);
+      let releaseRead!: () => void;
+      const delayedRead = new Promise<void>((resolve) => { releaseRead = resolve; });
+      await page.route("**/api/**", async (route) => {
+        const url = new URL(route.request().url());
+        if (url.pathname === "/api/auth/profile") return route.fallback();
+        if (url.pathname === endpoint) {
+          await delayedRead;
+          return fulfillJson(route, data);
+        }
+        return fulfillJson(route, { list: [], total: 0 });
+      });
+      await authenticateAdmin(page);
+
+      const loading = page.getByRole("status", { name: `正在加载${subject}…`, exact: true });
+      try {
+        await page.goto(path, { waitUntil: "domcontentloaded" });
+        await expect(loading).toBeVisible();
+        await expect(page.locator(".site-route-loading--region")).toHaveCount(1);
+        await expect(page.locator(".ant-spin-spinning .hc-spin-mark")).toHaveCount(0);
+        const mark = (await loading.locator(".site-route-loading__indicator").boundingBox())!;
+        expect(mark.x + mark.width / 2).toBeCloseTo(viewport.width / 2, 0);
+        expect(mark.y + mark.height / 2).toBeCloseTo(viewport.height / 2, 0);
+      } finally {
+        releaseRead();
+      }
+      await expect(loading).toHaveCount(0);
+      await expect(page.locator(".ant-table").first()).toBeVisible();
+    });
+  }
+
+  test("付款列表再次刷新时加载标识只在表格内居中", async ({ page }) => {
+    let releaseRefresh!: () => void;
+    const refreshRead = new Promise<void>((resolve) => { releaseRefresh = resolve; });
+    await page.route("**/api/**", (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === "/api/auth/profile") return route.fallback();
+      return fulfillJson(route, { list: [], total: 0 });
+    });
+    await authenticateAdmin(page);
+    await page.goto("/admin/trade/payments");
+    await expect(page.locator(".ant-table").first()).toBeVisible();
+    await page.route("**/api/payments?*", async (route) => {
+      await refreshRead;
+      return fulfillJson(route, { list: [], total: 0 });
+    });
+
+    const overlay = page.locator(".ant-spin-spinning").filter({ has: page.locator(".hc-spin-mark") });
+    try {
+      await page.getByRole("button", { name: /刷新$/ }).click();
+      await expect(overlay).toBeVisible();
+      await expect(page.locator(".site-route-loading--region")).toHaveCount(0);
+      const box = (await overlay.boundingBox())!;
+      const mark = (await overlay.locator(".hc-spin-mark").boundingBox())!;
+      expect(mark.x + mark.width / 2).toBeCloseTo(box.x + box.width / 2, 0);
+      expect(mark.y + mark.height / 2).toBeCloseTo(box.y + box.height / 2, 0);
+    } finally {
+      releaseRefresh();
+    }
+    await expect(overlay).toHaveCount(0);
+  });
+
   test("通知故障台安全重投在丢响应后保留原凭据且不自动再次入队", async ({ page }) => {
     await authenticateAdmin(page);
     let retryCalls = 0;

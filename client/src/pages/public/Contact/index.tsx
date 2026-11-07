@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import RouteLoading from "@/components/common/RouteLoading";
 import { usePublicContactResource } from "@/hooks/usePublicSiteSettings";
 import ContactLanding from "./ContactLanding";
+import { isContactRequestOnly } from "./contactRouteMode";
 
 const ConsultationRequest = lazy(() => import("./ConsultationRequest"));
 
@@ -11,8 +12,7 @@ export type ContactProps = { mode?: "public" | "editor-preview" };
 export default function Contact({ mode = "public" }: ContactProps = {}) {
   const contact = usePublicContactResource();
   const [params] = useSearchParams();
-  const requestOnly = mode !== "editor-preview"
-    && (params.get("view") === "request" || params.get("type") === "privacy");
+  const requestOnly = mode !== "editor-preview" && isContactRequestOnly(params);
   if (requestOnly) {
     return (
       <Suspense fallback={<RouteLoading surface="public" />}>
@@ -23,7 +23,7 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
   return (
     <>
       <ContactLanding mode={mode} contact={contact} />
-      <Suspense fallback={<RouteLoading scope="inline" surface="public" label="正在准备预约咨询…" />}>
+      <Suspense fallback={<p className="public-contact-details__notice" role="status">正在准备预约咨询…</p>}>
         <ConsultationRequest mode={mode} embedded contact={contact} />
       </Suspense>
     </>

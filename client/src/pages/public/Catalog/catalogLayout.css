@@ -1,0 +1,60 @@
+/* 选款页局部版式：作品优先，查找工具按任务层级展开。 */
+.catalog-page .catalog-category-nav {
+  border-top: 0;
+}
+
+.catalog-page .catalog-category-nav__inner {
+  min-height: 64px;
+}
+
+.catalog-page .catalog-category-nav__items {
+  gap: clamp(32px, 4vw, 56px);
+}
+
+.catalog-page .catalog-category-nav__item {
+  font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 16px;
+}
+
+.catalog-page .catalog-category-nav__item > span {
+  bottom: 0;
+}
+
+@media (min-width: 768px) {
+  .catalog-page .catalog-product-card__copy {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 112px;
+  }
+
+  .catalog-page .catalog-product-card__title {
+    width: 100%;
+    flex-shrink: 0;
+  }
+
+  .catalog-page .catalog-product-card__action {
+    margin-top: auto;
+  }
+}
+
+@media (max-width: 767px) {
+  .catalog-page .catalog-category-nav__item {
+    font-size: 15px;
+  }
+
+  .catalog-page .catalog-category-nav__inner {
+    min-height: 60px;
+    padding: 0 20px;
+    display: flex;
+  }
+
+  .catalog-page .catalog-category-nav__items {
+    width: 100%;
+    gap: 24px;
+  }
+
+  .catalog-page .catalog-category-nav__item > span {
+    bottom: 0;
+  }
+}

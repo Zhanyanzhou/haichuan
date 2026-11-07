@@ -52,15 +52,15 @@ test.describe("商品编辑器关键回归", () => {
 
   test("校验提示准确，草稿允许标题未完成", async ({ page }) => {
     await page.getByRole("button", { name: "保存草稿" }).click();
-    await expect(page.getByText("保存草稿至少需要选择类目并填写货号")).toBeVisible();
+    await expect(page.getByText("保存草稿至少需要选择类目并填写款号")).toBeVisible();
     await expect(page.getByText("保存失败，请检查后重试")).toHaveCount(0);
-    await page.getByRole("button", { name: "请输入货号" }).click();
-    await expect(page.getByRole("textbox", { name: "货号" })).toBeFocused();
+    await page.getByRole("button", { name: "请输入款号" }).click();
+    await expect(page.getByRole("textbox", { name: "款号" })).toBeFocused();
     await page.getByRole("button", { name: "请选择珠宝类目" }).click();
     await expect(page.getByRole("combobox", { name: "当前类目" })).toBeFocused();
 
     await page.getByRole("button", { name: "基础信息" }).click();
-    const productCode = page.getByRole("textbox", { name: "货号" });
+    const productCode = page.getByRole("textbox", { name: "款号" });
     await expect(productCode).toBeVisible();
     await productCode.fill(`DRAFT-${Date.now()}`);
     await page.getByRole("combobox", { name: "当前类目" }).click();

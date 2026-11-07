@@ -58,6 +58,7 @@ import { ProductStatus } from "@prisma/client";
 import type { Response } from "express";
 import { requirePublishedPublicContentLocale } from "../../common/content-locale";
 import { BoundedListQueryDto } from "../../common/dto/bounded-list-query.dto";
+import { CheckProductImportCodesDto } from "./dto/check-product-import-codes.dto";
 import type {
   CustomerOrStaffRequest,
   CustomerRequest,
@@ -104,6 +105,18 @@ export class ProductsController {
     @CurrentUser() actor: StaffPrincipal,
   ) {
     return this.productsService.resolveReferences(body, actor);
+  }
+
+  @Post("admin/import-code-conflicts")
+  @ApiBearerAuth()
+  @SkipGenericAudit()
+  @Header("Cache-Control", "no-store")
+  @ApiOperation({ summary: "检查商品导入款号冲突（含回收站）" })
+  checkImportCodeConflicts(
+    @Body() body: CheckProductImportCodesDto,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.productsService.checkImportCodeConflicts(body.codes, actor);
   }
 
   @Get("admin/publication-quality-report")
@@ -350,9 +363,21 @@ export class ProductsController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Delete(":id")
-  @ApiOperation({ summary: "移除回收站商品（已停用：回收站只读，仅支持恢复为草稿）" })
+  @ApiOperation({ summary: "旧商品删除接口（保留拒绝行为）" })
   delete(@Req() request: StaffRequest, @Param("id") id: string) {
     return this.productsService.delete(+id, request.user);
+  }
+
+  @Roles("SUPER_ADMIN")
+  @ApiBearerAuth()
+  @Delete(":id/permanent")
+  @SkipGenericAudit()
+  @ApiOperation({ summary: "永久移除回收站商品，保留关联业务历史" })
+  deletePermanently(
+    @CurrentUser() actor: StaffPrincipal,
+    @Param("id", ParseIntPipe) id: number,
+  ) {
+    return this.productsService.deletePermanently(id, actor);
   }
 
   /* ═══ 产品图片管理 ═══ */

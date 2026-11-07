@@ -193,6 +193,22 @@ test('resolver 对已批准的商品受控文件按私有商品根核对 SHA-256
     const reference = [{ url: `/uploads/${storageKey}` }];
     assert.equal((await service.resolveReferences(reference)).eligible, true);
     assert.equal((await service.resolveReferences([{ url: '/api/upload/public-media/21' }])).eligible, true);
+    const workImage = {
+      url: '/products/public/7/media/29',
+      path: 'content[0].props.contentBySlotId.workA.src',
+      verifiedProductMediaAssetId: 21,
+    };
+    const result = await service.resolveReferences([workImage], { mode: 'ENFORCE' });
+    assert.equal(result.eligible, true);
+    assert.equal(result.items[0]?.url, workImage.url);
+    assert.equal(result.items[0]?.assetId, 21);
+    assert.equal(result.items[0]?.authorizationRevision, 3);
+    assert.equal(result.items[0]?.sourceBytes, content.byteLength);
+    assert.equal((await service.resolveReferences([{ ...workImage, verifiedProductMediaAssetId: null }], {
+      mode: 'ENFORCE',
+    })).eligible, false);
+    asset.authorization.revocationStatus = 'REVOKED';
+    assert.equal((await service.resolveReferences([workImage], { mode: 'ENFORCE' })).eligible, false);
   } finally {
     if (previousProductRoot === undefined) delete process.env.PRODUCT_MEDIA_ROOT;
     else process.env.PRODUCT_MEDIA_ROOT = previousProductRoot;

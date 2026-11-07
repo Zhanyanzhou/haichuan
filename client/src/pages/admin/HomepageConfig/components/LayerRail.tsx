@@ -1,7 +1,7 @@
 /**
  * LayerRail.tsx — 编辑器第二栏的页面结构导航。
  * 2026-08-16 升级：同类型模块自动序号（品牌故事 1/2）；Shift/Ctrl 多选批量删除与移动。
- * 固定业务区不可删除/调整；点选定位、拖拽排序保持原有行为。
+ * 固定业务区不可删除或直接拖动，装修模块可调整到业务区前后。
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { App as AntdApp } from "antd";
@@ -35,6 +35,7 @@ import { getTemplateContractNodeLabel } from "@/page-builder/runtime/contentTemp
 import { useVisualEditorSession } from "@/page-builder/visual-editor/visualEditorSession";
 import WorkspaceTreeRow from "@/page-builder/workspace/WorkspaceTreeRow";
 import {
+  canReorderPageModule,
   commitPageModuleStructureTransaction,
   deletePageModules,
   reorderPageModules,
@@ -177,17 +178,20 @@ export default function LayerRail({
 
   // 画布滚动时，让图层列表自动滚动到当前可见模块（仅滚动，不改选中态）。
   useEffect(() => {
-    if (scrollSpyIndex === null) return;
+    const selector = canvasPreview?.focused
+      ? "[data-layer-preview]"
+      : scrollSpyIndex === null ? null : `[data-layer-index="${scrollSpyIndex}"]`;
+    if (!selector) return;
     const reduceMotion = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
     ).matches;
     layerScrollRef.current
-      ?.querySelector<HTMLElement>(`[data-layer-index="${scrollSpyIndex}"]`)
+      ?.querySelector<HTMLElement>(selector)
       ?.scrollIntoView({
         block: "nearest",
         behavior: reduceMotion ? "auto" : "smooth",
       });
-  }, [scrollSpyIndex]);
+  }, [canvasPreview?.focused, canvasPreview?.revision, scrollSpyIndex]);
 
   const multiActive = multiIndices.length >= 2;
 
@@ -205,7 +209,6 @@ export default function LayerRail({
   const handleLayerClick = (index: number, event: React.MouseEvent) => {
     if (!readOnly && (event.shiftKey || event.ctrlKey || event.metaKey)) {
       event.preventDefault();
-      const locked = Boolean(content[index]?.props?.locked);
       setMultiIndices((prev) => {
         let next: number[];
         if (event.shiftKey && anchorRef.current !== null) {
@@ -215,7 +218,7 @@ export default function LayerRail({
         } else {
           next = prev.includes(index) ? prev.filter((i) => i !== index) : [...prev, index];
         }
-        if (locked) next = next.filter((i) => !content[i]?.props?.locked);
+        next = next.filter((i) => !content[i]?.props?.locked);
         anchorRef.current = index;
         if (next.length === 0) {
           anchorRef.current = null;
@@ -234,17 +237,20 @@ export default function LayerRail({
     selectLayer(index);
   };
 
-  /* 整组上移/下移：保持组内相对顺序，跳过锁定模块与边界 */
+  /* 整组上移/下移：保持组内相对顺序，只更新实际移动的选中项 */
   const batchMove = (direction: -1 | 1) => {
     if (readOnly) return;
     const picked = [...multiIndices].sort((a, b) => (direction === -1 ? a - b : b - a));
+    const selectedIndices = new Set(picked);
     const next = [...content];
+    const anchorId = anchorRef.current === null ? undefined : content[anchorRef.current]?.props.id;
     let moved = false;
     for (const index of picked) {
       const target = index + direction;
-      if (target < 0 || target >= next.length) continue;
-      if (next[index].props?.locked || next[target].props?.locked) continue;
+      if (selectedIndices.has(target) || !canReorderPageModule(next[index], next[target])) continue;
       [next[index], next[target]] = [next[target], next[index]];
+      selectedIndices.delete(index);
+      selectedIndices.add(target);
       moved = true;
     }
     if (moved) {
@@ -252,7 +258,8 @@ export default function LayerRail({
         getPuck,
         (data) => ({ ...data, content: next }),
       );
-      setMultiIndices((prev) => prev.map((i) => i + direction));
+      setMultiIndices([...selectedIndices].sort((a, b) => a - b));
+      if (anchorId) anchorRef.current = next.findIndex((item) => item.props.id === anchorId);
     }
   };
 
@@ -287,12 +294,11 @@ export default function LayerRail({
       to >= content.length
     )
       return;
-    if (content[from]?.props?.locked || content[to]?.props?.locked) {
-      message.info("固定业务区不能调整顺序");
+    if (!reorderPageModules(getPuck, from, to)) {
+      message.info("无法调整锁定模块的顺序");
       return;
     }
     const movedBlockId = content[from]?.props?.id;
-    reorderPageModules(getPuck, from, to);
     focusCanvasBlock(typeof movedBlockId === "string" ? movedBlockId : undefined);
   };
 
@@ -300,22 +306,17 @@ export default function LayerRail({
     if (readOnly) return;
     const target = content[index];
     if (!target || target.props?.locked) return;
-    const nextVisible = target.props?.isVisible === false;
-    dispatch({
-      type: "replace",
-      destinationIndex: index,
-      destinationZone: ROOT_ZONE,
-      data: {
-        ...target,
-        props: {
-          ...target.props,
-          id: String(target.props.id),
-          isVisible: nextVisible,
-        },
-      },
-      recordHistory: true,
+    let nextVisible = false;
+    const changed = commitPageModuleStructureTransaction(getPuck, (data) => {
+      const currentIndex = data.content.findIndex((item) => item.props.id === target.props.id);
+      const current = data.content[currentIndex];
+      if (!current || current.props.locked) return data;
+      nextVisible = current.props.isVisible === false;
+      const nextContent = [...data.content];
+      nextContent[currentIndex] = { ...current, props: { ...current.props, isVisible: nextVisible } };
+      return { ...data, content: nextContent };
     });
-    message.success(`${nextVisible ? "已显示" : "已隐藏"}「${numberedNames[index]}」`);
+    if (changed) message.success(`${nextVisible ? "已显示" : "已隐藏"}「${numberedNames[index]}」`);
   };
 
   const deleteLayer = (index: number) => {
@@ -439,58 +440,6 @@ export default function LayerRail({
             </button>
           </div>
         )}
-        {canvasPreview ? (
-          <WorkspaceTreeRow
-            rowClassName="homepage-editor__layer-item is-preview"
-            selected={canvasPreview.focused}
-            hidden={canvasPreview.hidden}
-            rowProps={{ "data-layer-preview": "true" }}
-            buttonClassName="homepage-editor__layer-select"
-            buttonProps={{
-              onClick: () => {
-                setPageCanvasTemplatePreviewFocused(true);
-                if (canvasPreview.hidden) setPageCanvasTemplatePreviewHidden(false);
-                focusPageCanvasTemplatePreview();
-              },
-              "aria-label": canvasPreview.name,
-              "aria-current": canvasPreview.focused ? "location" : undefined,
-            }}
-            actions={!readOnly ? (
-              <div
-                className="homepage-editor__layer-actions"
-                role="group"
-                aria-label={`${canvasPreview.name}图层操作`}
-              >
-                <button
-                  type="button"
-                  onClick={() => setPageCanvasTemplatePreviewHidden(!canvasPreview.hidden)}
-                  aria-label={`${canvasPreview.hidden ? "显示" : "隐藏"}${canvasPreview.name}`}
-                  title={canvasPreview.hidden ? "显示预览" : "隐藏预览"}
-                >
-                  {canvasPreview.hidden ? <EyeInvisibleOutlined /> : <EyeOutlined />}
-                </button>
-                <button
-                  type="button"
-                  className="is-danger"
-                  onClick={() => clearPageCanvasTemplatePreview()}
-                  aria-label={`删除${canvasPreview.name}`}
-                  title="关闭预览"
-                >
-                  <DeleteOutlined />
-                </button>
-              </div>
-            ) : null}
-          >
-            <span className="homepage-editor__layer-copy">
-              <span className="homepage-editor__layer-name">
-                {canvasPreview.name}
-              </span>
-              <small className="homepage-editor__layer-summary" aria-hidden="true">
-                尚未加入页面
-              </small>
-            </span>
-          </WorkspaceTreeRow>
-        ) : null}
         {content.map((item, index) => {
           const active = item.props?.id === selectedId && !canvasPreview?.focused;
           const inView = scrollSpyIndex === index;
@@ -585,6 +534,58 @@ export default function LayerRail({
             </WorkspaceTreeRow>
           );
         })}
+        {canvasPreview ? (
+          <WorkspaceTreeRow
+            rowClassName="homepage-editor__layer-item is-preview"
+            selected={canvasPreview.focused}
+            hidden={canvasPreview.hidden}
+            rowProps={{ "data-layer-preview": "true" }}
+            buttonClassName="homepage-editor__layer-select"
+            buttonProps={{
+              onClick: () => {
+                setPageCanvasTemplatePreviewFocused(true);
+                if (canvasPreview.hidden) setPageCanvasTemplatePreviewHidden(false);
+                focusPageCanvasTemplatePreview();
+              },
+              "aria-label": canvasPreview.name,
+              "aria-current": canvasPreview.focused ? "location" : undefined,
+            }}
+            actions={!readOnly ? (
+              <div
+                className="homepage-editor__layer-actions"
+                role="group"
+                aria-label={`${canvasPreview.name}图层操作`}
+              >
+                <button
+                  type="button"
+                  onClick={() => setPageCanvasTemplatePreviewHidden(!canvasPreview.hidden)}
+                  aria-label={`${canvasPreview.hidden ? "显示" : "隐藏"}${canvasPreview.name}`}
+                  title={canvasPreview.hidden ? "显示预览" : "隐藏预览"}
+                >
+                  {canvasPreview.hidden ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+                </button>
+                <button
+                  type="button"
+                  className="is-danger"
+                  onClick={() => clearPageCanvasTemplatePreview()}
+                  aria-label={`删除${canvasPreview.name}`}
+                  title="关闭预览"
+                >
+                  <DeleteOutlined />
+                </button>
+              </div>
+            ) : null}
+          >
+            <span className="homepage-editor__layer-copy">
+              <span className="homepage-editor__layer-name">
+                {canvasPreview.name}
+              </span>
+              <small className="homepage-editor__layer-summary" aria-hidden="true">
+                尚未加入页面
+              </small>
+            </span>
+          </WorkspaceTreeRow>
+        ) : null}
         {appData.content.length === 0 && !canvasPreview && (
           <div className="homepage-editor__layer-empty">
             从左侧添加模块后，这里会显示页面结构。

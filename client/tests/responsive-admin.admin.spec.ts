@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { installAdminSession } from "./fixtures/session-auth";
 import type { TemplateCatalogResource } from "../src/services/clients/dynamicTemplateClient";
-import { createBlankTemplate, firstRegionAction, makeResource, productionStageAction } from "./fixtures/template-authoring-main-route";
+import { addFirstRegion, createBlankTemplate, makeResource, productionStageAction } from "./fixtures/template-authoring-main-route";
 import { createBlankDynamicTemplateDefinition } from "../src/page-builder/template-definition";
 
 async function expectNoHorizontalOverflow(page: import("@playwright/test").Page) {
@@ -242,12 +242,16 @@ test.describe("后台紧凑导航", () => {
     await expect(trigger).toBeFocused();
   });
 
-  test("1025px 恢复固定侧栏", async ({ page }) => {
+  test("1025px 使用占用独立列的桌面导航", async ({ page }) => {
     await page.setViewportSize({ width: 1025, height: 900 });
     await page.goto("/admin/dashboard");
 
     await expect(page.getByRole("button", { name: "打开后台导航" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "展开一级导航" })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "后台导航" })).toBeHidden();
+    await page.mouse.move(1, 400);
     await expect(page.getByRole("navigation", { name: "后台导航" })).toBeVisible();
+    await expect.poll(async () => (await page.getByRole("main").boundingBox())?.x).toBe(208);
     await expectNoHorizontalOverflow(page);
   });
 });
@@ -553,7 +557,7 @@ test.describe("TD-3C2 模板设计紧凑覆盖层（Mock Chromium）", () => {
     await expectNoHorizontalOverflow(page);
     await removeDeterministicTextScale200(page);
     await page.getByRole("complementary", { name: "模板结构", exact: true })
-      .getByRole("button", { name: "添加区域", exact: true })
+      .locator(".template-editor__region-select").first()
       .click();
     const nodeName = page.getByRole("complementary", { name: "模板属性", exact: true })
       .getByRole("textbox", { name: "节点名称", exact: true });
@@ -606,7 +610,7 @@ test.describe("TD-3C2 模板设计紧凑覆盖层（Mock Chromium）", () => {
     expect(dangerousWrites).toEqual([]);
   });
 
-  test("1056×858 与 1200×858 的添加区域、撤销和属性入口均由真实鼠标命中", async ({ page }) => {
+  test("1056×858 与 1200×858 的现有结构、撤销和属性入口均由真实鼠标命中", async ({ page }) => {
     const dangerousWrites: string[] = [];
     const runtimeErrors: string[] = [];
     page.on("pageerror", (error) => runtimeErrors.push(`pageerror: ${error.message}`));
@@ -620,6 +624,7 @@ test.describe("TD-3C2 模板设计紧凑覆盖层（Mock Chromium）", () => {
     await page.getByLabel("用途", { exact: true }).fill("验证真实鼠标命中");
     await page.getByLabel("用途", { exact: true }).press("Tab");
 
+    await addFirstRegion(page);
     await page.setViewportSize({ width: 1056, height: 858 });
     await expect(page.locator(".template-editor__body")).toHaveAttribute("data-template-workspace-compact", "false");
     const structureWorkspace = page.locator(".template-editor__structure:not(.is-collapsed)");
@@ -634,23 +639,15 @@ test.describe("TD-3C2 模板设计紧凑覆盖层（Mock Chromium）", () => {
       "1056 四区停靠后画布仍须留下可操作宽度",
     ).toBeGreaterThanOrEqual(320);
 
-    const compactSkeleton = firstRegionAction(page);
-    const compactGeometry = await Promise.all([
-      compactSkeleton.boundingBox(),
-      inspectorWorkspace.boundingBox(),
-    ]);
-    expect(compactGeometry[0]?.x).toBeDefined();
-    expect(compactGeometry[1]?.x).toBeDefined();
-    expect(
-      (compactGeometry[0]?.x ?? 0) + (compactGeometry[0]?.width ?? 0),
-      "1056 主操作不能伸入属性栏",
-    ).toBeLessThanOrEqual((compactGeometry[1]?.x ?? 0) + 1);
-    await clickCenterWithRealMouse(page, compactSkeleton, "1056 添加区域操作");
-    await expect(compactSkeleton).toBeHidden();
-
-    const compactUndo = page.getByRole("button", { name: "撤销", exact: true });
-    await clickCenterWithRealMouse(page, compactUndo, "1056 顶部撤销");
-    await expect(compactSkeleton).toBeVisible();
+    const existingRegion = structureWorkspace.locator(".template-editor__region-select").first();
+    await clickCenterWithRealMouse(page, existingRegion, "1056 选中现有区域");
+    await expect(structureWorkspace.getByRole("button", { name: "添加区域", exact: true })).toHaveCount(0);
+    const regionName = inspectorWorkspace.getByRole("textbox", { name: "节点名称", exact: true });
+    await regionName.fill("紧凑窗口现有区域");
+    await regionName.press("Tab");
+    await expect(existingRegion).toContainText("紧凑窗口现有区域");
+    await clickCenterWithRealMouse(page, page.getByRole("button", { name: "撤销", exact: true }), "1056 顶部撤销");
+    await expect(existingRegion).toContainText("内容区域 1");
     await expectNoHorizontalOverflow(page);
 
     await page.setViewportSize({ width: 1200, height: 858 });
@@ -659,10 +656,8 @@ test.describe("TD-3C2 模板设计紧凑覆盖层（Mock Chromium）", () => {
       .getByRole("textbox", { name: "模板名称", exact: true });
     await clickCenterWithRealMouse(page, desktopPropertyField, "1200 属性区入口");
     await expect(desktopPropertyField).toBeFocused();
-    await clickCenterWithRealMouse(page, compactSkeleton, "1200 添加区域操作");
-    await expect(compactSkeleton).toBeHidden();
-    await clickCenterWithRealMouse(page, page.getByRole("button", { name: "撤销", exact: true }), "1200 顶部撤销");
-    await expect(compactSkeleton).toBeVisible();
+    await clickCenterWithRealMouse(page, existingRegion, "1200 选中现有区域");
+    await expect(regionName).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
     expect(runtimeErrors).toEqual([]);
@@ -748,15 +743,13 @@ test.describe("TD-3C3 模板设计四区高频操作（Mock Chromium）", () => 
     expect(await imageNode.evaluate((element) => (element as HTMLElement).style.width)).toBe("60%");
     expect(await buttonNode.evaluate((element) => (element as HTMLElement).style.width)).toBe("40%");
 
-    const appearance = inspector.locator('details[data-template-property-group="外观"]');
-    await appearance.locator("summary").first().click();
+    const appearance = inspector.locator('[data-template-property-group="外观"]');
     await appearance.getByRole("combobox", { name: "背景预设", exact: true }).selectOption("brand-ink");
     await appearance.getByRole("combobox", { name: "边框预设", exact: true }).selectOption("strong");
     const radius = appearance.getByRole("spinbutton", { name: "圆角", exact: true });
     await radius.fill("12");
     await radius.press("Enter");
-    const spacing = inspector.locator('details[data-template-property-group="间距与对齐"]');
-    await spacing.locator("summary").first().click();
+    const spacing = inspector.locator('[data-template-property-group="间距与对齐"]');
     await spacing.getByRole("checkbox", { name: "四边内边距联动", exact: true }).check();
     const padding = spacing.getByRole("spinbutton", { name: "上内边距", exact: true });
     await padding.fill("16");

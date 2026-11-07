@@ -23,7 +23,68 @@ function fulfill(route: Route, data: unknown, status = 200) {
 test.describe("商品编辑器现有接口契约", () => {
   test.skip(useMock, "该回归通过隔离拦截真实 API 路径验证状态与错误契约");
 
-  test("加载失败可重试，重复保存只发送一次并将货号冲突落到字段", async ({ page }) => {
+  for (const width of [390, 1440]) {
+    test(`新建商品填写建议、文件名排序和图片内容去重（${width}px，API 夹具）`, async ({ page }) => {
+      await installAdminSession(page);
+      let codeChecks = 0;
+      let unexpectedWrites = 0;
+      await page.route("**/api/**", async (route) => {
+        const { pathname } = new URL(route.request().url());
+        if (pathname === "/api/auth/profile") return route.fallback();
+        if (pathname === "/api/categories/admin/tree") return fulfill(route, [
+          { id: 1, name: "戒指", children: [] }, { id: 2, name: "吊坠", children: [] },
+        ]);
+        if (pathname === "/api/products/admin/import-code-conflicts") {
+          codeChecks++;
+          const { codes } = route.request().postDataJSON();
+          return fulfill(route, codes[0] === "ATP969" ? [{ requestedCode: "ATP969", code: "ATP969" }] : []);
+        }
+        if (route.request().method() !== "GET") unexpectedWrites++;
+        return fulfill(route, {});
+      });
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto("/admin/products/new");
+      const title = page.getByRole("textbox", { name: "商品标题" });
+      const code = page.getByRole("textbox", { name: "款号" });
+      const suggestions = page.getByRole("region", { name: "填写建议" });
+      await title.fill("18K玫瑰金红宝石戒指 ATP969");
+      await page.getByRole("button", { name: "采用款号" }).click();
+      await expect(page.getByText("建议款号已被使用，请核对后填写其他款号")).toBeVisible();
+      await expect(code).toHaveValue("");
+      await title.fill("18K玫瑰金红宝石戒指 ATP968");
+      await expect(suggestions.getByText("主要材质 未填写 → 18K金 · 来自标题")).toBeVisible();
+      await expect(code).toHaveValue("");
+      await page.getByRole("button", { name: "采用全部建议" }).click();
+      await expect(code).toHaveValue("ATP968");
+      await expect(suggestions.getByText(/类目 已填入 戒指/)).toBeVisible();
+      await page.getByRole("button", { name: "撤销类目" }).click();
+      await code.fill("MANUAL-12");
+      await title.fill("戒指 ATP999");
+      await expect(code).toHaveValue("MANUAL-12");
+      await expect(suggestions.getByRole("button", { name: "采用类目" })).toHaveCount(0);
+      await expect(suggestions.getByRole("button", { name: "采用款号" })).toHaveCount(0);
+      await expect(page.getByRole("spinbutton", { name: "金重（g）" })).toHaveValue("");
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      expect(codeChecks).toBe(2);
+
+      await page.getByRole("button", { name: "前往上传商品图片" }).click();
+      const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aHsQAAAAASUVORK5CYII=", "base64");
+      const gallery = page.locator(".pro-editor__uploads");
+      await gallery.locator('input[type="file"]').setInputFiles([
+        { name: "ATP968_SIDE_戒指.png", mimeType: "image/png", buffer: Buffer.concat([png, Buffer.from([0])]) },
+        { name: "ATP968戒指主图.png", mimeType: "image/png", buffer: png },
+        { name: "不同文件名.png", mimeType: "image/png", buffer: png },
+      ]);
+      await expect(gallery.locator(".pro-editor__upload-card")).toHaveCount(2);
+      const cover = gallery.getByTitle("ATP968戒指主图.png");
+      await expect(cover.getByText("主图", { exact: true })).toBeVisible();
+      await gallery.getByTitle("ATP968_SIDE_戒指.png").getByRole("button", { name: /前移/ }).click();
+      await expect(cover.getByText("主图", { exact: true })).toHaveCount(0);
+      expect(unexpectedWrites).toBe(0);
+    });
+  }
+
+  test("加载失败可重试，重复保存只发送一次并将款号冲突落到字段", async ({ page }) => {
     await installAdminSession(page);
     let categoryAttempts = 0;
     let createAttempts = 0;
@@ -56,28 +117,22 @@ test.describe("商品编辑器现有接口契约", () => {
       if (url.pathname === "/api/products" && route.request().method() === "POST") {
         createAttempts += 1;
         await new Promise((resolve) => setTimeout(resolve, 250));
+        // 旧版本接口仍可返回原文案，编辑器应显示新术语并定位字段。
         await fulfill(route, { statusCode: 409, message: "该商品货号已存在，请更换货号" }, 409);
         return;
       }
       await fulfill(route, {});
     });
 
-    await page.setViewportSize({ width: 1912, height: 948 });
+    const viewport = { width: 1912, height: 948 };
+    await page.setViewportSize(viewport);
     await page.goto("/admin/products/new");
     await expect(page.getByText("正在加载商品信息…")).toBeVisible();
     const loadingLayer = page.locator(".site-route-loading--admin-content");
-    const main = page.locator(".admin-main");
     expect(await loadingLayer.evaluate((element) => element.closest(".admin-main") !== null)).toBe(true);
-    const indicatorBox = await loadingLayer.locator(".site-route-loading__indicator").boundingBox();
-    const mainBox = await main.boundingBox();
-    expect(indicatorBox).not.toBeNull();
-    expect(mainBox).not.toBeNull();
-    const indicatorCenterX = (indicatorBox?.x ?? 0) + (indicatorBox?.width ?? 0) / 2;
-    const indicatorCenterY = (indicatorBox?.y ?? 0) + (indicatorBox?.height ?? 0) / 2;
-    const mainCenterX = (mainBox?.x ?? 0) + (mainBox?.width ?? 0) / 2;
-    const mainCenterY = (mainBox?.y ?? 0) + (mainBox?.height ?? 0) / 2;
-    expect(Math.abs(indicatorCenterX - mainCenterX)).toBeLessThan(2);
-    expect(Math.abs(indicatorCenterY - mainCenterY)).toBeLessThan(24);
+    const indicatorBox = (await loadingLayer.locator(".site-route-loading__indicator").boundingBox())!;
+    expect.soft(indicatorBox.x + indicatorBox.width / 2).toBeCloseTo(viewport.width / 2, 0);
+    expect.soft(indicatorBox.y + indicatorBox.height / 2).toBeCloseTo(viewport.height / 2, 0);
     releaseInitialCategoryRequest();
     await expect(page.getByText("商品编辑所需的类目加载失败。请重新加载后重试。")).toBeVisible();
     await expect(page.getByRole("button", { name: "重新加载" })).toBeVisible();
@@ -85,20 +140,22 @@ test.describe("商品编辑器现有接口契约", () => {
 
     await page.getByRole("button", { name: "重新加载" }).click();
     await expect(page.getByRole("heading", { name: "图文描述" })).toBeVisible();
-    await expect(page.getByRole("radio", { name: "直接销售" })).toBeChecked();
+    await expect(page.getByRole("radio", { name: "预约定制", exact: true })).toBeChecked();
+    await expect(page.getByRole("spinbutton", { name: "定制参考起价", exact: true })).toHaveValue("1000.00");
     await expect(page.getByRole("radio", { name: "立刻上架" })).toBeChecked();
     await expect(page.getByRole("radio", { name: "二手" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "物流服务" })).toHaveCount(0);
+    await page.getByRole("radio", { name: "直接销售", exact: true }).click();
     await expect(page.getByText(/直接销售需要一个大于 0 的成交价/)).toBeVisible();
     await page.getByRole("button", { name: "基础信息" }).click();
-    await page.getByRole("textbox", { name: "货号" }).fill("DUPLICATE-001");
+    await page.getByRole("textbox", { name: "款号" }).fill("DUPLICATE-001");
     await page.getByRole("combobox", { name: "当前类目" }).click();
     await page.getByText("戒指", { exact: true }).click();
 
     const saveDraft = page.getByRole("button", { name: "保存草稿" });
     await saveDraft.dblclick();
     await expect(page.getByText("商品保存未完成")).toBeVisible();
-    await expect(page.locator(".ant-form-item-explain-error").filter({ hasText: "该商品货号已存在" })).toBeVisible();
+    await expect(page.locator(".ant-form-item-explain-error").filter({ hasText: "该商品款号已存在" })).toBeVisible();
     expect(createAttempts).toBe(1);
   });
 
@@ -133,13 +190,14 @@ test.describe("商品编辑器现有接口契约", () => {
         { id: 102, productId: 9, url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E", type: "SIDE", sortOrder: 1, isVideo: false },
       ],
       skus: [
-        { id: 201, productId: 9, skuCode: "RING-009-DEFAULT", material: "AU750", size: "14", price: 6999, isActive: true },
-        { id: 202, productId: 9, skuCode: "RING-009-15", material: "AU750", size: "15", price: 7299, isActive: true },
+        { id: 201, productId: 9, skuCode: "RING-009-DEFAULT", material: "AU750", size: "14", color: "玫瑰金", price: 6999, isActive: true },
+        { id: 202, productId: 9, skuCode: "RING-009-15", material: "AU750", size: "15", color: "白色", price: 7299, isActive: true },
       ],
       detailContent: [],
     };
     let deleteRequests = 0;
     let skuStatusRequests = 0;
+    const skuUpdatePayloads: Array<Record<string, unknown>> = [];
 
     await page.route("**/api/**", async (route) => {
       const url = new URL(route.request().url());
@@ -167,10 +225,14 @@ test.describe("商品编辑器现有接口契约", () => {
         return;
       }
       if (url.pathname === "/api/products/9/skus/201" && route.request().method() === "PUT") {
-        skuStatusRequests += 1;
-        await new Promise((resolve) => setTimeout(resolve, 250));
-        product.skus[0].isActive = false;
-        product.price = 7299;
+        const body = route.request().postDataJSON() as Record<string, unknown>;
+        skuUpdatePayloads.push(body);
+        Object.assign(product.skus[0], body);
+        if (body.isActive === false && Object.keys(body).length === 1) {
+          skuStatusRequests += 1;
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          product.price = 7299;
+        }
         await fulfill(route, product.skus[0]);
         return;
       }
@@ -183,6 +245,17 @@ test.describe("商品编辑器现有接口契约", () => {
     await expect(page.getByText("有多个规格时，页面显示其中的最低价。")).toBeVisible();
     await expect(page.getByText(/2 个有效规格/)).toBeVisible();
 
+    const defaultSkuRow = page.getByRole("row").filter({ hasText: "RING-009-DEFAULT" });
+    await expect(defaultSkuRow).toContainText("玫瑰金");
+    await defaultSkuRow.getByRole("button", { name: "编辑" }).click();
+    const skuDialog = page.getByRole("dialog", { name: "编辑 SKU" });
+    await expect(skuDialog.getByRole("textbox", { name: "颜色" })).toHaveValue("玫瑰金");
+    await skuDialog.getByRole("textbox", { name: "颜色" }).fill("香槟金");
+    await skuDialog.getByRole("button", { name: "保存 SKU" }).click();
+    await expect(page.getByText("SKU 已更新")).toBeVisible();
+    await expect(defaultSkuRow).toContainText("香槟金");
+    expect(skuUpdatePayloads[0]).toMatchObject({ color: "香槟金" });
+
     await expect(page.getByRole("button", { name: "设为主图" })).toHaveCount(0);
     await expect(page.locator(".pro-editor__upload-card").first().locator(".pro-editor__cover-badge")).toHaveText("主图");
 
@@ -193,7 +266,6 @@ test.describe("商品编辑器现有接口契约", () => {
     await expect(page.getByText("商品图片已删除")).toBeVisible();
     expect(deleteRequests).toBe(1);
 
-    const defaultSkuRow = page.getByRole("row").filter({ hasText: "RING-009-DEFAULT" });
     await defaultSkuRow.getByRole("button", { name: "停用" }).dblclick();
     await expect(page.getByText("SKU 已停用")).toBeVisible();
     expect(skuStatusRequests).toBe(1);
@@ -553,7 +625,7 @@ test.describe("商品编辑器现有接口契约", () => {
     });
 
     await page.goto("/admin/products");
-    await expect(page.getByRole("columnheader", { name: "SKU 最低价" })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "价格 / 起价" })).toBeVisible();
     await expect(page.getByText("一物一件", { exact: true })).toBeVisible();
     await expect(page.getByText("售罄 / 不可加入购物车", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "上架" }).click();
@@ -632,13 +704,15 @@ test.describe("商品编辑器现有接口契约", () => {
     await expect(page.getByText("商品已保存至仓库")).toHaveCount(0);
     expect(updateAttempts).toBe(1);
 
-    for (const mode of ["仅展示", "选款咨询", "预约到店", "定制咨询"]) {
+    for (const mode of ["仅展示", "选款咨询", "预约到店"]) {
       await page.getByRole("radio", { name: mode }).click();
       await expect(page.getByText(/当前销售方式发布时不要求交易价格、SKU 或正库存/)).toBeVisible();
     }
+    await page.getByRole("radio", { name: "预约定制", exact: true }).click();
+    await expect(page.getByText(/顾客先预约定制，最终金额在确认方案后报价，不要求成品库存/)).toBeVisible();
   });
 
-  test("首次创建响应丢失后由操作者显式重试并恢复同一货号，不重复创建业务对象", async ({ page }) => {
+  test("首次创建响应丢失后由操作者显式重试并恢复同一款号，不重复创建业务对象", async ({ page }) => {
     await installAdminSession(page);
     let createAttempts = 0;
     let updateAttempts = 0;
@@ -700,7 +774,7 @@ test.describe("商品编辑器现有接口契约", () => {
 
     await page.goto("/admin/products/new");
     await page.getByRole("button", { name: "基础信息" }).click();
-    await page.getByRole("textbox", { name: "货号" }).fill(product.code);
+    await page.getByRole("textbox", { name: "款号" }).fill(product.code);
     await page.getByRole("combobox", { name: "当前类目" }).click();
     await page.getByText("戒指", { exact: true }).click();
 
@@ -774,9 +848,10 @@ test.describe("商品编辑器现有接口契约", () => {
     await page.goto("/admin/products/new");
     await page.getByRole("button", { name: "基础信息" }).click();
     await page.getByRole("textbox", { name: "商品标题" }).fill("18K金红宝石吊坠");
-    await page.getByRole("textbox", { name: "货号" }).fill("ATP-310");
+    await page.getByRole("textbox", { name: "款号" }).fill("ATP-310");
     await page.getByRole("combobox", { name: "当前类目" }).click();
     await page.getByText("吊坠", { exact: true }).click();
+    await page.getByRole("radio", { name: "直接销售", exact: true }).click();
     await page.getByRole("spinbutton", { name: "成交价" }).fill("1280");
     await page.getByRole("spinbutton", { name: "金重（g）" }).fill("11");
     const openVisibility = async () => {
@@ -797,17 +872,20 @@ test.describe("商品编辑器现有接口契约", () => {
     await expect(page.getByText("商品已上架。可以继续填写下一件")).toBeVisible();
     await expect(page).toHaveURL(/\/admin\/products\/new$/);
     await expect(page.getByRole("textbox", { name: "商品标题" })).toHaveValue("");
-    await expect(page.getByRole("textbox", { name: "货号" })).toBeEnabled();
-    await expect(page.getByRole("textbox", { name: "货号" })).toHaveValue("");
-    await expect(page.getByRole("spinbutton", { name: "成交价" })).toHaveValue("");
+    await expect(page.getByRole("textbox", { name: "款号" })).toBeEnabled();
+    await expect(page.getByRole("textbox", { name: "款号" })).toHaveValue("");
+    await expect(page.getByRole("radio", { name: "预约定制", exact: true })).toBeChecked();
+    await expect(page.getByRole("spinbutton", { name: "定制参考起价", exact: true })).toHaveValue("1000.00");
     await expect(page.getByRole("spinbutton", { name: "金重（g）" })).toHaveValue("");
     await expect(page.getByRole("button", { name: "上架商品" })).toBeEnabled();
     await expect(page.getByText("尚未保存", { exact: true })).toBeVisible();
     await expect(page.locator(".pro-editor__category .ant-tag")).toHaveText("草稿");
     expect(createAttempts).toBe(1);
 
+    await page.getByRole("radio", { name: "直接销售", exact: true }).click();
+    await expect(page.getByRole("spinbutton", { name: "成交价" })).toHaveValue("");
     await page.getByRole("textbox", { name: "商品标题" }).fill("足金小鱼耳钉");
-    await page.getByRole("textbox", { name: "货号" }).fill("ATP-311");
+    await page.getByRole("textbox", { name: "款号" }).fill("ATP-311");
     await page.getByRole("combobox", { name: "当前类目" }).click();
     await page.getByText("吊坠", { exact: true }).click();
     await page.getByRole("spinbutton", { name: "成交价" }).fill("860");

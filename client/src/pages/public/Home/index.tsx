@@ -2,7 +2,11 @@ import {
   lazy,
   Suspense,
   useEffect,
+  useLayoutEffect,
+  useRef,
   useState,
+  type ComponentProps,
+  type ReactNode,
 } from "react";
 import { useOutletContext } from "react-router-dom";
 import { trackPageView } from "@/hooks/useAnalytics";
@@ -14,10 +18,12 @@ import {
 import StaleDocumentNotice from "@/page-builder/runtime/StaleDocumentNotice";
 import { PublicPageFallback } from "@/page-builder/runtime/PublishedPageDecoration";
 import { getPublishedPageReadiness } from "@/page-builder/runtime/publishedPageReadiness";
-import type { PuckDocument } from "@/page-builder/runtime/PuckDocumentRenderer";
+import type { PuckBlock, PuckDocument } from "@/page-builder/runtime/PuckDocumentRenderer";
 import RouteLoading from "@/components/common/RouteLoading";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { loadPuckDocumentRenderer } from "@/page-builder/runtime/loadPublicPageRenderer";
+import { scheduleChineseDisplayFonts } from "@/styles/loadChineseDisplayFonts";
+import "./firstFold.css";
 import { getHomeHeroPreview } from "@/page-builder/runtime/homeHeroPreview";
 import {
   buildResponsiveUploadsDerivedUrl,
@@ -25,6 +31,9 @@ import {
   type PublicImageSourceFacts,
 } from "@/utils/responsiveUploadsImage";
 import { coverSizesFromViewportBox } from "@/page-builder/config/imageDeliveryGeometry";
+import { CONTENT_TEMPLATE_LAYOUTS, ContentTemplateLayoutStyles, templateLayoutVars } from "@/page-builder/layout/contentTemplateLayouts";
+import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
+import { resolveStorefrontLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 import {
   PublicImageFactsProvider,
   readPublicImageFacts,
@@ -33,6 +42,7 @@ import {
 
 const LG = "#F4F5F5";
 const PuckDocumentRenderer = lazy(loadPuckDocumentRenderer);
+const FIRST_IMAGE_WAIT_MS = 1500;
 
 function heroDelivery(source: string, facts: PublicImageSourceFacts | null) {
   const srcSet = facts ? buildResponsiveUploadsSrcSet(source, facts) : undefined;
@@ -53,11 +63,21 @@ function heroDelivery(source: string, facts: PublicImageSourceFacts | null) {
 }
 
 /**
- * 公开首页在完整 Renderer 分块到达前只读取已发布文档的首个 Hero。
- * 这不是第二套内容：同一份 PageDocument 仍是唯一输入，只是先稳定呈现
- * 首屏的图片、标题和空间，避免访客看到技术性的全屏加载页。
+ * Renderer 尚未到达时，用当前发布文档先发现首图。等待态只占位，
+ * 正式首屏的图文和操作由同一个 Renderer 呈现。
  */
-export function HomeFirstFold({ data }: { data?: PuckDocument | null }) {
+function HomeLoadingStatus({ local = false }: { local?: boolean }) {
+  return (
+    <RouteLoading
+      data-home-loading-status="true"
+      scope="region"
+      surface="public"
+      label={local ? "主视觉正在准备" : "首页内容正在准备"}
+    />
+  );
+}
+
+export function HomeFirstFold({ data, stage }: { data?: PuckDocument | null; stage?: PuckBlock }) {
   const [device, setDevice] = useState<"desktop" | "mobile">(() => (
     typeof window !== "undefined" && window.innerWidth < 768 ? "mobile" : "desktop"
   ));
@@ -68,102 +88,120 @@ export function HomeFirstFold({ data }: { data?: PuckDocument | null }) {
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, []);
-  const hero = getHomeHeroPreview(data, device);
+  const hero = getHomeHeroPreview(stage ? { ...data, content: [stage] } : data, device);
   const desktopFacts = usePublicImageFact(hero.image);
   const mobileFacts = usePublicImageFact(hero.mobileImage);
   const desktop = heroDelivery(hero.image, desktopFacts);
   const mobile = heroDelivery(hero.mobileImage, mobileFacts);
-  const hasCopy = Boolean(hero.eyebrow || hero.title || hero.subtitle);
-
+  const legacy = stage?.type === "首屏主视觉" ? stage.props : undefined;
+  const actionText = typeof legacy?.actionText === "string" && resolveStorefrontLinkTargetUrl({
+    targetType: typeof legacy.targetType === "string" ? legacy.targetType : undefined,
+    productCode: typeof legacy.productCode === "string" ? legacy.productCode : undefined,
+    productId: Number(legacy.productId) || undefined,
+    categorySlug: legacy.categorySlug,
+    linkUrl: typeof legacy.linkUrl === "string" ? legacy.linkUrl : undefined,
+  }) ? legacy.actionText : "";
+  const legacyLayout = legacy ? CONTENT_TEMPLATE_LAYOUTS.hero : undefined;
   return (
     <section
       aria-busy="true"
       aria-label="首页首屏"
       data-page-document-state="loading"
-      style={{
-        position: "relative",
-        isolation: "isolate",
-        minHeight: "max(620px, 100svh)",
-        overflow: "hidden",
-        background: hero.image ? "#181A1B" : LG,
-        color: hero.image ? "#FFFFFF" : "#181A1B",
-      }}
+      className={legacyLayout
+        ? "home-primary-stage-loading home-legacy-stage-loading hc-content-template hc-phase1-hero"
+        : stage ? "home-first-fold-loading home-primary-stage-loading" : "home-first-fold-loading"}
+      style={legacyLayout ? templateLayoutVars(legacyLayout) : undefined}
     >
+      {legacyLayout ? (
+        <>
+          <ContentTemplateLayoutStyles />
+          {/* 用相同画幅与字行占位，兼容分块到达前不公开文案或行动。 */}
+          <div className="hc-phase1-hero__media" aria-hidden="true" />
+          {hero.title || hero.subtitle || actionText ? (
+            <div className="hc-phase1-hero__copy-band home-legacy-stage-loading__copy" aria-hidden="true">
+              <div className="hc-content-template__copy hc-phase1-hero__copy">
+                {hero.eyebrow ? <p className="hc-content-template__eyebrow">{hero.eyebrow}</p> : null}
+                {hero.title ? <div className="hc-content-template__title whitespace-pre-line" style={{ fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontSize: "var(--hc-hero-title-size, clamp(42px, 4.4vw, 76px))" }}>{hero.title}</div> : null}
+                {hero.subtitle ? <p className="hc-content-template__body" style={{ fontFamily: `var(--hc-font-display, ${FONT_DISPLAY})`, fontStyle: "italic" }}>{hero.subtitle}</p> : null}
+                {actionText ? <span className="hc-content-template__action" style={{ fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}>{actionText} <span>→</span></span> : null}
+              </div>
+            </div>
+          ) : null}
+        </>
+      ) : null}
       {desktop.src ? (
-        <picture>
-          {mobile.srcSet ? (
-            <source media="(max-width: 767px)" srcSet={mobile.srcSet} sizes={mobile.sizes} />
+        <picture hidden>
+          {mobile.src ? (
+            <source media="(max-width: 767px)" srcSet={mobile.srcSet ?? mobile.src} sizes={mobile.sizes} />
           ) : null}
           <img
             src={desktop.src}
             srcSet={desktop.srcSet}
             sizes={desktop.sizes}
             alt=""
-            aria-hidden="true"
             {...{ fetchpriority: "high" }}
-            decoding="async"
-            style={{
-              position: "absolute",
-              inset: 0,
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              zIndex: -2,
-            }}
           />
         </picture>
       ) : null}
-      {hero.image && hasCopy ? (
-        <div
-          aria-hidden="true"
-          style={{
-            position: "absolute",
-            inset: 0,
-            zIndex: -1,
-            background: "linear-gradient(90deg, rgba(16,18,19,.58) 0%, rgba(16,18,19,.24) 42%, rgba(16,18,19,0) 72%)",
-          }}
-        />
-      ) : null}
-      {hasCopy ? (
-        <div
-          style={{
-            display: "grid",
-            alignContent: "end",
-            minHeight: "max(620px, 100svh)",
-            width: "min(100%, 1440px)",
-            margin: "0 auto",
-            padding: "clamp(128px, 16vw, 236px) clamp(24px, 7vw, 136px)",
-          }}
-        >
-          <div style={{ maxWidth: 620 }}>
-            {hero.eyebrow ? (
-              <p style={{ margin: "0 0 18px", fontSize: 12, letterSpacing: "0.5px", lineHeight: 1.4 }}>
-                {hero.eyebrow}
-              </p>
-            ) : null}
-            {hero.title ? (
-              <h1 style={{ margin: 0, fontFamily: 'var(--hc-font-display, "Noto Serif SC", serif)', fontSize: "clamp(42px, 5.2vw, 76px)", fontWeight: 400, lineHeight: 1.14 }}>
-                {hero.title}
-              </h1>
-            ) : null}
-            {hero.subtitle ? (
-              <p style={{ margin: "20px 0 0", fontFamily: 'var(--hc-font-display, "Noto Serif SC", serif)', fontSize: "clamp(17px, 1.45vw, 22px)", fontStyle: "italic", lineHeight: 1.7 }}>
-                {hero.subtitle}
-              </p>
-            ) : null}
-          </div>
-        </div>
-      ) : (
-        <RouteLoading
-          data-home-loading-status="true"
-          scope="region"
-          surface="public"
-          label="首页内容正在准备"
-        />
-      )}
+      <HomeLoadingStatus local={Boolean(stage)} />
     </section>
   );
 }
+
+function HomePrimaryStageReveal({ children }: { children: ReactNode }) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [ready, setReady] = useState(false);
+
+  useLayoutEffect(() => {
+    // 只检查正式 Renderer 选出的首图，无图首屏和视频封面直接交给 Renderer。
+    const image = contentRef.current?.querySelector<HTMLImageElement>('img[fetchpriority="high"]');
+    if (!image) {
+      setReady(true);
+      return;
+    }
+
+    let active = true;
+    const reveal = () => {
+      window.clearTimeout(timeout);
+      if (active) setReady(true);
+    };
+    const timeout = window.setTimeout(reveal, FIRST_IMAGE_WAIT_MS);
+    // 解码失败时放行，图片的错误占位与重试仍由 Renderer 处理。
+    void image.decode().then(reveal, reveal);
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (ready) scheduleChineseDisplayFonts();
+  }, [ready]);
+
+  return (
+    <div className="home-primary-stage" data-ready={ready}>
+      <div ref={contentRef} className="home-primary-stage__content" aria-hidden={!ready || undefined}>
+        {children}
+      </div>
+      {!ready ? (
+        <div className="home-primary-stage-loading home-primary-stage-loading--overlay">
+          <HomeLoadingStatus local />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function HomeWithoutPrimaryStage() {
+  useEffect(scheduleChineseDisplayFonts, []);
+  return null;
+}
+
+function HomeFallback(props: ComponentProps<typeof PublicPageFallback>) {
+  useEffect(scheduleChineseDisplayFonts, []);
+  return <PublicPageFallback {...props} />;
+}
+
 export default function Home() {
   const homeFallback = getEditorPage("home").publicFallback;
   const layoutDocumentResource = useOutletContext<PublishedPageDocumentResource | null>();
@@ -190,7 +228,7 @@ export default function Home() {
     const fallback = homeFallback;
     const isReadFailure = documentStatus === "error";
     return (
-      <PublicPageFallback
+      <HomeFallback
         pageKey="home"
         pageLabel="店铺首页"
         status={documentStatus}
@@ -209,7 +247,7 @@ export default function Home() {
 
   if (documentStatus === "unpublished") {
     return (
-      <PublicPageFallback
+      <HomeFallback
         pageKey="home"
         pageLabel="店铺首页"
         status="unpublished"
@@ -221,7 +259,7 @@ export default function Home() {
 
   if (!pageDocument) {
     return (
-      <PublicPageFallback
+      <HomeFallback
         pageKey="home"
         pageLabel="店铺首页"
         status="invalid"
@@ -235,7 +273,7 @@ export default function Home() {
   if (!readiness?.ready) {
     const fallback = homeFallback;
     return (
-      <PublicPageFallback
+      <HomeFallback
         pageKey="home"
         pageLabel="店铺首页"
         status="invalid"
@@ -253,7 +291,7 @@ export default function Home() {
     <PublicImageFactsProvider facts={readPublicImageFacts(pageDocument)}>
     <div data-page-document-state="published" style={{ background: LG }}>
       <ErrorBoundary fallback={(
-        <PublicPageFallback
+        <HomeFallback
           pageKey="home"
           pageLabel="首页暂不可用"
           status="error"
@@ -272,6 +310,11 @@ export default function Home() {
             surface="home"
             pageKey="home"
             primaryHeading="海川珠宝"
+            renderPrimaryStage={(stage, block) => stage ? (
+              <Suspense fallback={<HomeFirstFold data={readiness.data as PuckDocument} stage={block} />}>
+                <HomePrimaryStageReveal>{stage}</HomePrimaryStageReveal>
+              </Suspense>
+            ) : <HomeWithoutPrimaryStage />}
           />
         </Suspense>
       </ErrorBoundary>

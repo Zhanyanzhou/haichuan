@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Card, message, Space, Table, Tag } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
+import { AdminLoadingState } from "@/components/common/AdminDataStates";
 import { orderApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
@@ -27,27 +28,32 @@ export default function AnomalyOrders() {
   const canViewOrders = canAccessAdminRoute(role, "/admin/orders");
   const [list, setList] = useState<AnomalyOrder[]>([]);
   const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [listLoading, setListLoading] = useState<"initial" | "refreshing" | "idle">("initial");
   const [loadError, setLoadError] = useState(false);
+  const listRequestIdRef = useRef(0);
 
   const load = async () => {
-    setLoading(true);
+    const requestId = ++listRequestIdRef.current;
+    setListLoading((current) => current === "initial" ? current : "refreshing");
     setLoadError(false);
     try {
       const res = await orderApi.getAnomalies();
+      if (requestId !== listRequestIdRef.current) return;
       const data = unwrapResponse<{ list: AnomalyOrder[]; total: number }>(res);
       setList(data?.list || []);
       setTotal(data?.total || 0);
     } catch (error: unknown) {
+      if (requestId !== listRequestIdRef.current) return;
       setLoadError(true);
       message.error(getSafeAdminErrorMessage(error, "异常订单加载失败，请稍后重新加载。"));
     } finally {
-      setLoading(false);
+      if (requestId === listRequestIdRef.current) setListLoading("idle");
     }
   };
 
   useEffect(() => {
     void load();
+    return () => { listRequestIdRef.current += 1; };
   }, []);
 
   return (
@@ -69,7 +75,9 @@ export default function AnomalyOrders() {
         </Space>
       </div>
 
-      {loadError ? (
+      {listLoading === "initial" ? (
+        <AdminLoadingState subject="异常订单" allowInteraction />
+      ) : loadError ? (
         <div className="text-center py-16">
           <p className="text-brand-muted mb-4">异常订单数据暂时无法加载</p>
           <Button type="primary" onClick={() => void load()}>
@@ -81,7 +89,7 @@ export default function AnomalyOrders() {
           <Table
             dataSource={list}
             rowKey="id"
-            loading={loading}
+            loading={listLoading === "refreshing"}
             size="middle"
             pagination={{
               // 服务端固定返回最近 200 条（total 为全量计数），单页展示避免翻到空页的假分页。

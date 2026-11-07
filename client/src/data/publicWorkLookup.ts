@@ -14,7 +14,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-/** 接口已经给出作品身份时，不再用演示款替换，即使货号碰巧相同。 */
+/** 接口已经给出作品身份时，不再用演示款替换，即使款号碰巧相同。 */
 function readPublishedProduct(value: unknown): Product | null {
   if (!isRecord(value)) return null;
   const id = value.id;

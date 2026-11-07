@@ -7,25 +7,33 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useEditorCanvasActive } from "@/page-builder/workspace/editorCanvasActivity";
+import { readPageEditorWorkspaceScale } from "@/page-builder/workspace/pageEditorWorkspaceTiers";
 import { App as AntdApp } from "antd";
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
   CopyOutlined,
   DeleteOutlined,
+  ExportOutlined,
 } from "@ant-design/icons";
 import { registerOverlayPortal, useGetPuck } from "@puckeditor/core";
 import { ROOT_ZONE, useHomepagePuck } from "../editor-store";
+import { usePageCanvasTemplatePreview } from "../pageCanvasTemplatePreview";
 import { getModuleDisplayName, resolveTemplateSectionRole } from "../editor-utils";
-import { useResolvedDynamicTemplateDefinitions } from "@/page-builder/dynamic-template-instance/registry";
+import { getResolvedDynamicTemplateDefinitions, useResolvedDynamicTemplateDefinitions } from "@/page-builder/dynamic-template-instance/registry";
+import { DYNAMIC_TEMPLATE_BLOCK_TYPE, dynamicTemplateVersionKey } from "@/page-builder/dynamic-template-instance/types";
+import type { EditorPageKey } from "@/page-builder/config/editorPages";
 import { usePublishedTemplateSectionRoles } from "@/page-builder/template-editor/publishedTemplateSectionRoles";
 import type { PuckProps } from "@/page-builder/types";
 import {
+  canReorderPageModule,
+  clonePageModule,
   deletePageModules,
   duplicatePageModule,
   reorderPageModules,
   usePageModuleStructureHistoryGuard,
 } from "./pageModuleActions";
+import CrossPageModuleCopy, { type CrossPageModuleSnapshot } from "./CrossPageModuleCopy";
 
 function findCanvasBlock(
   frameDocument: Document | null | undefined,
@@ -44,10 +52,14 @@ function findCanvasBlock(
 
 export default function CanvasSelectionDock({
   readOnly = false,
+  pageKey,
+  onSwitchPage,
 }: {
   readOnly?: boolean;
+  pageKey: EditorPageKey;
+  onSwitchPage: (key: EditorPageKey, copyId: string) => void;
 }) {
-  const { modal } = AntdApp.useApp();
+  const { modal, message } = AntdApp.useApp();
   const canvasActive = useEditorCanvasActive();
   const getPuck = useGetPuck();
   usePageModuleStructureHistoryGuard();
@@ -59,11 +71,13 @@ export default function CanvasSelectionDock({
   } | null>(null);
   const [dockHost, setDockHost] = useState<HTMLElement | null>(null);
   const [canvasReadyRevision, setCanvasReadyRevision] = useState(0);
+  const [crossPageSnapshot, setCrossPageSnapshot] = useState<CrossPageModuleSnapshot | null>(null);
   const appData = useHomepagePuck((state) => state.appState.data);
   const resolvedDefinitions = useResolvedDynamicTemplateDefinitions();
   const rolesByTemplateId = usePublishedTemplateSectionRoles((state) => state.rolesByTemplateId);
   const selectedItem = useHomepagePuck((state) => state.selectedItem);
-  const componentId = String(selectedItem?.props?.id ?? "");
+  const canvasPreview = usePageCanvasTemplatePreview();
+  const componentId = canvasPreview?.focused ? "" : String(selectedItem?.props?.id ?? "");
   const content = appData.content as Array<{
     type: string;
     props: PuckProps & { id: string };
@@ -81,16 +95,8 @@ export default function CanvasSelectionDock({
     : "";
   const componentType = selectedModule?.type ?? "";
   const selectedLocked = Boolean(selectedModule?.props?.locked);
-  const canMoveUp =
-    Boolean(selectedModule) &&
-    !selectedLocked &&
-    selectedIndex > 0 &&
-    !content[selectedIndex - 1]?.props?.locked;
-  const canMoveDown =
-    Boolean(selectedModule) &&
-    !selectedLocked &&
-    selectedIndex < content.length - 1 &&
-    !content[selectedIndex + 1]?.props?.locked;
+  const canMoveUp = canReorderPageModule(content[selectedIndex], content[selectedIndex - 1]);
+  const canMoveDown = canReorderPageModule(content[selectedIndex], content[selectedIndex + 1]);
 
   useEffect(() => {
     if (!canvasActive || !componentId || !portalRef.current) return undefined;
@@ -193,19 +199,17 @@ export default function CanvasSelectionDock({
       // 内部滚动条，在 100% 画布上会把 4px 差值错误放大到纵向坐标。
       const frameWidth = frame.offsetWidth;
       const scale = frameWidth > 0 ? frameBox.width / frameWidth : 1;
+      const hostZoom = readPageEditorWorkspaceScale(nextDockHost);
+      // 屏幕坐标包含工作台缩放，浮动工具栏的定位和滚动值使用宿主坐标。
       const nextPosition = {
         left:
-          frameBox.left -
-          hostBox.left +
+          (frameBox.left - hostBox.left + selectionBox.right * scale) / hostZoom +
           nextDockHost.scrollLeft -
-          nextDockHost.clientLeft +
-          selectionBox.right * scale,
+          nextDockHost.clientLeft,
         top:
-          frameBox.top -
-          hostBox.top +
+          (frameBox.top - hostBox.top + selectionBox.bottom * scale) / hostZoom +
           nextDockHost.scrollTop -
-          nextDockHost.clientTop +
-          selectionBox.bottom * scale,
+          nextDockHost.clientTop,
       };
       const previousPosition = lastDockPositionRef.current;
       if (
@@ -252,7 +256,8 @@ export default function CanvasSelectionDock({
           top = dockBox.top - hostViewport.top - inset;
         }
         if (Math.abs(left) >= 0.5 || Math.abs(top) >= 0.5) {
-          nextDockHost.scrollBy({ left, top, behavior: "auto" });
+          const hostZoom = readPageEditorWorkspaceScale(nextDockHost);
+          nextDockHost.scrollBy({ left: left / hostZoom, top: top / hostZoom, behavior: "auto" });
         }
       });
     };
@@ -282,18 +287,7 @@ export default function CanvasSelectionDock({
 
   const moveSelected = (direction: -1 | 1) => {
     if (readOnly) return;
-    const targetIndex = selectedIndex + direction;
-    if (
-      !selectedModule ||
-      selectedLocked ||
-      targetIndex < 0 ||
-      targetIndex >= content.length ||
-      content[targetIndex]?.props?.locked
-    ) {
-      return;
-    }
-
-    reorderPageModules(getPuck, selectedIndex, targetIndex);
+    reorderPageModules(getPuck, selectedIndex, selectedIndex + direction);
   };
 
   const deleteSelected = () => {
@@ -317,7 +311,23 @@ export default function CanvasSelectionDock({
     duplicatePageModule(getPuck, selectedIndex);
   };
 
-  return canvasActive && selectedModule && dockHost && !readOnly
+  const copyToOtherPage = () => {
+    const source = (getPuck().appState.data.content as typeof content).find((item) => item.props.id === componentId);
+    if (!source || source.props.locked || source.type !== DYNAMIC_TEMPLATE_BLOCK_TYPE || readOnly) return;
+    const { templateId, templateVersion } = source.props;
+    const version = getResolvedDynamicTemplateDefinitions()[
+      dynamicTemplateVersionKey(String(templateId ?? ""), Number(templateVersion))
+    ];
+    if (!version) {
+      message.warning("此区块的模板版本尚未加载，请稍后重试。");
+      return;
+    }
+    setCrossPageSnapshot({ sourcePage: pageKey, name: selectedDisplayName, block: clonePageModule(source), version });
+  };
+
+  return (
+    <>
+    {canvasActive && selectedModule && dockHost && !readOnly
     ? createPortal(
         <div
           ref={portalRef}
@@ -359,6 +369,16 @@ export default function CanvasSelectionDock({
           >
             <CopyOutlined aria-hidden="true" />
           </button>
+          {componentType === DYNAMIC_TEMPLATE_BLOCK_TYPE && !selectedLocked ? (
+            <button
+              type="button"
+              onClick={copyToOtherPage}
+              aria-label="复制到其他页面"
+              title="复制到其他页面"
+            >
+              <ExportOutlined aria-hidden="true" />
+            </button>
+          ) : null}
           <button
             type="button"
             className="is-danger"
@@ -372,7 +392,19 @@ export default function CanvasSelectionDock({
         </div>,
         dockHost,
       )
-    : null;
+    : null}
+    {crossPageSnapshot ? (
+      <CrossPageModuleCopy
+        key={crossPageSnapshot.block.props.id}
+        snapshot={crossPageSnapshot}
+        pageKey={pageKey}
+        readOnly={readOnly}
+        onSwitchPage={onSwitchPage}
+        onClose={() => setCrossPageSnapshot(null)}
+      />
+    ) : null}
+    </>
+  );
 }
 
 /** Puck 的临时 hover/selected portal 只负责绘制视觉覆盖层。 */

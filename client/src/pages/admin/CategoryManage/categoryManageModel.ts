@@ -1,17 +1,20 @@
-import type { TreeDataNode, TreeProps } from "antd";
 import type { Category } from "@/types";
 
 export interface CatTreeNode extends Category {
   children?: CatTreeNode[];
+  manageableProductCount?: number;
+  isUncategorized?: boolean;
 }
 
-export interface CatTreeDataNode extends TreeDataNode {
-  node?: CatTreeNode;
+/** 一级类目直属商品在目录中通过「未分类」查看，归属仍使用一级类目的 ID。 */
+export function hasUnclassifiedProducts(node: CatTreeNode): boolean {
+  return node.level === 1 && !node.isUncategorized && (node.manageableProductCount ?? 0) > 0;
 }
 
-export type CategoryDropInfo = Parameters<
-  NonNullable<TreeProps["onDrop"]>
->[0];
+export function matchesCategoryQuery(node: CatTreeNode, query: string): boolean {
+  const normalized = query.toLowerCase();
+  return node.name.toLowerCase().includes(normalized) || node.slug.toLowerCase().includes(normalized);
+}
 
 export function countProductsRecursive(node: CatTreeNode): number {
   const self = node._count?.products ?? 0;
@@ -22,9 +25,28 @@ export function countProductsRecursive(node: CatTreeNode): number {
   return self + childSum;
 }
 
-/** 顾客从该分类进入选款时会看到的商品数：品类含下级，款式只计本级。 */
-export function visibleProductCount(node: CatTreeNode): number {
-  return node.level === 1 ? countProductsRecursive(node) : (node._count?.products ?? 0);
+/** 商品浏览与商品管理使用同一分类范围。 */
+export function categoryProductsPath(
+  node: CatTreeNode,
+  status?: "ARCHIVED",
+  includeDescendants = !!node.children?.length,
+): string {
+  const params = new URLSearchParams({ categoryId: String(node.id) });
+  if (includeDescendants) params.set("includeDescendants", "1");
+  if (status) params.set("status", status);
+  return `/admin/products?${params.toString()}`;
+}
+
+/** 返回当前分支的可管理数量。兼容尚未提供此字段的后端。 */
+export function countManageableProducts(node: CatTreeNode): number | undefined {
+  let count = node.manageableProductCount;
+  if (count === undefined) return undefined;
+  for (const child of node.children ?? []) {
+    const childCount = countManageableProducts(child);
+    if (childCount === undefined) return undefined;
+    count += childCount;
+  }
+  return count;
 }
 
 /** 删除时要一起去掉的分类：自身和下级款式。 */
@@ -41,12 +63,16 @@ export function categoryMoveOptions(
 ): Array<{ value: number; label: string }> {
   const options: Array<{ value: number; label: string }> = [];
   const walk = (nodes: CatTreeNode[], prefix: string) => {
-    for (const node of nodes) {
-      if (excluded.has(node.id)) continue;
-      const label = prefix ? `${prefix} / ${node.name}` : node.name;
+    const siblings = sortCategories(nodes);
+    siblings.forEach((node, index) => {
+      if (excluded.has(node.id)) return;
+      const name = siblings.some((peer) => peer.id !== node.id && peer.name === node.name)
+        ? `${node.name}（第 ${index + 1} 位）`
+        : node.name;
+      const label = prefix ? `${prefix} / ${name}` : name;
       options.push({ value: node.id, label });
       if (node.children?.length) walk(node.children, label);
-    }
+    });
   };
   walk(tree, "");
   return options;
@@ -86,30 +112,7 @@ export function nextSortOrder(
   parentId: number | null,
 ): number {
   const siblings = parentId ? findNode(tree, parentId)?.children ?? [] : tree;
-  return siblings.reduce((max, item) => Math.max(max, item.sortOrder || 0), 0) + 1;
-}
-
-export function buildParentMap(
-  nodes: CatTreeNode[],
-  parent: number | null = null,
-  out = new Map<number, number | null>(),
-): Map<number, number | null> {
-  for (const node of nodes) {
-    out.set(node.id, parent);
-    if (node.children?.length) buildParentMap(node.children, node.id, out);
-  }
-  return out;
-}
-
-export function buildTreeData(nodes: CatTreeNode[]): CatTreeDataNode[] {
-  return nodes.map((node) => ({
-    key: node.id,
-    node,
-    children:
-      node.level === 1 && node.children?.length
-        ? buildTreeData(node.children)
-        : undefined,
-  }));
+  return siblings.reduce((max, item) => item.isUncategorized ? max : Math.max(max, item.sortOrder || 0), 0) + 1;
 }
 
 export function findNode(
@@ -126,17 +129,22 @@ export function findNode(
   return undefined;
 }
 
-export function removeNode(tree: CatTreeNode[], id: number): CatTreeNode[] {
-  return tree.flatMap((node) => {
-    if (node.id === id) return [];
-    if (!node.children?.length) return [node];
-    return [{ ...node, children: removeNode(node.children, id) }];
-  });
+export function getCategoryPath(tree: CatTreeNode[], id: number): CatTreeNode[] {
+  for (const node of tree) {
+    if (node.id === id) return [node];
+    const path = node.children?.length ? getCategoryPath(node.children, id) : [];
+    if (path.length) return [node, ...path];
+  }
+  return [];
 }
 
-/** 已不在前台、且没有款式和商品的分类不再出现在列表里。 */
+/** 分类目录只显示有待处理商品的「未分类」，并收起历史停用空分类。 */
 export function withoutRetiredEmpty(nodes: CatTreeNode[]): CatTreeNode[] {
   return nodes.flatMap((node) => {
+    if (node.isUncategorized) {
+      const workingCount = node.manageableProductCount ?? node._count?.products ?? 0;
+      return workingCount > 0 ? [node] : [];
+    }
     const children = node.children?.length
       ? withoutRetiredEmpty(node.children)
       : node.children;
@@ -162,17 +170,14 @@ export function orderedSiblings(
   tree: CatTreeNode[],
   parent: number | null,
 ): CatTreeNode[] {
-  return getSiblings(tree, parent)
-    .slice()
-    .sort((left, right) => left.sortOrder - right.sortOrder || left.id - right.id);
+  return sortCategories(getSiblings(tree, parent));
 }
 
-export function getParentName(
-  tree: CatTreeNode[],
-  parentId?: number | null,
-): string {
-  if (!parentId) return "—";
-  return findNode(tree, parentId)?.name ?? "—";
+export function sortCategories(nodes: CatTreeNode[]): CatTreeNode[] {
+  return [...nodes].sort((left, right) =>
+    Number(!!right.isUncategorized) - Number(!!left.isUncategorized) ||
+    left.sortOrder - right.sortOrder || left.id - right.id,
+  );
 }
 
 export function applySiblingOrder(
@@ -217,13 +222,12 @@ export function filterTree(
   const walk = (list: CatTreeNode[]): CatTreeNode[] => {
     const result: CatTreeNode[] = [];
     for (const node of list) {
-      const selfMatch =
-        node.name.toLowerCase().includes(normalizedQuery) ||
-        node.slug.toLowerCase().includes(normalizedQuery);
+      const selfMatch = matchesCategoryQuery(node, normalizedQuery);
+      const unclassifiedMatch = hasUnclassifiedProducts(node) && "未分类".includes(normalizedQuery);
       const filteredChildren = node.children?.length
         ? walk(node.children)
         : [];
-      if (selfMatch || filteredChildren.length) {
+      if (selfMatch || unclassifiedMatch || filteredChildren.length) {
         result.push({
           ...node,
           children: selfMatch ? node.children : filteredChildren,

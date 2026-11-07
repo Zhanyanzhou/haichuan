@@ -31,6 +31,7 @@ import type {
 } from "@/page-builder/inspector/publishValidation";
 import {
   getPagePublishIssueKey,
+  isPagePublishReviewIssue,
   reconcilePagePublishIssueKey,
 } from "@/page-builder/inspector/publishValidation";
 import {
@@ -720,20 +721,20 @@ export function usePageWorkspaceController({
       setPublishReviewIssueKey((currentKey) => reconcilePagePublishIssueKey(
         previousPublishIssuesRef.current,
         currentKey,
-        publishReviewIssues.filter((issue) => issue.severity === "error"),
+        publishReviewIssues.filter(isPagePublishReviewIssue),
       ));
     }
     previousPublishIssuesRef.current = publishReviewIssues;
   }, [publishReviewActive, publishReviewIssues]);
 
   const activatePublishReview = useCallback((issues: PublishValidationIssue[]) => {
-    const errors = issues.filter((issue) => issue.severity === "error");
+    const targets = issues.filter(isPagePublishReviewIssue);
     setPublishReviewActive(true);
     setPublishReviewOpen(true);
     setPublishReviewIssueKey((currentKey) => (
-      currentKey && errors.some((issue) => getPagePublishIssueKey(issue) === currentKey)
+      currentKey && targets.some((issue) => getPagePublishIssueKey(issue) === currentKey)
         ? currentKey
-        : errors[0] ? getPagePublishIssueKey(errors[0]) : null
+        : targets[0] ? getPagePublishIssueKey(targets[0]) : null
     ));
   }, []);
 
@@ -979,11 +980,11 @@ export function usePageWorkspaceController({
   // 历史 reason：自动保存曾作为 SPA 跳转的静默兜底，用户判定其无价值且干扰草稿管理。
 
   const switchEditorPage = useCallback(
-    async (path: string) => {
+    async (path: string, state?: { pageModuleCopyId: string }) => {
       const targetPage = getEditorPageByPath(path);
       if (!targetPage || targetPage.key === pageKey) return;
       // 未保存修改由 UnsavedChangesGuard 拦截（保存并离开/继续编辑），此处纯导航。
-      navigate(`/admin/editor/${targetPage.key}`);
+      navigate(`/admin/editor/${targetPage.key}`, { state });
     },
     [navigate, pageKey],
   );

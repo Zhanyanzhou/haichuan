@@ -21,7 +21,7 @@ import { usePublishedTemplateSectionRoles } from "../template-editor/publishedTe
 import InspectorObjectContext, {
   getInspectorResponsiveStates,
 } from "./InspectorObjectContext";
-import InspectorDisclosure from "./InspectorDisclosure";
+import InspectorFieldGroup from "./InspectorFieldGroup";
 import InspectorFooterBar from "./InspectorFooterBar";
 import { resolvePublishIssueReviewAction } from "./publishReminderDialog";
 import {
@@ -894,7 +894,7 @@ export default function SchemaInspectorPanel({
                       </div>
                     ))}
                   {entries.some(({ field }) => field.control === "color") ? (
-                    <InspectorDisclosure label="自定义颜色">
+                    <InspectorFieldGroup label="自定义颜色">
                       <div className="homepage-editor__advanced-settings-grid">
                         {entries
                           .filter(({ field }) => field.control === "color")
@@ -913,7 +913,7 @@ export default function SchemaInspectorPanel({
                             </div>
                           ))}
                       </div>
-                    </InspectorDisclosure>
+                    </InspectorFieldGroup>
                   ) : null}
                 </>
               ) : null}

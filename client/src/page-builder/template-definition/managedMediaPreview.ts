@@ -4,6 +4,8 @@ import api, { requestStatus } from "@/services/httpClient";
 import { currentSessionEpoch, isCurrentSessionEpoch, isStaleSessionResponseError, StaleSessionResponseError } from "@/services/sessionEpoch";
 import { useAuthStore } from "@/store/authStore";
 import { RESPONSIVE_UPLOADS_IMAGE_WIDTHS } from "@/utils/responsiveUploadsImage";
+import { resolveRenderableImageSrc } from "@/components/common/SecureImage";
+import { withPublicMediaWidth } from "@/utils/publicMediaWidth";
 
 const MANAGED_PAGE_ASSET_PREFIX = "/uploads/page-assets/";
 const STAFF_MEDIA_PREVIEW_PATH = "/api/upload/media/preview-by-storage-key?";
@@ -26,6 +28,16 @@ function sessionCacheKey(requestUrl: string, epoch = currentSessionEpoch("admin"
   return `${epoch}|${requestUrl}`;
 }
 
+export function isTemplateProductImage(value: string): boolean {
+  return /^\/products\/public\/[1-9]\d*\/media\/[1-9]\d*$/.test(value);
+}
+
+export function resolveTemplateProductImageUrl(value: string, width: 800 | 1200 = 1200): string {
+  return isTemplateProductImage(value)
+    ? resolveRenderableImageSrc(withPublicMediaWidth(value, width))
+    : value;
+}
+
 /**
  * 模板保存的始终是受治理的正式素材引用；后台编辑与预览改走
  * 需登录的预览端点，避免尚未完成公开授权的素材被误判为失效。
@@ -35,7 +47,7 @@ export function resolveManagedTemplateMediaPreviewUrl(
   value: string | undefined,
   width?: typeof RESPONSIVE_UPLOADS_IMAGE_WIDTHS[number],
 ): string {
-  if (!value?.startsWith(MANAGED_PAGE_ASSET_PREFIX)) return value ?? "";
+  if (!value?.startsWith(MANAGED_PAGE_ASSET_PREFIX)) return resolveTemplateProductImageUrl(value ?? "", width === 800 ? 800 : 1200);
   const path = value.split(/[?#]/, 1)[0];
   const storageKey = path.slice("/uploads/".length);
   const segments = storageKey.split("/");

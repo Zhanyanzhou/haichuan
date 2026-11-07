@@ -171,8 +171,8 @@ export default function TemplateNativeResponsiveControls({ nodeIds, disabled = f
     if (!result.ok) { setError(result.message); return; }
     setReview(null); setError(null); setNotice(`${label}，${review.plan.changes.length} 项变化。可撤销。`);
   };
-  return <details className="template-native-responsive">
-    <summary>复制与恢复设计组</summary>
+  return <section className="template-native-responsive" aria-label="复制与恢复设计组">
+    <h4>复制与恢复设计组</h4>
     <div role="group" aria-label="设计组操作" className="template-native-responsive__actions">
       <button type="button" aria-pressed={mode === "copy"} onClick={() => setMode("copy")}>复制其他设备</button>
       <button type="button" aria-pressed={mode === "restore"} onClick={() => setMode("restore")}>恢复最近保存</button>
@@ -201,5 +201,5 @@ export default function TemplateNativeResponsiveControls({ nodeIds, disabled = f
         {error ? <p role="alert">{error}</p> : null}
       </div>
     </Modal>
-  </details>;
+  </section>;
 }

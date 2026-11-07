@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import type { Prisma } from "@prisma/client";
 import { computeProductPublicationQualityHash } from "../modules/products/product-publication-quality-hash";
 import test from "node:test";
 import {
@@ -129,6 +130,7 @@ function database(options: {
   documents?: any[];
   audit?: any;
   actor?: any;
+  simulateSkuQualityProjection?: boolean;
 } = {}) {
   const calls: string[] = [];
   let settingsRead = 0;
@@ -149,9 +151,20 @@ function database(options: {
         },
       },
       product: {
-        findMany: async () => {
+        findMany: async ({ select }: Prisma.ProductFindManyArgs) => {
           calls.push("product.findMany");
-          return structuredClone(options.products ?? []);
+          const rows = structuredClone(options.products ?? []);
+          if (options.simulateSkuQualityProjection) {
+            const skuSelect = typeof select?.skus === "object" ? select.skus.select : undefined;
+            for (const row of rows) {
+              if (!select?.priceMin) delete row.priceMin;
+              for (const sku of row.skus) {
+                if (!skuSelect?.imageId) delete sku.imageId;
+                if (!skuSelect?.color) delete sku.color;
+              }
+            }
+          }
+          return rows;
         },
       },
       operationLog: {
@@ -507,6 +520,25 @@ test("静态 SEO 快照拒绝沿用图片类型或排序已变化的旧质量 ha
       /QUALITY_HASH_DRIFT/,
     );
   }
+});
+
+test("静态 SEO 快照沿用旧 SKU 签认，并检查新增规格和定制参考价", async () => {
+  const value = product();
+  const exportProduct = () => createPublicSeoExportInput(
+    database({ products: [value], simulateSkuQualityProjection: true }).value, config, validatePage, NOW,
+  );
+
+  // 已签认的旧 SKU 在新增列后得到 NULL，原哈希仍有效。
+  Object.assign(value.skus[0], { imageId: null, color: null });
+  assert.ok((await exportProduct()).routes.some((route) => route.path === "/products/HC-RING-01"));
+
+  Object.assign(value, { salesMode: "CUSTOM_INQUIRY", priceMin: "1600" });
+  Object.assign(value.skus[0], { imageId: 401, color: "金色" });
+  value.publicationQualityHash = qualityHash(value);
+  assert.ok((await exportProduct()).routes.some((route) => route.path === "/products/HC-RING-01"));
+
+  value.skus[0].color = "玫瑰金色";
+  await assert.rejects(exportProduct, /QUALITY_HASH_DRIFT/);
 });
 
 test("当前页面校验器或商品分类不满足发布资格时失败关闭", async () => {

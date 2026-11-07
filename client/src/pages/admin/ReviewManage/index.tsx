@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { App as AntdApp, Button, Input, Modal, Rate, Select, Space, Table, Tag } from 'antd';
 import { reviewApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
 import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
-import { AdminErrorState } from '@/components/common/AdminDataStates';
+import { AdminErrorState, AdminLoadingState } from '@/components/common/AdminDataStates';
 import { useAuthStore } from '@/store/authStore';
 import { SecureImage } from '@/components/common/SecureImage';
 
@@ -39,25 +39,33 @@ export default function ReviewManage() {
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState('PENDING');
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [replyTarget, setReplyTarget] = useState<ReviewRow | null>(null);
   const [replyText, setReplyText] = useState('');
   // 只锁当前操作中的行/弹窗，避免一行审核让整页按钮同时转圈
   const [handlingId, setHandlingId] = useState<number | null>(null);
+  const listRequestId = useRef(0);
 
   const load = async () => {
+    const requestId = ++listRequestId.current;
     setLoading(true);
     setLoadError(false);
     try {
       const res = await reviewApi.adminList({ page, pageSize: 20, status });
+      if (requestId !== listRequestId.current) return;
       const data = unwrapResponse<{ list: ReviewRow[]; total: number }>(res);
       setList(data?.list || []);
       setTotal(data?.total || 0);
     } catch (e: unknown) {
+      if (requestId !== listRequestId.current) return;
       setLoadError(true);
       message.error(getSafeAdminErrorMessage(e, '评价列表加载失败，请稍后重试。'));
     } finally {
-      setLoading(false);
+      if (requestId === listRequestId.current) {
+        setInitialLoading(false);
+        setLoading(false);
+      }
     }
   };
 
@@ -101,7 +109,9 @@ export default function ReviewManage() {
         />
       </div>
 
-      {loadError ? (
+      {initialLoading ? (
+        <AdminLoadingState subject="评价列表" allowInteraction />
+      ) : loadError ? (
         <div className="bg-white border border-brand-line">
           <AdminErrorState subject="评价列表" onRetry={() => void load()} />
         </div>

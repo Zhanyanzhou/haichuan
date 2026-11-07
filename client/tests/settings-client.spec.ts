@@ -254,13 +254,20 @@ test("操作日志沿用员工鉴权和现有分页筛选参数", async ({ page 
 
 test("操作日志加载失败时提供可执行的重新加载入口", async ({ page }) => {
   await authenticateAuditAdmin(page);
+  const viewport = { width: 1440, height: 900 };
+  await page.setViewportSize(viewport);
   let attempts = 0;
+  let releaseLogs = () => {};
+  const logsCanFinish = new Promise<void>((resolve) => { releaseLogs = resolve; });
+  let releaseNotifications = () => {};
+  const notificationsCanFinish = new Promise<void>((resolve) => { releaseNotifications = resolve; });
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/api/auth/profile") return route.fallback();
     if (url.pathname === "/api/settings/logs") {
       attempts += 1;
       if (attempts === 1) {
+        await logsCanFinish;
         return route.fulfill({
           status: 503,
           contentType: "application/json",
@@ -277,6 +284,7 @@ test("操作日志加载失败时提供可执行的重新加载入口", async ({
         }),
       });
     }
+    if (url.pathname === "/api/notification-operations/failures") await notificationsCanFinish;
     return route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -285,6 +293,23 @@ test("操作日志加载失败时提供可执行的重新加载入口", async ({
   });
 
   await page.goto("/admin/audit-logs");
+  try {
+    const loading = page.getByRole("status", { name: "正在加载操作日志…" });
+    await expect(loading).toBeVisible();
+    await expect(page.locator(".site-route-loading")).toHaveCount(1);
+    const indicator = (await loading.locator(".site-route-loading__indicator").boundingBox())!;
+    expect(indicator.x + indicator.width / 2).toBeCloseTo(viewport.width / 2, 0);
+    expect(indicator.y + indicator.height / 2).toBeCloseTo(viewport.height / 2, 0);
+    const logsFailed = page.waitForResponse((response) =>
+      new URL(response.url()).pathname === "/api/settings/logs" && response.status() === 503,
+    );
+    releaseLogs();
+    await logsFailed;
+    await expect(loading).toBeVisible();
+  } finally {
+    releaseLogs();
+    releaseNotifications();
+  }
   await expect(page.getByText("操作日志加载失败。请稍后重新加载。", { exact: true })).toBeVisible();
   await expect(page.getByText("internal fixture detail", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "重新加载" }).click();

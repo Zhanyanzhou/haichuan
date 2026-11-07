@@ -48,15 +48,17 @@
 .template-native__scope-notice > button { margin-top: 6px; width: 100%; }
 .template-editor__native-design .template-native__scope { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; align-items: center; font-size: 12px; color: var(--adm-muted); }
 .template-native__breakpoint-actions { margin: 8px 0; padding-top: 4px; border-top: 1px solid var(--adm-line); font-size: 13px; }
-.template-native__breakpoint-actions > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
-.template-native__breakpoint-actions > summary > small { margin-left: auto; color: var(--adm-muted); font-size: 12px; font-weight: 400; }
+.template-native__breakpoint-actions > h3,
+.template-native__breakpoint-actions h4,
+.template-native__custom-padding > h4,
+.template-native__design-width > h4 { margin: 8px 0; font-size: 13px; font-weight: 600; }
 .template-native__breakpoint-actions > p { margin: 4px 0 8px; color: var(--adm-muted); font-size: 12px; line-height: 18px; }
 .template-native__breakpoint-actions .template-native__anchor,
 .template-native__breakpoint-actions .template-native-responsive { margin: 8px 0 0; border-top: 1px solid var(--adm-line); }
-.template-editor__native-design summary,
-.template-native__anchor summary { min-height: 32px; padding: 5px 0; cursor: pointer; }
-.template-editor__native-design .template-native__section { padding: 16px 0; margin: 0; }
+.template-editor__native-design summary { min-height: 32px; padding: 5px 0; cursor: pointer; }
+.template-editor__native-design .template-native__section { padding: 8px 0 12px; margin: 0; }
 .template-native__section > h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+.template-native__section > h3 > small { display: block; color: var(--adm-muted); font-size: 12px; font-weight: 400; }
 .template-native__dimensions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .template-native__dimensions > h3,
 .template-native__measured,
@@ -70,6 +72,7 @@
 [data-template-overall-design] .template-native__measured strong { font-size: 15px; font-weight: 500; }
 [data-template-overall-design] .template-native__measured > .template-native__proportion { grid-column: 1 / -1; flex-direction: row; align-items: baseline; gap: 8px; }
 [data-template-overall-design] .template-native__measured > .template-native__proportion strong { font-size: 13px; }
+[data-template-overall-design] .template-native__measured > small { grid-column: 1 / -1; }
 .template-native__ratio { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 [data-template-overall-design] .template-native__dimensions { grid-template-columns: minmax(0, 1fr); gap: 10px; padding-top: 10px; padding-bottom: 8px; }
 [data-template-overall-design] .template-native__ratio { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; align-items: center; }
@@ -77,13 +80,6 @@
 [data-template-overall-design] .template-native__ratio > span { font-size: 12px; color: var(--adm-muted); }
 [data-template-overall-design] .template-native__ratio > button { padding-left: 0; padding-right: 0; }
 .template-native__overall { display: grid; gap: 8px; }
-.template-native__public-width { display: flex; justify-content: space-between; gap: 12px; margin: 0; font-size: 13px; }
-.template-native__public-width span { color: var(--adm-muted); }
-.template-native__size-notes { border-top: 1px solid var(--adm-line); }
-.template-native__size-notes > summary { font-size: 13px; font-weight: 500; }
-.template-native__size-notes p { margin: 0 0 6px; color: var(--adm-muted); font-size: 12px; line-height: 1.5; }
-.template-native__ratio-input { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; border: 0; padding: 0; margin: 0; min-width: 0; }
-.template-native__ratio-input legend { margin-bottom: 4px; font-size: 13px; }
 .template-native__ratio > [role="group"] { flex-basis: 100%; }
 .template-native__layout-after-size { order: 3; }
 .template-native__property { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 8px; margin-bottom: 12px; min-width: 0; }
@@ -92,12 +88,15 @@
 .template-native__property > :is(label, small, div) { flex-basis: 100%; min-width: 0; }
 .template-native__property > .template-native__property-status { flex: 0 1 auto; order: 2; }
 .template-native__property-status:empty { display: none; }
-.template-native__property > .template-native__property-metadata { flex: 1 1 auto; order: 1; }
-.template-native__property > .template-native__property-metadata[open] { flex-basis: 100%; }
+.template-native__property > .template-native__property-metadata { order: 1; }
 .template-native__property > small { color: var(--adm-muted); font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
+.template-native__visual-property { display: grid; gap: 6px; }
+.template-native__visual-options { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; }
+.template-native__visual-options > button { display: flex; min-width: 0; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+.template-native__visual-options svg { flex: none; max-width: 100%; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.template-native__weight-sample { font-size: 24px; line-height: 30px; }
+.template-native__visual-property > small { color: var(--adm-muted); }
 .template-native__property-metadata { flex-basis: 100%; min-width: 0; color: var(--adm-muted); font-size: 12px; }
-.template-native__property-metadata[open] { background: var(--adm-neutral-bg); padding: 8px; border-radius: 4px; }
-.template-editor__native-design .template-native__property-metadata summary { min-height: 24px; padding: 0; }
 .template-native__property-metadata > small { display: block; margin: 4px 0; font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
 .template-native__property-metadata button { margin: 4px 0; font-size: 12px; }
 .template-native__unavailable-options { font-size: 12px; color: var(--adm-muted); }
@@ -119,27 +118,17 @@
 .template-native__layout table { width: 100%; font-size: 12px; overflow-wrap: anywhere; border-collapse: collapse; }
 .template-native__layout :is(td, th) { border: 1px solid var(--adm-line); padding: 4px; text-align: left; }
 .template-native__anchor .template-editor__focus-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.template-native__anchor[open] > summary { margin-bottom: 8px; }
-.template-native__anchor > summary { font-weight: 500; }
-.template-native__secondary-group { border-top: 1px solid var(--adm-line); }
-.template-native__secondary-group > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 14px; font-weight: 600; padding: 12px 0; }
-.template-native__secondary-group > summary::before { content: "›"; }
-.template-native__secondary-group[open] > summary::before { transform: rotate(90deg); }
-.template-native__secondary-group > summary > small { flex: 1 1 auto; margin-left: auto; padding-left: 8px; color: var(--adm-muted); font-size: 13px; font-weight: 400; text-align: right; }
 .template-native__root-layout .template-native__layout { margin: 0; padding-top: 0; }
 .template-native__root-layout .template-native__layout-heading > h3 { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-.template-native__section[data-template-property-group="间距与对齐"],
-details[data-template-property-group="间距与对齐"] > .template-native__section { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; row-gap: 8px; align-items: start; }
-.template-native__section[data-template-property-group="间距与对齐"] > :not(.template-native__pad),
-details[data-template-property-group="间距与对齐"] > .template-native__section > :not(.template-native__pad) { grid-column: 1 / -1; }
+.template-native__section[data-template-property-group="间距与对齐"] { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; row-gap: 8px; align-items: start; }
+.template-native__section[data-template-property-group="间距与对齐"] > :not(.template-native__pad) { grid-column: 1 / -1; }
 .template-native__pad { margin-bottom: 0; }
-.template-native__secondary-group > .template-native__section { padding-top: 0; }
 .template-native__layout .template-editor__settings-section { border: 0; }
 .template-editor__native-design > .template-native__layout { margin: 0; padding: 12px 0; }
 .template-editor__native-design .template-native__layout > h3 { font-size: 14px; font-weight: 600; margin: 0 0 8px; }
 .template-native__property .homepage-editor__number-input > select { width: 64px; flex: 0 0 64px; }
 .template-native__property :is(input, select) { min-height: 36px; font-variant-numeric: tabular-nums; }
-@container (max-width: 280px) {
+@container (max-width: 250px) {
   .template-native__dimensions { grid-template-columns: minmax(0, 1fr); }
   .template-native__measured { flex-wrap: wrap; }
   .template-native__editing-context { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
@@ -171,12 +160,17 @@ details[data-template-property-group="间距与对齐"] > .template-native__sect
 .template-native__layout-diagram rect { fill: var(--adm-neutral-bg); stroke: currentColor; stroke-width: 1px; }
 .template-native__column-preview { display: flex; gap: 4px; margin: 8px 0; min-width: 0; }
 .template-native__column-preview > span { flex-basis: 0; min-width: 0; padding: 8px 2px; border: 1px solid var(--adm-line); background: var(--adm-neutral-bg); color: var(--adm-text); font-size: 12px; text-align: center; overflow-wrap: anywhere; }
-.template-native__dimensions > [data-template-design-property="node.height"] { grid-column: 1 / -1; }
+
+.template-native__overall-padding { display: grid; justify-items: start; gap: 6px; }
+.template-native__padding-values { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; color: var(--adm-muted); }
+.template-native__padding-values strong { color: var(--adm-text); font-weight: 500; font-variant-numeric: tabular-nums; }
+.template-native__hero-frames { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-bottom: 12px; color: var(--adm-muted); }
+.template-native__hero-frames strong { color: var(--adm-text); font-variant-numeric: tabular-nums; }
+.template-native__custom-padding { width: 100%; min-width: 0; font-size: 13px; }
+.template-native__section .template-native__spacing-action { justify-self: start; }
 .template-native__design-width { border-top: 1px solid var(--adm-line); font-size: 13px; }
-.template-native__design-width > summary { color: var(--adm-muted); }
 .template-native__default-content { margin: 0; }
-.template-native__default-content > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-weight: 600; }
-.template-native__default-content > summary > small { color: var(--adm-muted); font-size: 12px; font-weight: 400; }
+.template-native__default-content .homepage-editor__media-preview-trigger { max-width: 144px; }
 .template-native__default-content > .homepage-editor__inspector-section-body { padding-top: 8px; }
 
 /* 盒模型只重排原有字段，单位、校验、继承和撤销仍走统一属性命令。 */

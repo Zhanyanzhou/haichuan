@@ -231,7 +231,7 @@ export const navigationConfig: NavDomain[] = [
           { key: "products", label: "商品管理", route: "/admin/products" },
           {
             key: "categories",
-            label: "类目管理",
+            label: "分类管理",
             route: "/admin/categories",
           },
           {

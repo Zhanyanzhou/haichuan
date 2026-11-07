@@ -45,6 +45,7 @@ import {
 } from "../runtime/ContentTemplateRenderSurface";
 import {
   resolveManagedTemplateMediaPreviewUrl,
+  resolveTemplateProductImageUrl,
   useManagedTemplateMediaDisplayUrl,
 } from "./managedMediaPreview";
 import { usesLargePhoneMeasure } from "./largePhoneMeasure";
@@ -52,7 +53,7 @@ import { segmentMobileCopyFrames } from "./mobileCopyInsideImage";
 import { attachMobileWorkCaptions, creationGridLeadSpanId, heroFrameExceedsViewport, isMobileWorkUnit, pageHeroReusesDesktopFrame, paintDesktopOnlyHeroFrame, partitionMobileWorkUnits, resolveMobileImageFrame, splitHeroMobileFrame } from "./mobileWorkGrid";
 import { choosePeerImageSplit, pairedCanvasContentBox, workCardOverflowsCell, type PairedCanvasRatio } from "./pairedCanvas";
 import { formatExactTemplateRatio, formatTemplateRatio, isContentHeightSplitSection, parseTemplateRatio, resolvePairedMobileCanvas, splitCopyShouldStack } from "./templateDimensions";
-import { hasExplicitMobileTemplateComposition, hasExplicitMobileTemplateLayout, isFixedFourWorkGrid } from "./layoutAuthoring";
+import { getWorkGridImageSlotIds, hasExplicitMobileTemplateComposition, hasExplicitMobileTemplateLayout, isFixedFourWorkGrid } from "./layoutAuthoring";
 import { publicFlowNodeIsVisible } from "./publicFlow";
 import { hasTemplateImageContent, resolveTemplateImageSource } from "./imageContent";
 import { resolveTextOnImageScrim } from "./textOnImageScrim";
@@ -66,6 +67,7 @@ import {
   type ImageDeliveryFit,
 } from "../config/imageDeliveryGeometry";
 import { buildResponsiveUploadsDerivedUrl } from "@/utils/responsiveUploadsImage";
+import { normalizePublicProductReference, publicProductPath } from "@/utils/publicProductPath";
 import { usePublicImageFact } from "../runtime/publicImageFacts";
 import { usePageEditorMediaVariant } from "./usePageEditorMediaVariant";
 import { RESPONSIVE_CANVAS } from "../config/blockContracts";
@@ -321,12 +323,6 @@ function spacingToCss(
     .join(" ");
 }
 
-function cssFrameIsLandscape(frame: string | undefined): boolean {
-  if (!frame) return false;
-  const [width, height] = frame.split("/").map((part) => Number(part.trim()));
-  return width > 0 && height > 0 && width / height >= 1;
-}
-
 function ratioToCss(ratio: string | undefined): string | undefined {
   return ratio && /^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(ratio)
     ? ratio.replace(":", " / ")
@@ -341,28 +337,12 @@ function parseAspectRatio(ratio: string | undefined): { width: number; height: n
   return { width, height };
 }
 
-/**
- * 手机首屏没有单独竖图时，外框用 4:5，图片铺满。
- * 「完整放入」配上更高的竖框会把横图衬在深色底上，所以这种情况改为铺满。
- * 页面标题仍是槽位里的文字。实例里明确选择的适配方式保持不变。
- */
 export function resolveImageObjectFit(
-  node: Pick<DynamicTemplateRenderPlanNode, "layoutOverride" | "slot" | "slotRules">,
-  viewport: "desktop" | "mobile" | undefined,
+  node: Pick<DynamicTemplateRenderPlanNode, "layoutOverride" | "slotRules">,
 ): NonNullable<CSSProperties["objectFit"]> {
-  const explicitOverride = node.layoutOverride?.objectFit;
-  const requested = explicitOverride
+  return node.layoutOverride?.objectFit
     ?? node.slotRules?.objectFit
     ?? TEMPLATE_MEDIA_DEFAULTS.objectFit;
-  if (explicitOverride || viewport !== "mobile" || node.slot?.semanticRole !== "backgroundImage") {
-    return requested;
-  }
-  const frame = parseAspectRatio(node.slotRules?.aspectRatio);
-  const desktop = parseAspectRatio(node.slot?.desktopRules?.aspectRatio);
-  const portraitFrame = Boolean(frame && frame.width / frame.height < 1);
-  const sharedLandscape = !desktop || desktop.width / desktop.height >= 1;
-  if (portraitFrame && sharedLandscape && requested === "contain") return "cover";
-  return requested;
 }
 
 /**
@@ -375,7 +355,7 @@ function resolveImageFrameAspectRatio(
   preserveResolvedMobileRatio: boolean,
 ): string | undefined {
   if (preserveResolvedMobileRatio) return undefined;
-  if (resolveImageObjectFit(node, viewport) !== "contain" || viewport !== "mobile") return undefined;
+  if (resolveImageObjectFit(node) !== "contain" || viewport !== "mobile") return undefined;
   const desktop = parseAspectRatio(node.slot?.desktopRules?.aspectRatio);
   if (desktop && desktop.width / desktop.height >= 1) {
     return `${desktop.width} / ${desktop.height}`;
@@ -711,7 +691,7 @@ function ManagedTemplateSlotImage({
   const previewUrl = hostFetch ? resolveManagedTemplateMediaPreviewUrl(src) : src;
   const displaySrc = hostFetch
     ? media.displaySrc || (media.status === "error" && variant.width === undefined ? previewUrl : "")
-    : src;
+    : resolveTemplateProductImageUrl(src);
   const facts = usePublicImageFact(hostFetch ? undefined : src);
   const [srcSetEnabled, setSrcSetEnabled] = useState(true);
   const [failedHero, setFailedHero] = useState<{ src: string; canRetry: boolean } | null>(null);
@@ -876,7 +856,6 @@ function renderSlotContent(
   imageFit?: NonNullable<CSSProperties["objectFit"]>,
   canvasColor?: string,
   onImage = false,
-  imageCarriesCopy = false,
 ): ReactNode {
   const { slot, content } = node;
   if (!slot) return null;
@@ -1000,19 +979,7 @@ function renderSlotContent(
         </span>
       );
     }
-    const operatorFit = node.layoutOverride?.objectFit;
-    const desktopFrame = parseAspectRatio(node.slot?.desktopRules?.aspectRatio);
-    const landscapeHero = (node.slot?.semanticRole === "backgroundImage" || node.slot?.semanticRole === "heroImage")
-      && Boolean(desktopFrame && desktopFrame.width / desktopFrame.height >= 1);
-    // 横图没有手机图时按原比例铺满，不再完整放入竖框。操作者明确选了铺满或拉伸时保留该选择。
-    const posterContain = imageCarriesCopy
-      && editorViewport === "mobile"
-      && !mobileSrc
-      && operatorFit !== "cover"
-      && operatorFit !== "fill"
-      && !landscapeHero;
-    const resolvedFit = posterContain ? "contain" : imageFit ?? resolveImageObjectFit(node, editorViewport);
-    const objectFit = resolvedFit;
+    const objectFit = imageFit ?? resolveImageObjectFit(node);
     return (
       <ManagedTemplateSlotImage
         src={src}
@@ -1531,6 +1498,7 @@ function RenderNode({
   fillSplitRemainder = false,
   pairedWorkCard = false,
   layoutDefinition,
+  workGridImageSlotIds,
   pageHeroPlacement,
   heroCopyBelow = false,
   heroFrameCapped = false,
@@ -1592,6 +1560,7 @@ function RenderNode({
   pairedWorkCard?: boolean;
   /** 当前渲染定义（含属性预览），仅用于判断手机排列是否由作者明确设置。 */
   layoutDefinition?: TemplateDefinitionV2;
+  workGridImageSlotIds?: ReadonlySet<string>;
   pageHeroPlacement?: PageHeroFramePlacement;
   heroCopyBelow?: boolean;
   heroFrameCapped?: boolean;
@@ -1602,7 +1571,9 @@ function RenderNode({
   const backgroundSource = !node.hidden && node.rules.backgroundImage && isSafeTemplateMediaUrl(node.rules.backgroundImage)
     ? node.rules.backgroundImage
     : "";
-  const backgroundMedia = useManagedTemplateMediaDisplayUrl(backgroundSource, mode !== "public", layoutElement);
+  // 目录缩略图使用画框实测尺寸选派生档，避免小卡片读取完整背景原图。
+  const backgroundVariant = usePageEditorMediaVariant(backgroundSource, mode === "thumbnail", layoutElement, "cover");
+  const backgroundMedia = useManagedTemplateMediaDisplayUrl(backgroundSource, mode !== "public", layoutElement, backgroundVariant);
   const backgroundDisplayUrl = !backgroundSource
     ? undefined
     : mode === "public"
@@ -1643,7 +1614,17 @@ function RenderNode({
   const artworkImageHref = artworkHref && node.slot?.type === "image" && node.slotId === artworkImageSlotId
     ? artworkHref
     : undefined;
-  const Element: ElementType = actionHref || artworkImageHref ? "a" : nodeElementType(node);
+  const workImage = mode !== "editor" && !node.hidden && node.slotId && workGridImageSlotIds?.has(node.slotId)
+    && node.content && typeof node.content === "object" && !Array.isArray(node.content)
+    ? node.content as { alt?: unknown; workProductCode?: unknown }
+    : undefined;
+  const workCode = typeof workImage?.alt === "string" && workImage.alt.trim()
+    && hasTemplateImageContent(workImage, device)
+    ? normalizePublicProductReference(workImage.workProductCode)
+    : null;
+  const workImageHref = workCode ? publicProductPath({ id: workCode, code: workCode }) : undefined;
+  const nodeHref = actionHref ?? workImageHref ?? artworkImageHref;
+  const Element: ElementType = nodeHref ? "a" : nodeElementType(node);
   const interactive = mode === "editor" && Boolean(onSelectNode);
   const structureLocked = structureProtectedNodeIds?.has(node.nodeId) === true;
   const layoutEditable = Boolean(
@@ -1909,14 +1890,9 @@ function RenderNode({
     && Boolean(node.slot && ["heading", "text", "richText", "badge"].includes(node.slot.type));
   const overlayScrim = artworkClip ? undefined : resolveTextOnImageScrim(node, siblings, device);
   const posterContain = imageCarriesCopy
-    && missingMobileHero
-    && !pairedCanvas
-    && node.layoutOverride?.objectFit !== "cover"
-    && node.layoutOverride?.objectFit !== "fill"
-    && !cssFrameIsLandscape(paintedMobileFrame);
-  const fillSourceFrame = missingMobileHero
-    && cssFrameIsLandscape(paintedMobileFrame)
-    && node.layoutOverride?.objectFit !== "fill";
+    && node.slot?.type === "image"
+    && node.slotId === artworkImageSlotId
+    && !node.layoutOverride?.objectFit;
   const slotContent = node.slot
     ? renderSlotContent(
       node,
@@ -1929,14 +1905,9 @@ function RenderNode({
       interactionOwner,
       relationalLayout,
       node.slotId === primaryImageSlotId,
-      fillSourceFrame
-        ? "cover"
-        : posterContain
-          ? "contain"
-          : bleedStyle && !node.layoutOverride?.objectFit ? "cover" : fillMobileCopyFrame ? "cover" : undefined,
+      posterContain ? "contain" : undefined,
       canvasColor,
       onImageCopy,
-      imageCarriesCopy,
     )
     : null;
   const coversPairedSection = Boolean(pairedCanvas)
@@ -1958,7 +1929,7 @@ function RenderNode({
   return (
     <Element
       ref={layoutElement}
-      {...(actionHref || artworkImageHref ? { href: actionHref ?? artworkImageHref } : {})}
+      href={nodeHref}
       className={[
         artworkClip ? "hc-dynamic-template__artwork-copy" : undefined,
         mode === "editor" && visualCollapse && !artworkClip ? "hc-dynamic-template__empty-slot" : undefined,
@@ -2332,6 +2303,7 @@ function RenderNode({
         fillPairedCell,
         fillSplitRemainder,
         layoutDefinition,
+        workGridImageSlotIds,
         pageHeroPlacement,
         heroCopyBelow,
         heroFrameCapped,
@@ -2736,7 +2708,7 @@ export default function DynamicTemplateRenderer({
   const artworkHref = imageCarriesCopy && mode !== "editor"
     ? findArtworkActionHref(result.plan.root, contentRenderMode !== "public")
     : undefined;
-  const artworkImageSlotId = artworkHref
+  const artworkImageSlotId = imageCarriesCopy
     ? findPrimaryImageSlotId(result.plan.root)
     : undefined;
   // 左右图文整节用对换比例，文字仍在图下，不把主图盖住文字。
@@ -2845,6 +2817,7 @@ export default function DynamicTemplateRenderer({
         pairedCanvas={pairedCanvas}
         fillSplitRemainder={fillSplitRemainder}
         layoutDefinition={definition}
+        workGridImageSlotIds={getWorkGridImageSlotIds(definition)}
       />
       {narrowSplit ? (
         <style>

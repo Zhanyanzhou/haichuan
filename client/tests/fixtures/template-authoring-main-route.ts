@@ -501,15 +501,8 @@ export async function productionStageAction(page: Page, label: string) {
   throw new Error("已删除制作任务链，请通过实际编辑入口操作：" + label);
 }
 
-export function firstRegionAction(page: Page) {
-  return blankTemplateStart(page).getByRole("button", {
-    name: "添加区域",
-    exact: true,
-  });
-}
-
 export function blankTemplateStart(page: Page) {
-  return page.frameLocator('iframe[title$="模板隔离画布"]').getByRole("region", { name: "空白模板起步操作", exact: true });
+  return page.frameLocator('iframe[title$="模板隔离画布"]').getByRole("region", { name: "模板结构为空", exact: true });
 }
 
 export function structurePanel(page: Page) {
@@ -523,34 +516,9 @@ export async function openTemplateDesignWithoutDraft(page: Page) {
   await expect(page.getByRole("region", { name: "空模板画布", exact: true })).toBeVisible();
 }
 
-/**
- * 新建模板入口随布局切换：521–1024px 用顶部快捷按钮；≥1025px 停靠布局以
- * 组件库底部主入口为准；≤520px 收进“更多模板操作”菜单。返回实际使用的入口，
- * 供焦点恢复断言复用。
- */
-export async function clickNewTemplateEntry(page: Page) {
-  const width = page.viewportSize()?.width ?? 1280;
-  if (width > 520 && width <= 1024) {
-    const top = page.getByRole("button", { name: "顶部新建模板", exact: true });
-    await top.click();
-    return top;
-  }
-  if (width >= 1025) {
-    const library = page.getByRole("button", { name: "新建模板", exact: true });
-    await library.click();
-    return library;
-  }
-  await page.getByRole("button", { name: "更多模板操作", exact: true }).click();
-  const menuItem = page.getByRole("menuitem", { name: /新建模板$/ });
-  await menuItem.click();
-  return menuItem;
-}
-
 export async function createBlankTemplate(page: Page) {
   await openTemplateDesignWithoutDraft(page);
   // 旧空白模板兼容编辑夹具：仅在自有 Mock 页面装入 schema 2 草稿。
-  // 新建产品入口的七步向导另由 recipe/new-template-flow 用例验证；
-  // 后编辑测试不再把“新建必须空白”作为当前产品约束。
   await page.evaluate(async (name) => {
     const repoPath = "/src/page-builder/template-editor/dynamicTemplateDraftRepository.ts";
     const sessionPath = "/src/page-builder/template-editor/templateEditorSession.ts";
@@ -615,66 +583,90 @@ export async function expectHealthyStableCanvas(page: Page) {
   return second;
 }
 
+async function seedTemplateRegions(page: Page, count: 1 | 2) {
+  // 仅在 Mock 浏览器中准备已有结构，维护用例不依赖已退役的新增按钮。
+  await page.evaluate(async (regionCount) => {
+    const repoPath = "/src/page-builder/template-editor/dynamicTemplateDraftRepository.ts";
+    const sessionPath = "/src/page-builder/template-editor/templateEditorSession.ts";
+    const [{ addConfiguredTemplateRegion }, { useTemplateEditorSession }] = await Promise.all([
+      import(/* @vite-ignore */ repoPath), import(/* @vite-ignore */ sessionPath),
+    ]);
+    let selectedNodeId = "";
+    const result = useTemplateEditorSession.getState().executeCommand({
+      type: "transform-definition",
+      label: "装入区域夹具",
+      transform: (current: TemplateDefinitionV2) => {
+        let next = current;
+        for (let index = 0; index < regionCount; index += 1) {
+          const region = addConfiguredTemplateRegion(next);
+          next = region.definition;
+          selectedNodeId = region.nodeId;
+        }
+        return next;
+      },
+    });
+    if (!result.ok) throw new Error(result.message);
+    useTemplateEditorSession.getState().selectObject(selectedNodeId);
+  }, count);
+  const tree = page.getByRole("tree", { name: "模板区域与槽位" });
+  for (let index = 1; index <= count; index += 1) {
+    await expect(tree.getByRole("treeitem", { name: new RegExp(`内容区域 ${index}`) })).toBeVisible();
+  }
+}
+
 export async function addFirstRegion(page: Page) {
-  // 几何、后续制作链使用既有结构命令入口；空白画布唯一主 CTA 另有独立断言。
-  await structurePanel(page).getByRole("button", { name: "添加区域", exact: true }).click();
-  await expect(page.getByRole("tree", { name: "模板区域与槽位" })
-    .getByRole("treeitem", { name: /内容区域 1/ })).toBeVisible();
+  await seedTemplateRegions(page, 1);
 }
 
 export async function addTwoRegions(page: Page) {
-  await addFirstRegion(page);
-  await structurePanel(page).getByRole("button", { name: "添加区域", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "添加区域", exact: true });
-  const insertion = dialog.getByLabel("区域插入位置");
-  await expect(insertion).toBeVisible();
-  await expect(insertion.locator("option")).toHaveText([
-    "当前区域前",
-    "当前区域后",
-    "模板末尾",
-  ]);
-  await insertion.selectOption("after");
-  await dialog.getByRole("button", { name: "确认添加区域", exact: true }).click();
-  const tree = page.getByRole("tree", { name: "模板区域与槽位" });
-  await expect(tree.getByRole("treeitem", { name: /内容区域 1/ })).toBeVisible();
-  await expect(tree.getByRole("treeitem", { name: /内容区域 2/ })).toBeVisible();
-}
-
-export async function chooseAddTarget(page: Page, label: string) {
-  const select = page.getByLabel("添加目标");
-  const value = await select.locator("option").filter({ hasText: label }).getAttribute("value");
-  if (!value) throw new Error(`缺少添加目标：${label}`);
-  await select.selectOption(value);
+  await seedTemplateRegions(page, 2);
 }
 
 export async function addContentGroupsAndSlots(page: Page) {
   await addTwoRegions(page);
+  await page.evaluate(async () => {
+    const definitionPath = "/src/page-builder/template-definition/index.ts";
+    const sessionPath = "/src/page-builder/template-editor/templateEditorSession.ts";
+    const [{ addDynamicTemplateLayoutGroup, addDynamicTemplateNode }, { useTemplateEditorSession }] = await Promise.all([
+      import(/* @vite-ignore */ definitionPath), import(/* @vite-ignore */ sessionPath),
+    ]);
+    let selectedNodeId = "";
+    const result = useTemplateEditorSession.getState().executeCommand({
+      type: "transform-definition",
+      label: "装入图文槽位夹具",
+      transform: (current: TemplateDefinitionV2) => {
+        const [imageRegionId, textRegionId] = current.nodes[current.rootNodeId].childIds;
+        const imageGroup = addDynamicTemplateLayoutGroup(current, imageRegionId, "horizontal");
+        imageGroup.definition.nodes[imageGroup.nodeId].name = "图片组";
+        const textGroup = addDynamicTemplateLayoutGroup(imageGroup.definition, textRegionId, "vertical");
+        textGroup.definition.nodes[textGroup.nodeId].name = "文字组";
+        let next: TemplateDefinitionV2 = textGroup.definition;
+        for (const [parentId, type, label, typography] of [
+          [imageGroup.nodeId, "ImageSlot", "图片槽位", null],
+          [textGroup.nodeId, "HeadingSlot", "标题槽位", { desktop: 48, mobile: 28, weight: 600 }],
+          [textGroup.nodeId, "TextSlot", "正文槽位", { desktop: 28, mobile: 16, weight: 400 }],
+          [textGroup.nodeId, "ButtonSlot", "按钮槽位", { desktop: 24, mobile: 16, weight: 400 }],
+        ] as const) {
+          const added = addDynamicTemplateNode(next, parentId, type);
+          next = added.definition;
+          const slot = next.slots[added.slotId];
+          next.nodes[added.nodeId].name = label;
+          slot.label = label;
+          if (type === "TextSlot") slot.key = "description";
+          if (typography) {
+            slot.desktopRules.fontWeight = slot.mobileRules.fontWeight = typography.weight;
+            slot.desktopRules.fontSize = { value: typography.desktop, unit: "px" };
+            slot.mobileRules.fontSize = { value: typography.mobile, unit: "px" };
+          }
+          selectedNodeId = added.nodeId;
+        }
+        return next;
+      },
+    });
+    if (!result.ok) throw new Error(result.message);
+    useTemplateEditorSession.getState().selectObject(selectedNodeId);
+  });
   const tree = page.getByRole("tree", { name: "模板区域与槽位" });
-  const structure = structurePanel(page);
-
-  await tree.getByRole("treeitem", { name: /内容区域 1/ }).click();
-  await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
-  await page.getByRole("button", { name: "添加左右排列布局分组", exact: true }).click();
-  await page.keyboard.press("Escape");
-  await page.getByLabel("节点名称").first().fill("图片组");
-  await page.getByLabel("节点名称").first().press("Tab");
-  await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
-  await chooseAddTarget(page, "图片组");
-  await page.getByRole("button", { name: "添加图片槽位", exact: true }).click();
-  await page.keyboard.press("Escape");
-
-  await tree.getByRole("treeitem", { name: /内容区域 2/ }).click();
-  await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
-  await page.getByRole("button", { name: "添加上下排列布局分组", exact: true }).click();
-  await page.keyboard.press("Escape");
-  await page.getByLabel("节点名称").first().fill("文字组");
-  await page.getByLabel("节点名称").first().press("Tab");
-  await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
-  await chooseAddTarget(page, "文字组");
-  await page.getByRole("button", { name: "添加标题槽位", exact: true }).click();
-  await page.getByRole("button", { name: "添加正文槽位", exact: true }).click();
-  await page.getByRole("button", { name: "添加按钮槽位", exact: true }).click();
-  await page.keyboard.press("Escape");
 
   for (const name of [
     "图片组 布局容器",
@@ -740,7 +732,6 @@ export async function completeProductionReviews(page: Page) {
   await page.getByRole("tab", { name: "页面开放范围", exact: true }).click();
   await (await productionStageAction(page, "发布检查")).click();
   const review = page.getByRole("region", { name: "本次发布检查", exact: true });
-  await review.getByText("预览与核对（可选）", { exact: true }).click();
   await review.getByRole("button", { name: "发布检查桌面端模板布局", exact: true }).click();
   await review.getByRole("button", { name: "确认已核对桌面端布局", exact: true }).click();
   await review.getByRole("button", { name: "发布检查移动端模板布局", exact: true }).click();

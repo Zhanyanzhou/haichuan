@@ -52,7 +52,8 @@ import {
   type VisualEditorMode,
   type VisualNodeSelection,
 } from "@/page-builder/visual-editor/visualEditorSession";
-import type { PublishValidationStatus } from "@/page-builder/inspector/publishValidation";
+import type { PublishValidationIssue, PublishValidationStatus } from "@/page-builder/inspector/publishValidation";
+import { openNonBlockingPublishReminder } from "@/page-builder/inspector/publishReminderDialog";
 import { formatViewportSize, type ViewportPreset } from "../editor-utils";
 import WorkspaceContextControls from "@/page-builder/template-editor/WorkspaceContextControls";
 import useWorkspaceHistoryShortcuts from "@/page-builder/template-editor/useWorkspaceHistoryShortcuts";
@@ -89,6 +90,8 @@ export default function EditorToolbar({
   publishValidationStatus,
   publishAttemptFailed,
   publishReviewErrorCount,
+  publishDescriptionReminderCount = 0,
+  publishWarnings = [],
   onOpenPublishReview,
   onSubmitReview,
   onApproveReview,
@@ -133,6 +136,8 @@ export default function EditorToolbar({
   publishValidationStatus: PublishValidationStatus;
   publishAttemptFailed: boolean;
   publishReviewErrorCount: number;
+  publishDescriptionReminderCount?: number;
+  publishWarnings?: readonly PublishValidationIssue[];
   onOpenPublishReview: () => void;
   onSubmitReview: () => void;
   onApproveReview: () => void;
@@ -713,7 +718,24 @@ export default function EditorToolbar({
         ]
       : [];
 
+  const publishCheckCount = publishReviewErrorCount + publishDescriptionReminderCount;
   const compactActionItems = [
+    ...(!viewingPublished && publishCheckCount > 0
+      ? [{
+          key: "publish-check",
+          icon: <ExclamationCircleOutlined aria-hidden="true" />,
+          label: `发布检查（${publishCheckCount} 项）`,
+          onClick: onOpenPublishReview,
+        }]
+      : []),
+    ...(!viewingPublished && publishWarnings.length > 0
+      ? [{
+          key: "publish-reminders",
+          icon: <ExclamationCircleOutlined />,
+          label: `发布提醒（${publishWarnings.length} 项）`,
+          onClick: () => openNonBlockingPublishReminder(modal, publishWarnings),
+        }]
+      : []),
     ...(publishValidationStatus === "unavailable"
       ? [{
           key: "retry-publish-validation",

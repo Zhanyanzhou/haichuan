@@ -1,57 +1,128 @@
 import { useId, type RefObject } from "react";
 import { WEIGHT_RANGES } from "@/data/catalogData";
-import { catalogTokens as T } from "./catalogTokens";
+import type { CatalogFilterValues } from "./CatalogFilters";
 import useCatalogDialog from "./useCatalogDialog";
 
+export function getCatalogPriceError(
+  minPrice: string,
+  maxPrice: string,
+): string {
+  const amounts = [minPrice.trim(), maxPrice.trim()];
+  if (amounts.some((amount) => amount && !/^\d+(?:\.\d{1,2})?$/.test(amount))) {
+    return "请输入非负金额，最多保留两位小数";
+  }
+  if (
+    amounts.some(
+      (amount) =>
+        amount &&
+        (!Number.isFinite(Number(amount)) ||
+          Number(amount) > Number.MAX_SAFE_INTEGER / 100),
+    )
+  ) {
+    return "金额超出支持范围";
+  }
+  if (amounts.every(Boolean) && Number(amounts[0]) > Number(amounts[1])) {
+    return "最高价不能低于最低价";
+  }
+  return "";
+}
+
+export function CatalogPriceInputs({
+  minPrice,
+  maxPrice,
+  onMinPrice,
+  onMaxPrice,
+  errorId,
+}: {
+  minPrice: string;
+  maxPrice: string;
+  onMinPrice: (value: string) => void;
+  onMaxPrice: (value: string) => void;
+  errorId?: string;
+}) {
+  return (
+    <div className="catalog-price-inputs">
+      <label>
+        <span aria-hidden="true">¥</span>
+        <input
+          type="text"
+          inputMode="decimal"
+          aria-label="最低价"
+          aria-invalid={Boolean(errorId)}
+          aria-describedby={errorId}
+          value={minPrice}
+          placeholder="最低价"
+          maxLength={20}
+          onChange={(event) => onMinPrice(event.target.value)}
+        />
+      </label>
+      <span aria-hidden="true">—</span>
+      <label>
+        <span aria-hidden="true">¥</span>
+        <input
+          type="text"
+          inputMode="decimal"
+          aria-label="最高价"
+          aria-invalid={Boolean(errorId)}
+          aria-describedby={errorId}
+          value={maxPrice}
+          placeholder="最高价"
+          maxLength={20}
+          onChange={(event) => onMaxPrice(event.target.value)}
+        />
+      </label>
+    </div>
+  );
+}
+
 export default function FilterDrawer({
-  materials,
-  crafts,
+  values,
   materialOptions,
   craftOptions,
-  weights,
-  sizes,
   sizeOptions,
-  onMaterials,
-  onCrafts,
-  onWeights,
-  onSizes,
-  onClear,
+  onChange,
+  onApply,
   onClose,
   total,
+  loading,
   returnFocusRef,
 }: {
-  materials: string[];
-  crafts: string[];
+  values: CatalogFilterValues;
   materialOptions: string[];
   craftOptions: string[];
-  weights: string[];
-  sizes: string[];
   sizeOptions: string[];
-  onMaterials: (m: string[]) => void;
-  onCrafts: (c: string[]) => void;
-  onWeights: (w: string[]) => void;
-  onSizes: (s: string[]) => void;
-  onClear: () => void;
+  onChange: (values: CatalogFilterValues) => void;
+  onApply: () => void;
   onClose: () => void;
-  total: number;
+  total: number | null;
+  loading: boolean;
   returnFocusRef: RefObject<HTMLElement | null>;
 }) {
   const titleId = useId();
-  const { dialogRef, initialFocusRef } = useCatalogDialog(onClose, returnFocusRef);
-  const toggle = (arr: string[], v: string, setter: (a: string[]) => void) => {
-    setter(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
+  const errorId = useId();
+  const priceError = getCatalogPriceError(values.minPrice, values.maxPrice);
+  const { dialogRef, initialFocusRef } = useCatalogDialog(
+    onClose,
+    returnFocusRef,
+  );
+  const toggle = (
+    key: "materials" | "crafts" | "weights" | "sizes",
+    value: string,
+  ) => {
+    const selected = values[key];
+    onChange({
+      ...values,
+      [key]: selected.includes(value)
+        ? selected.filter((item) => item !== value)
+        : [...selected, value],
+    });
   };
 
   return (
     <>
       <div
+        className="catalog-filter-drawer__backdrop"
         aria-hidden="true"
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 90,
-          background: "rgba(0,0,0,0.12)",
-        }}
         onClick={onClose}
       />
       <div
@@ -59,118 +130,101 @@ export default function FilterDrawer({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        style={{
-          position: "fixed",
-          top: 0,
-          right: 0,
-          bottom: 0,
-          width: "min(440px, 100%)",
-          zIndex: 91,
-          background: T.bg,
-          overflowY: "auto",
-          padding: "32px 28px",
-          boxShadow: "-1px 0 0 " + T.line,
-          display: "flex",
-          flexDirection: "column",
-        }}
+        className="catalog-filter-drawer"
       >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 28,
-          }}
-        >
-          <h3
-            id={titleId}
-            style={{ fontSize: 16, fontWeight: 400, color: T.txt, margin: 0 }}
-          >
-            更多筛选
-          </h3>
+        <div className="catalog-filter-drawer__header">
+          <h3 id={titleId}>筛选作品</h3>
           <button
             ref={initialFocusRef}
             type="button"
             aria-label="关闭筛选"
             onClick={onClose}
-            style={{
-              background: "none",
-              border: 0,
-              cursor: "pointer",
-              fontSize: 20,
-              color: T.sec,
-              lineHeight: 1,
-              minWidth: 44,
-              minHeight: 44,
-            }}
           >
-            ✕
+            ×
           </button>
         </div>
-        <div style={{ flex: 1 }}>
+        <div className="catalog-filter-drawer__body">
+          <p className="catalog-filter-drawer__hint">
+            同类条件可多选，选择后查看作品。
+          </p>
           <FilterGroup
             title="材质"
             options={materialOptions}
-            selected={materials}
-            onToggle={(value) => toggle(materials, value, onMaterials)}
+            selected={values.materials}
+            onToggle={(value) => toggle("materials", value)}
           />
           <FilterGroup
             title="工艺"
             options={craftOptions}
-            selected={crafts}
-            onToggle={(value) => toggle(crafts, value, onCrafts)}
+            selected={values.crafts}
+            onToggle={(value) => toggle("crafts", value)}
           />
           <FilterGroup
             title="重量"
             options={WEIGHT_RANGES}
-            selected={weights}
-            onToggle={(value) => toggle(weights, value, onWeights)}
+            selected={values.weights}
+            onToggle={(value) => toggle("weights", value)}
           />
-          {sizeOptions.length > 0 && (
-            <FilterGroup
-              title="规格"
-              options={sizeOptions}
-              selected={sizes}
-              onToggle={(value) => toggle(sizes, value, onSizes)}
+          <FilterGroup
+            title="规格"
+            options={sizeOptions}
+            selected={values.sizes}
+            onToggle={(value) => toggle("sizes", value)}
+          />
+          <fieldset className="catalog-drawer-filter-group">
+            <legend>价格区间</legend>
+            <CatalogPriceInputs
+              minPrice={values.minPrice}
+              maxPrice={values.maxPrice}
+              errorId={priceError ? errorId : undefined}
+              onMinPrice={(minPrice) => onChange({ ...values, minPrice })}
+              onMaxPrice={(maxPrice) => onChange({ ...values, maxPrice })}
             />
-          )}
+            <p className="catalog-price-note">
+              按公开售价或定制参考起价筛选，定制最终金额以确认方案后的报价为准。
+            </p>
+            {priceError && (
+              <p id={errorId} className="catalog-filter-error" role="alert">
+                {priceError}
+              </p>
+            )}
+          </fieldset>
         </div>
-        <div
-          style={{
-            display: "flex",
-            gap: 12,
-            paddingTop: 20,
-            borderTop: `1px solid ${T.line}`,
-          }}
-        >
-          <button
-            onClick={onClear}
-            style={{
-              flex: 1,
-              minHeight: 44,
-              border: `1px solid ${T.line}`,
-              background: "transparent",
-              cursor: "pointer",
-              fontSize: 12,
-              color: T.sec,
-            }}
-          >
-            重置
-          </button>
-          <button
-            onClick={onClose}
-            style={{
-              flex: 1,
-              minHeight: 44,
-              border: 0,
-              background: T.txt,
-              cursor: "pointer",
-              fontSize: 12,
-              color: "#FFFFFF",
-            }}
-          >
-            查看 {total} 款结果
-          </button>
+        <div className="catalog-filter-drawer__footer">
+          <p role="status" aria-live="polite" aria-busy={loading}>
+            {priceError
+              ? "请先修正价格区间"
+              : loading
+                ? "正在统计符合条件的作品…"
+                : total === null
+                  ? "暂时无法预览数量，可应用条件后重试"
+                  : `符合条件的作品共 ${total} 款`}
+          </p>
+          <div className="catalog-filter-drawer__actions">
+            <button
+              type="button"
+              onClick={() =>
+                onChange({
+                  materials: [],
+                  crafts: [],
+                  weights: [],
+                  sizes: [],
+                  minPrice: "",
+                  maxPrice: "",
+                })
+              }
+            >
+              重置
+            </button>
+            <button
+              type="button"
+              className="catalog-filter-apply"
+              disabled={Boolean(priceError) || loading}
+              onClick={onApply}
+            >
+              {total === null ? "应用筛选" : `查看 ${total} 款作品`}
+            </button>
+          </div>
         </div>
       </div>
     </>
@@ -188,51 +242,23 @@ function FilterGroup({
   selected: string[];
   onToggle: (value: string) => void;
 }) {
-  if (!options.length) return null;
-
+  const available = Array.from(new Set([...options, ...selected]));
+  if (!available.length) return null;
   return (
-    <div style={{ marginBottom: 24 }}>
-      <p
-        style={{
-          fontSize: 10,
-          letterSpacing: "0.1em",
-          color: T.light,
-          marginBottom: 12,
-        }}
-      >
-        {title}
-      </p>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px" }}>
-        {options.map((option) => (
-          <label
-            key={option}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              minHeight: 44,
-              paddingInline: 4,
-              gap: 6,
-              cursor: "pointer",
-              fontSize: 12,
-              color: T.txt,
-              paddingBlock: 2,
-            }}
-          >
+    <fieldset className="catalog-drawer-filter-group">
+      <legend>{title}</legend>
+      <div className="catalog-drawer-filter-group__values">
+        {available.map((option) => (
+          <label className="catalog-filter-check" key={option}>
             <input
               type="checkbox"
               checked={selected.includes(option)}
               onChange={() => onToggle(option)}
-              style={{
-                width: 13,
-                height: 13,
-                accentColor: T.txt,
-                cursor: "pointer",
-              }}
             />
             {option}
           </label>
         ))}
       </div>
-    </div>
+    </fieldset>
   );
 }

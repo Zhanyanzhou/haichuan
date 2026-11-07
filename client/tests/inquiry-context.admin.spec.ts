@@ -15,7 +15,7 @@ const wrapped = (data: unknown) => JSON.stringify({
   message: "ok",
 });
 
-test("普通咨询详情展示服务端关联的来源作品与货号", async ({ page }) => {
+test("普通咨询详情展示服务端关联的来源作品与款号", async ({ page }) => {
   await authenticate(page);
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -68,5 +68,5 @@ test("普通咨询详情展示服务端关联的来源作品与货号", async ({
   const drawer = page.getByRole("dialog", { name: "线索详情" });
   await expect(drawer.getByText("来源作品", { exact: true })).toBeVisible();
   await expect(drawer.getByText("光序素圈戒指", { exact: true })).toBeVisible();
-  await expect(drawer.getByText("货号：HC-RING-042", { exact: true })).toBeVisible();
+  await expect(drawer.getByText("款号：HC-RING-042", { exact: true })).toBeVisible();
 });

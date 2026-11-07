@@ -23,6 +23,12 @@ export interface CategoryReferenceResult {
     | "NOT_FOUND";
 }
 
+export interface CategoryDeleteResult {
+  success: true;
+  movedProductCount: number;
+  uncategorizedCategoryId?: number;
+}
+
 type MockCategoryNode = Category & {
   deletedAt?: string | null;
   hasPublicProduct?: boolean;
@@ -132,7 +138,7 @@ export const categoryApi = {
   delete: async (id: number, moveTo?: number) => {
     if (USE_MOCK) {
       await mockDelay(200);
-      return mockResponse({ success: true });
+      return mockResponse<CategoryDeleteResult>({ success: true, movedProductCount: 0 });
     }
     return api.delete(`/categories/${id}`, {
       params: moveTo ? { moveTo } : undefined,

@@ -82,7 +82,8 @@ export default function TemplateAnchorControls({ nodeId, disabled }: { nodeId: s
       }
     });
   };
-  return <details key={`${nodeId}:${Boolean(rules.anchor)}`} open={Boolean(rules.anchor) || pending} className="template-editor__settings-section template-native__anchor" aria-label="局部叠放与锚点"><summary>{rules.anchor ? "局部叠放 · 锚点与偏移" : "高级定位 · 改为局部叠放"}</summary>
+  return <section className="template-editor__settings-section template-native__anchor" aria-label="局部叠放与锚点">
+    <h4>{rules.anchor ? "局部叠放 · 锚点与偏移" : "改为局部叠放"}</h4>
     <p>{rules.anchor ? "相对父容器锚定；移动父级时保持关系。" : "当前对象参与排列；可明确改为局部叠放。"}</p>
     {disabled ? <p>定位需在当前断点的实际画布中测量；请选择当前断点作用域并解锁对象。</p> : null}
     {!parentHasHeight ? <p>请先设置父容器的高度、最小高度或比例，再使用局部叠放。</p> : null}
@@ -100,5 +101,5 @@ export default function TemplateAnchorControls({ nodeId, disabled }: { nodeId: s
     </> : null}
     {notice ? <p role="status">{notice}</p> : null}
     {pending ? <div><button type="button" onClick={() => { const current = token.current; token.current = null; if (current) { const result = useTemplateEditorSession.getState().commitInteraction(current); setNotice(result.ok ? "定位规则已更新，可撤销。" : result.message); } setPending(false); }}>确认定位</button><button type="button" onClick={() => { cancel(); setNotice("已取消，定位规则未改变。"); }}>取消定位</button></div> : null}
-  </details>;
+  </section>;
 }

@@ -30,7 +30,7 @@ import {
 } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
-import { AdminErrorState } from "@/components/common/AdminDataStates";
+import { AdminErrorState, AdminLoadingState } from "@/components/common/AdminDataStates";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
 
@@ -88,6 +88,7 @@ export default function MarketingManage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get("tab");
   const tab = requestedTab === "coupons" ? "coupons" : "promotions";
+  const [initialTab] = useState(tab);
 
   return (
     <div>
@@ -125,17 +126,18 @@ export default function MarketingManage() {
         activeKey={tab}
         onChange={(nextTab) => setSearchParams({ tab: nextTab })}
         items={[
-          { key: "promotions", label: "促销活动", children: <PromotionsTab /> },
-          { key: "coupons", label: "优惠券", children: <CouponsTab /> },
+          { key: "promotions", label: "促销活动", children: <PromotionsTab loadAtPageCenter={initialTab === "promotions" && tab === initialTab} /> },
+          { key: "coupons", label: "优惠券", children: <CouponsTab loadAtPageCenter={initialTab === "coupons" && tab === initialTab} /> },
         ]}
       />
     </div>
   );
 }
 
-function PromotionsTab() {
+function PromotionsTab({ loadAtPageCenter }: { loadAtPageCenter: boolean }) {
   const [list, setList] = useState<PromotionRecord[]>([]);
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<PromotionRecord | null>(null);
@@ -152,6 +154,7 @@ function PromotionsTab() {
       setLoadError(true);
       message.error(getSafeAdminErrorMessage(e, "促销活动加载失败，请稍后重试。"));
     } finally {
+      setInitialLoading(false);
       setLoading(false);
     }
   };
@@ -244,7 +247,9 @@ function PromotionsTab() {
           新建活动
         </Button>
       </div>
-      {loadError ? (
+      {initialLoading && loadAtPageCenter ? (
+        <AdminLoadingState subject="促销活动" allowInteraction />
+      ) : loadError ? (
         <AdminErrorState subject="促销活动" onRetry={() => load()} />
       ) : (
         <Table
@@ -358,9 +363,10 @@ function PromotionsTab() {
   );
 }
 
-function CouponsTab() {
+function CouponsTab({ loadAtPageCenter }: { loadAtPageCenter: boolean }) {
   const [list, setList] = useState<CouponRecord[]>([]);
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<CouponRecord | null>(null);
@@ -384,6 +390,7 @@ function CouponsTab() {
       setLoadError(true);
       message.error(getSafeAdminErrorMessage(e, "优惠券数据加载失败，请稍后重试。"));
     } finally {
+      setInitialLoading(false);
       setLoading(false);
     }
   };
@@ -494,7 +501,9 @@ function CouponsTab() {
           新建优惠券
         </Button>
       </div>
-      {loadError ? (
+      {initialLoading && loadAtPageCenter ? (
+        <AdminLoadingState subject="优惠券" allowInteraction />
+      ) : loadError ? (
         <AdminErrorState subject="优惠券" onRetry={() => load()} />
       ) : (
         <Table

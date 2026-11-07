@@ -4,6 +4,7 @@ import {
   IsBoolean,
   IsEnum,
   IsNumber,
+  IsInt,
   Min,
   MaxLength,
   IsNotEmpty,
@@ -12,6 +13,11 @@ import { Type } from "class-transformer";
 import { MaterialType } from "@prisma/client";
 
 export class CreateSkuDto {
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  imageId?: number | null;
+
   @IsString({ message: "SKU编码必须是字符串" })
   @IsNotEmpty({ message: "请输入SKU编码" })
   @MaxLength(100, { message: "SKU编码不能超过100个字符" })
@@ -25,6 +31,11 @@ export class CreateSkuDto {
   @IsString({ message: "规格必须是字符串" })
   @MaxLength(50, { message: "规格不能超过50个字符" })
   size?: string;
+
+  @IsOptional()
+  @IsString({ message: "颜色必须是字符串" })
+  @MaxLength(50, { message: "颜色不能超过50个字符" })
+  color?: string;
 
   @IsOptional()
   @Type(() => Number)
@@ -47,6 +58,11 @@ export class CreateSkuDto {
 
 export class UpdateSkuDto {
   @IsOptional()
+  @IsInt()
+  @Min(1)
+  imageId?: number | null;
+
+  @IsOptional()
   @IsString({ message: "SKU编码必须是字符串" })
   @MaxLength(100)
   skuCode?: string;
@@ -59,6 +75,11 @@ export class UpdateSkuDto {
   @IsString({ message: "规格必须是字符串" })
   @MaxLength(50)
   size?: string;
+
+  @IsOptional()
+  @IsString({ message: "颜色必须是字符串" })
+  @MaxLength(50, { message: "颜色不能超过50个字符" })
+  color?: string;
 
   @IsOptional()
   @Type(() => Number)

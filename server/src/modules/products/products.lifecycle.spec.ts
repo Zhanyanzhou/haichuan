@@ -128,7 +128,7 @@ test("商品数量统计的 all 排除回收站和已软删除记录", async () 
   });
 });
 
-test("归档、恢复与回收站只读形成受状态约束的闭环", async () => {
+test("归档和恢复遵循状态约束，旧删除接口保持拒绝", async () => {
   const { service, records } = createService([
     { id: 1, status: "DRAFT", deletedAt: null },
   ]);
@@ -142,7 +142,7 @@ test("归档、恢复与回收站只读形成受状态约束的闭环", async ()
   await assert.rejects(() => service.restore(1, adminActor), ConflictException);
 
   await service.archive(1, adminActor);
-  // 回收站只读：delete 被拒绝，deletedAt 不被写入
+  // 旧删除接口保持拒绝，不写 deletedAt。
   await assert.rejects(() => service.delete(1, adminActor), ConflictException);
   assert.equal(records[0].status, "ARCHIVED");
   assert.equal(records[0].deletedAt, null);
@@ -171,6 +171,10 @@ test("回收站商品不能通过状态接口绕过恢复操作", async () => {
 test("商品生命周期端点保留后台角色守卫，非商品角色被拒绝", () => {
   const roles = Reflect.getMetadata(ROLES_KEY, ProductsController) as string[];
   assert.deepEqual(roles, ["SUPER_ADMIN", "ADMIN", "EDITOR"]);
+  assert.deepEqual(
+    Reflect.getMetadata(ROLES_KEY, ProductsController.prototype.deletePermanently),
+    ["SUPER_ADMIN"],
+  );
 
   const guard = new RolesGuard(new Reflector());
   const context = {

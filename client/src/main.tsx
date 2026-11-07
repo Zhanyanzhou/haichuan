@@ -40,22 +40,3 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <RouterProvider router={router} />
   </React.StrictMode>,
 );
-
-// 中文衬线分片不与 PageDocument 和首屏图片争抢首访带宽；完整页面 load 后再在空闲期换装。
-const loadDeferredChineseFonts = () => {
-  const load = () => {
-    void import('@fontsource/noto-serif-sc/300.css');
-    void import('@fontsource/noto-serif-sc/400.css');
-  };
-  const scheduleIdle = (window as Window & {
-    requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
-  }).requestIdleCallback;
-  if (scheduleIdle) {
-    scheduleIdle(load, { timeout: 2000 });
-  } else {
-    globalThis.setTimeout(load, 1000);
-  }
-};
-
-if (document.readyState === 'complete') loadDeferredChineseFonts();
-else window.addEventListener('load', loadDeferredChineseFonts, { once: true });

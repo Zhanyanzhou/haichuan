@@ -37,7 +37,7 @@ test("确定性 UI：普通选择与间距调整分离，退出恢复尺寸柄�
   const navigation = page.getByRole("navigation", { name: "画布编辑层级" });
   await expect(toolbar).toBeVisible();
   await expect(toolbar).toContainText("自由构图");
-  await expect(toolbar).toContainText(/\d+ × \d+/);
+  await expect(toolbar).toContainText(/宽 \d+ px × 高 \d+ px/);
   await expect(toolbar.getByRole("button", { name: "拖动移动自由构图", exact: true })).toHaveCount(1);
   await expect(navigation.getByRole("button", { name: "调整间距", exact: true })).toHaveCount(0);
   await expect(page.getByText("对象操作", { exact: true })).toHaveCount(0);

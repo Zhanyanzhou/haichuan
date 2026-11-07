@@ -100,15 +100,17 @@ export default function TemplateDefaultContentControls({ nodeId, breakpoint: ove
   );
   return <>
     {error ? <p role="alert">{error}</p> : null}
-    {(section === "all" || section === "content") && slot && (image || textSlot) ? <details className="homepage-editor__inspector-section template-native__default-content" aria-label="模板默认内容" data-template-default-content={slot.slotId} data-template-default-content-kind={image ? "image" : "text"} open={image ? undefined : true}
-      onToggle={(event) => { if (!event.currentTarget.open && event.currentTarget.querySelector('[aria-invalid="true"]')) event.currentTarget.open = true; }}>
-      <summary>{image ? (heroPortraitUpload ? "手机默认图片" : "模板默认图片") : "模板默认文案"}<small>{image
-        ? (heroPortraitUpload
-          ? (imageFrames?.mobile && imageFrames.mobile !== "9:16"
-            ? "当前画面沿用桌面横图。选一张 9:16 后，手机单独使用竖图"
-            : "按 9:16 上传，桌面 16:9 的图留在桌面端")
-          : "桌面和手机共用这张图。只有首页首屏竖图会单独存成手机图")
-        : "所有设备共享 · 随模板保存"}</small></summary>
+    {(section === "all" || section === "content") && slot && (image || textSlot) ? <section className="homepage-editor__inspector-section template-native__default-content" aria-label="模板默认内容" data-template-default-content={slot.slotId} data-template-default-content-kind={image ? "image" : "text"}>
+      <div className="homepage-editor__inspector-section-head">
+        <strong>{image ? (heroPortraitUpload ? "手机默认图片" : "模板默认图片") : "模板默认文案"}</strong>
+        <span>{image
+          ? (heroPortraitUpload
+            ? (imageFrames?.mobile && imageFrames.mobile !== "9:16"
+              ? "当前画面沿用桌面横图。选一张 9:16 后，手机单独使用竖图"
+              : "按 9:16 上传，桌面 16:9 的图留在桌面端")
+            : "桌面和手机共用这张图。只有首页首屏竖图会单独存成手机图")
+          : "所有设备共享 · 随模板保存"}</span>
+      </div>
       <div className="homepage-editor__inspector-section-body">
         {image ? <>
           <MediaPickerField
@@ -142,7 +144,7 @@ export default function TemplateDefaultContentControls({ nodeId, breakpoint: ove
         ) : null}
         {onOpenPageScope ? <button type="button" className="template-native__page-scope-link" onClick={onOpenPageScope}>设置页面开放范围</button> : null}
       </div>
-    </details> : null}
+    </section> : null}
     {(() => {
       const showTextColor = Boolean(textSlot && ["all", "text-style", "text-color"].includes(section));
       const showTextFont = Boolean(textSlot && ["all", "text-style", "text-font"].includes(section));

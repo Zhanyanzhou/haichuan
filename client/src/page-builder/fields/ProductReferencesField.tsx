@@ -3,12 +3,13 @@ import { Modal } from "antd";
 import { categoryApi } from "@/services/api";
 import { SecureImage } from "@/components/common/SecureImage";
 import { unwrapResponse } from "@/utils/unwrap";
+import { normalizePublicProductReference, publicProductPath } from "@/utils/publicProductPath";
 import {
   fetchProductPage,
   resolveProductReferences,
   type ProductRow,
 } from "../data-sources/productSource";
-import "./ProductReferencesField.css";
+import { referencePickerModalProps, singleReferencePickerModalProps } from "./referencePickerModal";
 import RouteLoading from "@/components/common/RouteLoading";
 
 interface CategoryOption {
@@ -17,14 +18,27 @@ interface CategoryOption {
   children?: CategoryOption[];
 }
 
-interface ProductReferencesFieldProps {
+type ProductReferencesFieldProps = {
   value?: string[];
   legacyIds?: number[];
-  onChange: (codes: string[], legacyIds: number[]) => void;
   minProducts?: number;
   maxProducts?: number;
   readOnly?: boolean;
-}
+} & ({
+  onChange: (codes: string[], legacyIds: number[]) => void;
+  batchPicker?: undefined;
+  /** 由装修栏触发单选弹窗；关闭时只显示当前商品。 */
+  singlePicker?: {
+    open: boolean;
+    onOpen: () => void;
+    onClose: () => void;
+    onConfirm?: (code: string, signal: AbortSignal) => Promise<string | undefined>;
+  };
+} | {
+  onChange?: undefined;
+  singlePicker?: undefined;
+  batchPicker: { label: string; onConfirm: (codes: string[], signal: AbortSignal) => Promise<string | undefined> };
+});
 
 type DisplayProductRow = ProductRow & { resolutionPending?: boolean };
 
@@ -40,6 +54,7 @@ const REASON_LABEL: Record<ProductRow["reason"], string> = {
   FORBIDDEN: "当前账号无权解析该商品，请联系管理员",
   RESOLVE_FAILED: "商品解析失败，引用已保留，请重试",
 };
+const PRODUCT_PLACEHOLDER = "/images/system/product-placeholder.svg";
 
 function uniqueStrings(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -65,12 +80,18 @@ export default function ProductReferencesField({
   minProducts = 1,
   maxProducts = 8,
   readOnly,
+  batchPicker,
+  singlePicker,
 }: ProductReferencesFieldProps) {
   const codes = useMemo(() => uniqueStrings(value), [value]);
   const oldIds = useMemo(() => uniqueIds(legacyIds), [legacyIds]);
   const [selectedRows, setSelectedRows] = useState<ProductRow[]>([]);
   const [results, setResults] = useState<ProductRow[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const controlledPickerOpen = singlePicker?.open;
+  const isSinglePicker = controlledPickerOpen !== undefined;
+  const isPickerOpen = controlledPickerOpen ?? pickerOpen;
+  const wasControlledPickerOpen = useRef(false);
   const [draftCodes, setDraftCodes] = useState<string[]>([]);
   const [draftLegacyIds, setDraftLegacyIds] = useState<number[]>([]);
   const [candidateRows, setCandidateRows] = useState<Record<string, ProductRow>>({});
@@ -91,13 +112,31 @@ export default function ProductReferencesField({
   const [listRevision, setListRevision] = useState(0);
   const requestVersion = useRef(0);
   const pickerTriggerRef = useRef<HTMLButtonElement>(null);
+  const pickerSearchRef = useRef<HTMLInputElement>(null);
+  const batchRequest = useRef<AbortController | null>(null);
+  const [batchConfirming, setBatchConfirming] = useState(false);
+  const [batchError, setBatchError] = useState("");
+  useEffect(() => () => batchRequest.current?.abort(), []);
   const pageSize = 12;
 
   useEffect(() => {
-    if (!pickerOpen) return;
+    const justOpened = controlledPickerOpen && !wasControlledPickerOpen.current;
+    wasControlledPickerOpen.current = controlledPickerOpen ?? false;
+    if (!justOpened) return;
+    setDraftCodes(codes);
+    setDraftLegacyIds(oldIds);
+    setCandidateRows({});
+    setQuery("");
+    setCategoryId(undefined);
+    setPage(1);
+    setLoading(true);
+  }, [controlledPickerOpen, codes, oldIds]);
+
+  useEffect(() => {
+    if (!isPickerOpen) return;
     const controller = new AbortController();
     setCategoryError(false);
-    void categoryApi.getManageTree()
+    void categoryApi.getManageTree(controller.signal)
       .then((response) => {
         const data = unwrapResponse<CategoryOption[]>(response);
         if (!controller.signal.aborted) setCategories(flattenCategories(Array.isArray(data) ? data : []));
@@ -109,7 +148,7 @@ export default function ProductReferencesField({
         }
       });
     return () => controller.abort();
-  }, [categoryRevision, pickerOpen]);
+  }, [categoryRevision, isPickerOpen]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -135,7 +174,7 @@ export default function ProductReferencesField({
   }, [codes, oldIds, selectedRevision]);
 
   useEffect(() => {
-    if (!pickerOpen) return;
+    if (!isPickerOpen) return;
     const version = ++requestVersion.current;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
@@ -172,7 +211,7 @@ export default function ProductReferencesField({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [categoryId, listRevision, page, pickerOpen, query, status, visibility]);
+  }, [categoryId, listRevision, page, isPickerOpen, query, status, visibility]);
 
   const selectedByCode = new Map(
     selectedRows.filter((row) => row.code).map((row) => [row.code, row]),
@@ -267,8 +306,10 @@ export default function ProductReferencesField({
     }),
   ];
   const draftSelectedCount = draftCodes.length + draftLegacyIds.length;
+  const batchHasUnavailableProduct = Boolean(batchPicker) && draftDisplayRows.some((row) => !row.eligible);
 
   const openPicker = () => {
+    setBatchError("");
     setDraftCodes(codes);
     setDraftLegacyIds(oldIds);
     setCandidateRows(Object.fromEntries(
@@ -278,7 +319,8 @@ export default function ProductReferencesField({
   };
 
   const closePicker = () => {
-    setPickerOpen(false);
+    if (singlePicker) singlePicker.onClose();
+    else setPickerOpen(false);
   };
 
   const resetFilters = () => {
@@ -294,7 +336,13 @@ export default function ProductReferencesField({
   );
 
   const toggleDraftProduct = (product: ProductRow) => {
-    if (readOnly) return;
+    if (readOnly || batchRequest.current) return;
+    setBatchError("");
+    if (singlePicker) {
+      setDraftCodes([product.code]);
+      setDraftLegacyIds([]);
+      return;
+    }
     const legacyId = getDraftLegacyIdForCode(product.code);
     const selectedAsCode = draftCodes.includes(product.code);
     if (selectedAsCode || legacyId) {
@@ -315,7 +363,8 @@ export default function ProductReferencesField({
   };
 
   const removeDraftRow = (product: ProductRow) => {
-    if (readOnly) return;
+    if (readOnly || batchRequest.current) return;
+    setBatchError("");
     const legacyId = product.legacyId && draftLegacyIds.includes(product.legacyId)
       ? product.legacyId
       : getDraftLegacyIdForCode(product.code);
@@ -327,7 +376,7 @@ export default function ProductReferencesField({
   };
 
   const moveDraftRow = (index: number, direction: -1 | 1) => {
-    if (readOnly || !allDraftLegacyResolved) return;
+    if (readOnly || batchRequest.current || !allDraftLegacyResolved) return;
     const nextIndex = index + direction;
     if (nextIndex < 0 || nextIndex >= draftDisplayRows.length) return;
     const ordered = draftDisplayRows.map((row) => row.code).filter(Boolean);
@@ -336,33 +385,60 @@ export default function ProductReferencesField({
     setDraftLegacyIds([]);
   };
 
-  const confirmDraftSelection = () => {
+  const confirmDraftSelection = async () => {
     if (
       readOnly ||
+      batchRequest.current ||
+      batchHasUnavailableProduct ||
       !allDraftLegacyResolved ||
       draftSelectedCount < minProducts ||
       draftSelectedCount > maxProducts
     ) return;
-    onChange(draftActiveCodes, []);
-    setPickerOpen(false);
+    const confirm = batchPicker?.onConfirm
+      ?? (singlePicker?.onConfirm && draftActiveCodes[0] !== codes[0]
+        ? (codes: string[], signal: AbortSignal) => singlePicker.onConfirm!(codes[0], signal)
+        : undefined);
+    if (confirm) {
+      const request = new AbortController();
+      batchRequest.current = request;
+      setBatchConfirming(true);
+      setBatchError("");
+      try {
+        const issue = await confirm(draftActiveCodes, request.signal);
+        if (!request.signal.aborted) {
+          if (issue) setBatchError(issue);
+          else closePicker();
+        }
+      } catch {
+        if (!request.signal.aborted) setBatchError("作品读取失败，当前页面未修改。请重试。");
+      } finally {
+        batchRequest.current = null;
+        if (!request.signal.aborted) setBatchConfirming(false);
+      }
+      return;
+    }
+    if (!singlePicker || oldIds.length > 0 || draftActiveCodes[0] !== codes[0]) {
+      onChange?.(draftActiveCodes, []);
+    }
+    closePicker();
   };
 
   const commitCodes = (nextCodes: string[]) => {
     if (readOnly || !allLegacyResolved) return;
-    onChange([...new Set(nextCodes)], []);
+    onChange?.([...new Set(nextCodes)], []);
   };
 
   const removeRow = (row: ProductRow) => {
     if (readOnly) return;
     if (codes.length) {
-      onChange(codes.filter((code) => code !== row.code), []);
+      onChange?.(codes.filter((code) => code !== row.code), []);
       return;
     }
     if (row.legacyId) {
       if (allLegacyResolved) {
         commitCodes(activeCodes.filter((code) => code !== row.code));
       } else {
-        onChange([], oldIds.filter((id) => id !== row.legacyId));
+        onChange?.([], oldIds.filter((id) => id !== row.legacyId));
       }
       return;
     }
@@ -378,8 +454,8 @@ export default function ProductReferencesField({
     commitCodes(ordered);
   };
 
-  return (
-    <div className="homepage-editor__product-picker" aria-label="选择真实商品">
+  const inlineControls = singlePicker ? null : (
+    <>
       <div className="homepage-editor__product-picker-method">
         <span aria-hidden="true" />
         <div>
@@ -424,57 +500,131 @@ export default function ProductReferencesField({
         {selectedCount > 0 && selectedCount < minProducts ? <div className="homepage-editor__product-picker-note is-error">至少选择 {minProducts} 件商品后才能发布</div> : null}
         {!allLegacyResolved ? <div className="homepage-editor__product-picker-note is-error">旧引用中有无法解析的商品；请先移除失效项，再添加或排序。</div> : null}
       </div>
+    </>
+  );
 
+  const selectedProduct: DisplayProductRow | undefined = selectedByCode.get(codes[0])
+    ?? draftSelectedByCode.get(codes[0])
+    ?? displaySelectedRows[0];
+  const confirmedProduct = selectedByCode.get(codes[0]) ?? selectedByLegacyId.get(oldIds[0]);
+  const detailCode = !selectedError && confirmedProduct?.eligible
+    ? normalizePublicProductReference(confirmedProduct.code)
+    : null;
+  return (
+    <div
+      className={singlePicker ? undefined : "homepage-editor__product-picker"}
+      aria-label={singlePicker ? undefined : "选择真实商品"}
+      hidden={singlePicker ? !selectedProduct : undefined}
+    >
+      {batchPicker ? (
+        <button ref={pickerTriggerRef} type="button" className="homepage-editor__product-picker-trigger"
+          onClick={openPicker} disabled={readOnly} aria-haspopup="dialog">
+          {batchPicker.label}
+        </button>
+      ) : inlineControls}
+      {singlePicker && selectedProduct ? (
+        <div className="homepage-editor__linked-product" aria-live="polite">
+          <div className="homepage-editor__linked-product-card">
+            <SecureImage
+              src={selectedProduct.image || PRODUCT_PLACEHOLDER}
+              alt=""
+              fallback={PRODUCT_PLACEHOLDER}
+              tokenKind="staff"
+              className="homepage-editor__linked-product-image"
+            />
+            <button
+              type="button"
+              className="homepage-editor__linked-product-trigger"
+              aria-label={`更换商品：${selectedProduct.name}`}
+              aria-haspopup="dialog"
+              onClick={singlePicker.onOpen}
+              disabled={readOnly}
+            >
+              <span className="homepage-editor__linked-product-identity">
+                <strong>{selectedProduct.resolutionPending ? "正在读取商品" : selectedProduct.name}</strong>
+                {selectedProduct.code ? <small>{selectedProduct.code}</small> : null}
+              </span>
+              <span className="homepage-editor__linked-product-action">更换</span>
+            </button>
+          </div>
+          {detailCode ? (
+            <a
+              className="homepage-editor__linked-target-detail"
+              href={publicProductPath({ id: detailCode, code: detailCode })}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="查看商品详情（新标签页）"
+            >
+              查看商品详情
+            </a>
+          ) : null}
+          {selectedError || (!selectedLoading && !selectedProduct.eligible) ? (
+            <div className="homepage-editor__product-picker-note is-error" role="status">
+              {REASON_LABEL[selectedError ?? selectedProduct.reason]}
+              {selectedError ? (
+                <button type="button" onClick={() => setSelectedRevision((value) => value + 1)}>重试解析商品</button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       <Modal
-        title="选择商品"
-        open={pickerOpen}
-        width={1120}
-        centered
-        keyboard
-        maskClosable={false}
-        wrapClassName="homepage-editor__product-picker-modal"
-        okText={`确认选择（${draftSelectedCount}）`}
+        {...(singlePicker ? singleReferencePickerModalProps : referencePickerModalProps)}
+        title={batchPicker?.label ?? "选择商品"}
+        open={isPickerOpen}
+        keyboard={!batchConfirming}
+        closable={!batchConfirming}
+        confirmLoading={batchConfirming}
+        okText={singlePicker ? "确认选择" : `确认选择（${draftSelectedCount}）`}
         cancelText="取消"
         okButtonProps={{
           disabled:
             readOnly ||
+            batchHasUnavailableProduct ||
             !allDraftLegacyResolved ||
             draftSelectedCount < minProducts ||
             draftSelectedCount > maxProducts,
           size: "large",
         }}
-        cancelButtonProps={{ size: "large" }}
-        onOk={confirmDraftSelection}
+        onOk={() => void confirmDraftSelection()}
+        cancelButtonProps={{ disabled: batchConfirming }}
         onCancel={closePicker}
         afterClose={() => pickerTriggerRef.current?.focus()}
+        afterOpenChange={(open) => {
+          if (open && singlePicker) pickerSearchRef.current?.focus();
+        }}
       >
         <div className="homepage-editor__product-picker-dialog">
-          <div className="homepage-editor__product-picker-dialog-heading">
-            <div>
-              <strong>从商品库关联</strong>
-              <span>名称、价格、图片和公开状态始终从商品系统读取。</span>
+          {!singlePicker ? (
+            <div className="homepage-editor__product-picker-dialog-heading">
+              <div>
+                <strong>从商品库关联</strong>
+                <span>{batchPicker ? "空卡位会带入作品主图，已有配图会保留。" : "名称、价格、图片和公开状态始终从商品系统读取。"}</span>
+              </div>
+              <span>已选 {draftSelectedCount}/{maxProducts} 件</span>
             </div>
-            <span>已选 {draftSelectedCount}/{maxProducts} 件</span>
-          </div>
+          ) : null}
 
-          <div className="homepage-editor__product-picker-toolbar" aria-label="商品搜索与筛选">
+          <div className={`homepage-editor__product-picker-toolbar${singlePicker ? " is-single-product" : ""}`} role="group" aria-label="商品搜索与筛选">
             <label>
               <span>搜索商品</span>
               <input
+                ref={pickerSearchRef}
                 value={query}
                 disabled={readOnly}
-                aria-label="搜索商品名称或货号"
-                placeholder="搜索商品名称或货号"
+                aria-label="搜索商品名称或款号"
+                placeholder="搜索商品名称或款号"
                 onChange={(event) => { setQuery(event.target.value); setPage(1); }}
               />
             </label>
             <label>
               <span>商品分类</span>
-              <select aria-label="商品分类" value={categoryId ?? ""} onChange={(event) => { setCategoryId(event.target.value ? Number(event.target.value) : undefined); setPage(1); }}>
+              <select aria-label="商品分类" value={categoryId ?? ""} disabled={readOnly} onChange={(event) => { setCategoryId(event.target.value ? Number(event.target.value) : undefined); setPage(1); }}>
                 <option value="">全部分类</option>
                 {categories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}
               </select>
             </label>
+            {!singlePicker ? <>
             <label>
               <span>商品状态</span>
               <select aria-label="商品状态" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}>
@@ -488,11 +638,12 @@ export default function ProductReferencesField({
               </select>
             </label>
             <button type="button" className="homepage-editor__product-picker-reset" onClick={resetFilters}>重置</button>
+            </> : null}
           </div>
 
           {categoryError ? (
             <div className="homepage-editor__product-picker-note is-error" role="status">
-              分类筛选加载失败，仍可使用关键词、状态和公开资格继续选择商品
+              {singlePicker ? "分类加载失败，仍可按名称或款号搜索商品。" : "分类筛选加载失败，仍可使用关键词、状态和公开资格继续选择商品"}
               <button type="button" onClick={() => setCategoryRevision((value) => value + 1)}>重新加载分类</button>
             </div>
           ) : null}
@@ -504,7 +655,8 @@ export default function ProductReferencesField({
                   const selected = draftActiveCodes.includes(product.code);
                   const addBlocked = !selected && (
                     readOnly ||
-                    !allDraftLegacyResolved ||
+                    (Boolean(batchPicker) && !product.eligible) ||
+                    (!singlePicker && !allDraftLegacyResolved) ||
                     (maxProducts !== 1 && draftSelectedCount >= maxProducts)
                   );
                   return (
@@ -514,7 +666,7 @@ export default function ProductReferencesField({
                       className="homepage-editor__product-picker-card"
                       data-selected={selected}
                       aria-pressed={selected}
-                      disabled={addBlocked}
+                      disabled={batchConfirming || addBlocked}
                       onClick={() => toggleDraftProduct(product)}
                     >
                       <span className="homepage-editor__product-picker-card-check" aria-hidden="true">{selected ? "✓" : ""}</span>
@@ -541,7 +693,12 @@ export default function ProductReferencesField({
             <button type="button" disabled={page * pageSize >= total || loading} onClick={() => setPage((value) => value + 1)}>下一页</button>
           </div>
 
-          <section className="homepage-editor__product-picker-draft" aria-label="本次已选商品">
+          {singlePicker ? (
+            <>
+              <p role="status">{draftDisplayRows[0] ? `已选：${draftDisplayRows[0].name}` : "请选择一个商品。"}</p>
+              {batchError ? <p role="alert" className="homepage-editor__product-picker-note is-error">{batchError}</p> : null}
+            </>
+          ) : <section className="homepage-editor__product-picker-draft" aria-label="本次已选商品">
             <header>
               <strong>本次已选</strong>
               <span>{draftSelectedCount}/{maxProducts} 件 · 确认后才会更新页面</span>
@@ -565,7 +722,8 @@ export default function ProductReferencesField({
             )}
             {draftSelectedCount < minProducts ? <p role="alert">至少选择 {minProducts} 件商品后才能确认。</p> : null}
             {!allDraftLegacyResolved ? <p role="alert">旧引用中有无法解析的商品，请先移除失效项。</p> : null}
-          </section>
+            {batchError ? <p role="alert" className="homepage-editor__product-picker-note is-error">{batchError}</p> : null}
+          </section>}
         </div>
       </Modal>
     </div>

@@ -453,3 +453,23 @@
 .template-editor__catalog-preview-shell[data-preview-annotations="false"] .template-editor__editable-overlay.is-catalog {
   visibility: hidden;
 }
+.template-editor__catalog-drag-status {
+  grid-column: 1 / -1;
+  min-width: 0;
+  color: var(--adm-text);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.template-editor__catalog-drag-status:empty {
+  position: absolute;
+}
+
+.template-editor__catalog-drag-refresh {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.homepage-editor__dynamic-template-card-main {
+  user-select: none;
+}

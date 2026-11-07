@@ -1,9 +1,9 @@
 import {
   IsString, IsOptional, IsInt, IsBoolean, IsEnum, IsNumber,
-  Min, MaxLength, IsNotEmpty, ValidateNested, IsArray, ArrayMaxSize, ArrayUnique,
+  Min, Max, MaxLength, IsNotEmpty, ValidateNested, IsArray, ArrayMaxSize, ArrayUnique,
   IsIn, IsDateString,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   MaterialType, ProductStatus, ProductVisibility, SalesMode,
   ProductPurchaseRegion, ProductPublishMode, ProductFulfillmentType,
@@ -43,10 +43,15 @@ export class CreateProductDto {
   @MaxProductTitleUnits()
   name!: string;
 
-  @IsString({ message: '货号必须是字符串' })
-  @IsNotEmpty({ message: '请填写商品货号' })
-  @MaxLength(50, { message: '货号不能超过50个字符' })
+  @IsString({ message: '款号必须是字符串' })
+  @IsNotEmpty({ message: '请填写商品款号' })
+  @MaxLength(50, { message: '款号不能超过50个字符' })
   code!: string;
+
+  @IsOptional()
+  @Transform(({ obj }) => obj.requireNewCode)
+  @IsBoolean({ message: '款号冲突检查标记必须是布尔值' })
+  requireNewCode?: boolean;
 
   @IsOptional()
   @IsString({ message: '简介必须是字符串' })
@@ -83,6 +88,14 @@ export class CreateProductDto {
   @IsNumber({}, { message: '价格必须是数字' })
   @Min(0, { message: '价格不能为负数' })
   price?: number;
+
+  /** 定制参考起价；不作为 SKU 成交价或订金。0 表示不公开参考价。 */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 }, { message: '定制参考起价最多保留两位小数' })
+  @Min(0, { message: '定制参考起价不能为负数' })
+  @Max(99999999.99, { message: '定制参考起价超出有效范围' })
+  priceMin?: number | null;
 
   @IsOptional()
   @Type(() => Number)

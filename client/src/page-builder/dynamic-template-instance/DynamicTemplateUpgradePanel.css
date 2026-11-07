@@ -3,6 +3,25 @@
   overflow: auto;
 }
 
+.dynamic-template-operations {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 40px));
+}
+
+.dynamic-template-operations > p {
+  margin: 0;
+}
+
+.dynamic-template-operations__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .dynamic-template-upgrade-review__instances {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));

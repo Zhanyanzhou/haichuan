@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { executeDynamicTemplateDefinitionCommand, type TemplateDefinitionV2 } from "../src/page-builder/template-definition";
-import { applyBasicSkeleton, createBlankTemplate, installNewTemplateServer, readSession, saveTemplate } from "./fixtures/template-authoring-main-route";
+import { addFirstRegion, applyBasicSkeleton, createBlankTemplate, installNewTemplateServer, readSession, saveTemplate } from "./fixtures/template-authoring-main-route";
 const nativeBrowserErrors = new WeakMap<Page, string[]>();
 test.beforeEach(async ({ page }) => {
   const errors: string[] = [];
@@ -33,10 +33,6 @@ async function mount(page: Page) {
   await expect(page.getByRole("spinbutton", { name: "网格列数", exact: true })).toBeVisible();
 }
 const snapshot = async (page: Page) => JSON.parse(await page.getByTestId("state").textContent() ?? "{}");
-async function openPropertyGroup(page: Page, name: string) {
-  const group = page.locator(`details[data-template-property-group="${name}"]`);
-  if (await group.count() && !(await group.getAttribute("open") !== null)) await group.locator(":scope > summary").click();
-}
 
 async function selectStructureTarget(page: Page, targetId: string) {
   const structureTrigger = page.getByRole("button", { name: "展开模板结构面板", exact: true });
@@ -92,7 +88,6 @@ test("属性可见性：显示操作恢复 display none，仅作用正在查看�
   expect(shown.definition.nodes[id].responsive.desktop).toEqual(before.definition.nodes[id].responsive.desktop);
   expect(shown.definition.nodes[id].responsive.mobile).toMatchObject({ hidden: false, display: "block" });
   expect(shown.history).toBe(before.history + 1);
-  await page.getByText("断点显示与继承", { exact: true }).click();
   await page.getByRole("button", { name: "显示／隐藏当前断点", exact: true }).click();
   expect((await snapshot(page)).definition.nodes[id].responsive.desktop).toEqual(before.definition.nodes[id].responsive.desktop);
   await expect(node).toBeHidden();
@@ -156,15 +151,17 @@ for (const viewportWidth of [1200, 1920]) test(`对象属性布局：${viewportW
   await selectStructureTarget(page, headingId);
   const inspector = page.getByRole("region", { name: "对象设计属性", exact: true });
   const typography = inspector.getByRole("heading", { name: "文字排版", exact: true });
-  const responsive = inspector.getByText("断点显示与继承", { exact: true });
+  const responsive = inspector.getByRole("heading", { name: "设备覆盖", exact: true });
   await expect(typography).toBeInViewport();
   expect((await typography.boundingBox())!.y).toBeLessThan((await inspector.getByRole("heading", { name: "尺寸与位置", exact: true }).boundingBox())!.y);
   expect((await typography.boundingBox())!.y).toBeLessThan((await responsive.boundingBox())!.y);
   await expect(inspector.getByRole("spinbutton", { name: "字号", exact: true })).toBeInViewport();
+  await expect(inspector.getByRole("group", { name: "字重", exact: true })).toBeInViewport();
+  await expect(inspector.getByRole("group", { name: "文字对齐", exact: true })).toBeInViewport();
   await expect(inspector.getByRole("group", { name: "对象外框比例预设" })).toHaveCount(0);
-  await expect(inspector.locator('details[data-template-property-group="尺寸限制"]')).not.toHaveAttribute("open");
-  await expect(inspector.locator('details[data-template-property-group="外观"]')).not.toHaveAttribute("open");
-  await expect(inspector.locator('details[data-template-property-group="文字细节"]')).not.toHaveAttribute("open");
+  await expect(inspector.locator('[data-template-property-group="尺寸限制"]')).toBeVisible();
+  await expect(inspector.locator('[data-template-property-group="外观"]')).toBeVisible();
+  await expect(inspector.locator('[data-template-property-group="文字细节"]')).toBeVisible();
   expect(await inspector.evaluate((element) => element.scrollWidth > element.clientWidth + 1)).toBe(false);
   await page.screenshot({ path: testInfo.outputPath(`properties-text-${viewportWidth}.png`) });
   const imageId = Object.values(state.definition!.nodes).find((node) => node.type === "ImageSlot")!.nodeId;
@@ -172,9 +169,9 @@ for (const viewportWidth of [1200, 1920]) test(`对象属性布局：${viewportW
   const imageControls = inspector.getByRole("heading", { name: "图片适配与焦点", exact: true });
   const imageDimensions = inspector.getByRole("heading", { name: "尺寸与位置", exact: true });
   await expect(imageControls).toBeInViewport();
-  await expect(inspector.getByRole("combobox", { name: "图片适配", exact: true })).toBeInViewport();
+  await expect(inspector.getByRole("group", { name: "图片适配", exact: true })).toBeInViewport();
   expect((await imageControls.boundingBox())!.y).toBeLessThan((await imageDimensions.boundingBox())!.y);
-  expect((await imageControls.boundingBox())!.y).toBeLessThan((await inspector.getByText("断点显示与继承", { exact: true }).boundingBox())!.y);
+  expect((await imageControls.boundingBox())!.y).toBeLessThan((await inspector.getByRole("heading", { name: "设备覆盖", exact: true }).boundingBox())!.y);
   await expect(inspector.getByRole("heading", { name: "文字排版", exact: true })).toHaveCount(0);
   await expect(inspector.getByRole("group", { name: "对象外框比例预设", exact: true })).toBeVisible();
   expect(await inspector.evaluate((element) => element.scrollWidth > element.clientWidth + 1)).toBe(false);
@@ -186,13 +183,10 @@ test("主路由属性：空白零高区域可以从最小固定高度开始，�
   await page.setViewportSize({ width: 1600, height: 1000 });
   const server = await installNewTemplateServer(page);
   await createBlankTemplate(page);
-  const add = page.locator(".template-editor__canvas-add");
-  await add.locator(":scope > summary").click();
-  await add.getByText("布局区域与分组", { exact: true }).click();
-  await add.getByRole("button", { name: "添加区域", exact: true }).click();
+  await addFirstRegion(page);
+  await expect(page.locator(".template-editor__canvas-add")).toHaveCount(0);
   const before = await readSession(page);
   const region = before.selectedObjectId!;
-  await page.locator('details[data-template-property-group="尺寸与位置"] > summary').click();
   const heightMode = page.getByRole("combobox", { name: "高度方式", exact: true });
   await expect(page.getByLabel("当前画布对象外框尺寸")).toContainText("画布占位高 256 px（非输出高度）");
   await expect(page.getByText("当前为空，画布使用编辑占位；模板仍按所选高度规则输出，添加内容后按实际内容重测。", { exact: true })).toBeVisible();
@@ -204,7 +198,6 @@ test("主路由属性：空白零高区域可以从最小固定高度开始，�
   expect(fixed.historyPast.length).toBe(before.historyPast.length + 1);
   await page.getByRole("button", { name: "撤销", exact: true }).click();
   expect((await readSession(page)).definition).toEqual(before.definition);
-  await page.getByText("断点显示与继承", { exact: true }).click();
   await page.getByRole("button", { name: "显示／隐藏当前断点", exact: true }).click();
   await expect(page.getByLabel("当前画布对象外框尺寸")).toContainText("未呈现");
   await expect(heightMode.locator('option[value="fixed"]')).toHaveJSProperty("disabled", true);
@@ -260,15 +253,13 @@ for (const viewportWidth of [1200, 1600, 1920]) test(`主路由属性体验：${
   const state = await readSession(page);
   await selectStructureTarget(page, region);
   const inspector = page.getByRole("region", { name: "对象设计属性", exact: true });
-  const dimensions = inspector.locator('details[data-template-property-group="尺寸与位置"]');
-  await expect(dimensions).not.toHaveAttribute("open");
-  const summary = dimensions.locator("> summary");
-  await expect(summary).toBeInViewport();
+  const dimensions = inspector.locator('[data-template-property-group="尺寸与位置"]');
+  const sizeHeading = dimensions.getByRole("heading", { name: "尺寸与位置", exact: true });
+  await expect(sizeHeading).toBeInViewport();
   const layout = inspector.getByRole("heading", { name: "排列与分栏", exact: true });
-  expect((await layout.boundingBox())!.y).toBeLessThan((await summary.boundingBox())!.y);
-  expect((await summary.boundingBox())!.y).toBeLessThan((await inspector.getByText("断点显示与继承", { exact: true }).boundingBox())!.y);
-  expect((await summary.boundingBox())!.y).toBeLessThan(650);
-  await summary.click();
+  expect((await layout.boundingBox())!.y).toBeLessThan((await sizeHeading.boundingBox())!.y);
+  expect((await sizeHeading.boundingBox())!.y).toBeLessThan((await inspector.getByRole("heading", { name: "设备覆盖", exact: true }).boundingBox())!.y);
+  expect((await sizeHeading.boundingBox())!.y).toBeLessThan(650);
   const heightMode = inspector.getByRole("combobox", { name: "高度方式", exact: true });
   await expect(heightMode).toBeInViewport();
   await expect(inspector.getByLabel("当前画布对象外框尺寸")).not.toContainText("未呈现");
@@ -363,7 +354,6 @@ test("主路由属性：排列预览占用交互，其他属性不能替换预�
   await selectStructureTarget(page, region);
   const inspector = page.getByRole("region", { name: "对象设计属性", exact: true });
   const before = await readSession(page);
-  await inspector.locator('details[data-template-property-group="尺寸与位置"] > summary').click();
   await inspector.getByRole("button", { name: "预览上下排列", exact: true }).click();
   const ratio = inspector.getByRole("group", { name: "对象外框比例预设", exact: true }).getByRole("button", { name: "1:1", exact: true });
   await expect(ratio).toBeDisabled();
@@ -387,8 +377,6 @@ test("主路由属性：手机查看桌面基础时解释排列禁用并可切�
   await expect(page.getByRole("button", { name: /^桌面端模板布局/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /^移动端模板布局/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /平板/ })).toHaveCount(0);
-  await page.getByRole("complementary", { name: "模板属性", exact: true }).getByText("模板设置", { exact: true }).click();
-  await page.getByRole("region", { name: "模板名称与页面职责", exact: true }).getByRole("button", { name: "模板资料与使用限制", exact: true }).click();
   await expect(page.getByRole("heading", { name: /模板资料/ })).toBeVisible();
   await expect(page.getByText(/Tablet|平板端/)).toHaveCount(0);
   await expect(page.locator('[data-template-inspector-field="metadata.mobileBreakpoint"]')).toHaveCount(0);
@@ -447,7 +435,6 @@ test("隔离属性：间距快捷值复用当前设备事务并保留非预设�
 test("隔离属性：图片形状只用直角，历史圆角保留且手机不改桌面", async ({ page }) => {
   await mount(page);
   await page.getByRole("button", { name: "选择图片", exact: true }).click();
-  await openPropertyGroup(page, "外观");
   let shapes = page.getByRole("group", { name: "图片形状", exact: true });
   let radius = page.getByRole("spinbutton", { name: "圆角", exact: true });
   const before = await snapshot(page);
@@ -460,7 +447,6 @@ test("隔离属性：图片形状只用直角，历史圆角保留且手机不�
   await expect(shapes.getByRole("button", { name: "圆形", exact: true })).toHaveCount(0);
 
   await page.getByRole("button", { name: "多选图片", exact: true }).click();
-  await openPropertyGroup(page, "外观");
   shapes = page.getByRole("group", { name: "图片形状", exact: true });
   await expect(shapes.getByRole("button", { pressed: true })).toHaveCount(0);
   const beforeBatch = await snapshot(page);
@@ -478,7 +464,6 @@ test("隔离属性：图片形状只用直角，历史圆角保留且手机不�
   await expect(shapes.getByRole("button", { pressed: true })).toHaveCount(0);
   await expect(page.getByText("当前圆角不是现行推荐（直角或圆形）。历史值仍保留，不会自动改掉。")).toBeVisible();
   await page.getByRole("button", { name: "mobile", exact: true }).click();
-  await openPropertyGroup(page, "外观");
   shapes = page.getByRole("group", { name: "图片形状", exact: true });
   await shapes.getByRole("button", { name: "直角", exact: true }).click();
   state = await snapshot(page);
@@ -503,7 +488,6 @@ test("隔离属性：精确图片焦点保存并被共同Renderer消费，多选
 test("隔离属性：约束冲突保留纠错输入，Escape恢复真实原值且不增加历史", async ({ page }) => {
   await mount(page);
   await page.getByRole("button", { name: "选择图片", exact: true }).click();
-  await openPropertyGroup(page, "尺寸限制");
   await page.getByRole("spinbutton", { name: "最小宽度", exact: true }).fill("500");
   await page.getByRole("spinbutton", { name: "最小宽度", exact: true }).press("Enter");
   const maximum = page.getByRole("spinbutton", { name: "最大宽度", exact: true });
@@ -534,8 +518,6 @@ test("共同Renderer：锚点相对父内容框，实例焦点覆盖不改变绝
 
 test("隔离属性：可选主值恢复系统行为，保留下级覆盖且不删除必填尺寸", async ({ page }) => {
   await mount(page);
-  await openPropertyGroup(page, "尺寸限制");
-  await openPropertyGroup(page, "外观");
   await page.getByRole("button", { name: "mobile", exact: true }).click();
   const gap = page.getByRole("spinbutton", { name: "对象间距", exact: true });
   await gap.fill("27"); await gap.press("Enter");
@@ -652,19 +634,17 @@ test("隔离属性：填满与内容尺寸冲突提前禁用，保持原文档",
   await expect(page.getByText("填满可用空间不可用：父容器高度随内容变化，不能同时让子对象填满；请先确定父容器高度", { exact: true })).toBeVisible();
   expect((await snapshot(page)).definition).toEqual(before.definition);
   await page.getByRole("button", { name: "选择网格", exact: true }).click();
-  await openPropertyGroup(page, "尺寸与位置");
   await expect(page.getByRole("combobox", { name: "宽度方式", exact: true }).locator('option[value="fit"]')).toHaveJSProperty("disabled", true);
 });
 
 test("隔离属性：可选值为空而有效默认可解释，媒体默认与 Renderer 共用", async ({ page }) => {
   await mount(page);
-  await openPropertyGroup(page, "尺寸限制");
   const maximum = page.locator('[data-template-design-property="node.maxWidth"]');
   await expect(maximum.getByRole("spinbutton", { name: "最大宽度", exact: true })).toHaveValue("");
   await expect(maximum.locator('[data-template-effective-value]')).toHaveText("实际生效：不限制");
   await page.getByRole("button", { name: "选择图片", exact: true }).click();
   const fit = page.locator('[data-template-design-property="slot.objectFit"]');
-  await expect(fit.getByRole("combobox", { name: "图片适配", exact: true })).toHaveValue("cover");
+  await expect(fit.getByRole("button", { name: "裁切填满", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("render").locator("img").first()).toHaveCSS("object-fit", "cover");
 });
 
@@ -693,12 +673,10 @@ test("隔离属性：非整数列数拒绝后保留纠错输入，Escape明确�
 test("隔离属性：混合值批量修改一条历史，不支持的属性明确排除", async ({ page }) => {
   await mount(page);
   await page.getByRole("button", { name: "选择图片", exact: true }).click();
-  await openPropertyGroup(page, "外观");
   let radius = page.getByRole("spinbutton", { name: "圆角", exact: true });
   await radius.fill("12"); await radius.press("Enter");
   const before = await snapshot(page);
   await page.getByRole("button", { name: "多选图片", exact: true }).click();
-  await openPropertyGroup(page, "外观");
   radius = page.getByRole("spinbutton", { name: "圆角", exact: true });
   await expect(radius).toHaveValue("");
   await expect(radius).toHaveAttribute("placeholder", "混合值");
@@ -710,10 +688,8 @@ test("隔离属性：混合值批量修改一条历史，不支持的属性明�
   expect((await snapshot(page)).definition).toEqual(before.definition);
   await radius.fill("1"); await radius.press("Enter");
   await page.getByRole("button", { name: "选择图片", exact: true }).click();
-  await openPropertyGroup(page, "外观");
   await page.getByRole("combobox", { name: "圆角单位", exact: true }).selectOption("rem");
   await page.getByRole("button", { name: "多选图片", exact: true }).click();
-  await openPropertyGroup(page, "外观");
   await expect(radius).toHaveAttribute("placeholder", "混合值");
   await expect(radius).toHaveValue("");
   await page.getByRole("button", { name: "混选网格和图片", exact: true }).click();
@@ -740,6 +716,34 @@ test("隔离属性：继承字体的原值保持空白，实际生效读取画�
   await input.press("Escape");
   await expect(input).toHaveValue("");
   await expect(row.locator('[data-template-effective-value]')).toHaveText(`实际生效：${computed}（当前画布计算值）`);
+  expect((await snapshot(page)).definition).toEqual(before.definition);
+
+  const weights = page.getByRole("group", { name: "字重", exact: true });
+  const alignments = page.getByRole("group", { name: "文字对齐", exact: true });
+  await expect(weights.getByRole("button", { name: "细", exact: true })).toBeVisible();
+  await expect(weights.getByRole("button", { name: "常规", exact: true })).toBeVisible();
+  await expect(weights.getByRole("button", { name: "中等", exact: true })).toHaveCount(0);
+  for (const name of ["左对齐", "居中", "右对齐"]) {
+    await expect(alignments.getByRole("button", { name, exact: true })).toBeVisible();
+  }
+  const thin = weights.getByRole("button", { name: "细", exact: true });
+  await thin.click();
+  await expect(thin).toHaveAttribute("aria-pressed", "true");
+  await expect(rendered).toHaveCSS("font-weight", "300");
+  const afterWeight = await snapshot(page);
+  const slotId = afterWeight.definition.nodes[afterWeight.ids.heading].slotId;
+  expect(afterWeight.definition.slots[slotId].desktopRules.fontWeight).toBe(300);
+  expect(afterWeight.history).toBe(before.history + 1);
+  const centered = alignments.getByRole("button", { name: "居中", exact: true });
+  await centered.click();
+  await expect(centered).toHaveAttribute("aria-pressed", "true");
+  await expect(rendered).toHaveCSS("text-align", "center");
+  const afterAlignment = await snapshot(page);
+  expect(afterAlignment.definition.slots[slotId].desktopRules.textAlign).toBe("center");
+  expect(afterAlignment.history).toBe(afterWeight.history + 1);
+  await page.getByRole("button", { name: "撤销", exact: true }).click();
+  expect((await snapshot(page)).definition).toEqual(afterWeight.definition);
+  await page.getByRole("button", { name: "撤销", exact: true }).click();
   expect((await snapshot(page)).definition).toEqual(before.definition);
 });
 
@@ -787,7 +791,6 @@ test("隔离属性：空字号从计算值步进与标签拖动，不从零跳�
 test("隔离属性：混合隐藏多选显式统一，单次历史可完整撤销", async ({ page }) => {
   await mount(page);
   await page.getByRole("button", { name: "选择图片", exact: true }).click();
-  await page.getByText("断点显示与继承", { exact: true }).click();
   await page.getByRole("button", { name: "显示／隐藏当前断点", exact: true }).click();
   const before = await snapshot(page);
   await page.getByRole("button", { name: "多选图片", exact: true }).click();
@@ -805,7 +808,6 @@ test("隔离属性：混合隐藏多选显式统一，单次历史可完整撤�
 test("隔离属性：流式外边距真实渲染，叠放不显示失效的外边距", async ({ page }) => {
   await mount(page);
   await page.getByRole("button", { name: "选择图片", exact: true }).click();
-  await openPropertyGroup(page, "间距与对齐");
   const margin = page.getByRole("spinbutton", { name: "左外边距", exact: true });
   await margin.fill("12"); await margin.press("Enter");
   const state = await snapshot(page);
@@ -820,18 +822,29 @@ test("隔离属性：流式外边距真实渲染，叠放不显示失效的外�
 test("隔离属性：图片适配与整体焦点重置系统值，保留次断点覆盖", async ({ page }) => {
   await mount(page);
   await page.getByRole("button", { name: "选择图片", exact: true }).click();
-  await page.getByRole("combobox", { name: "图片适配", exact: true }).selectOption("contain");
+  const fit = page.getByRole("group", { name: "图片适配", exact: true });
+  const contain = fit.getByRole("button", { name: "完整显示", exact: true });
+  const cover = fit.getByRole("button", { name: "裁切填满", exact: true });
+  const rendered = page.getByTestId("render").locator("img").first();
+  const initial = await snapshot(page);
+  await expect(cover).toHaveAttribute("aria-pressed", "true");
+  await contain.click();
+  await expect(contain).toHaveAttribute("aria-pressed", "true");
+  await expect(rendered).toHaveCSS("object-fit", "contain");
+  expect((await snapshot(page)).history).toBe(initial.history + 1);
+  await page.getByRole("button", { name: "撤销", exact: true }).click();
+  await expect(rendered).toHaveCSS("object-fit", "cover");
+  expect((await snapshot(page)).definition).toEqual(initial.definition);
+  await contain.click();
   await page.getByRole("button", { name: "图片适配恢复系统默认", exact: true }).click();
-  await expect(page.getByRole("combobox", { name: "图片适配", exact: true })).toHaveValue("cover");
+  await expect(cover).toHaveAttribute("aria-pressed", "true");
   let state = await snapshot(page);
   const slotId = state.definition.nodes[state.ids.cards[0]].slotId;
   expect(state.definition.slots[slotId].desktopRules.objectFit).toBeUndefined();
   await page.getByRole("button", { name: "mobile", exact: true }).click();
-  await page.getByRole("button", { name: "精确百分比", exact: true }).click();
   await page.getByRole("spinbutton", { name: "水平焦点", exact: true }).fill("79");
   await page.getByRole("spinbutton", { name: "水平焦点", exact: true }).press("Enter");
   await page.getByRole("button", { name: "desktop", exact: true }).click();
-  await page.getByRole("button", { name: "精确百分比", exact: true }).click();
   await page.getByRole("spinbutton", { name: "水平焦点", exact: true }).fill("23");
   await page.getByRole("spinbutton", { name: "水平焦点", exact: true }).press("Enter");
   await page.getByRole("spinbutton", { name: "垂直焦点", exact: true }).fill("64");
@@ -847,16 +860,17 @@ test("隔离属性：没有父级分配空间的根容器不开放填满高度",
   await mount(page);
   const before = await snapshot(page);
   await page.getByRole("button", { name: "选择根容器", exact: true }).click();
-  await page.locator('[data-template-design-property="node.height"]').getByText("查看尺寸方式限制", { exact: true }).click();
-  await expect(page.getByRole("combobox", { name: "高度方式", exact: true }).locator('option[value="fill"]')).toHaveJSProperty("disabled", true);
-  await expect(page.getByText("填满可用空间不可用：模板根容器没有可分配的父级高度，请使用固定、最小或比例高度", { exact: true })).toBeVisible();
+  const heightProperty = page.locator('[data-template-design-property="node.height"]');
+  const fillOption = heightProperty.getByRole("combobox", { name: "高度方式", exact: true }).locator('option[value="fill"]');
+  await expect(fillOption).toHaveJSProperty("disabled", true);
+  await expect(fillOption).toContainText("模板根容器没有可分配的父级高度");
+  await expect(heightProperty.getByText("查看尺寸方式限制", { exact: true })).toHaveCount(0);
   expect((await snapshot(page)).definition).toEqual(before.definition);
 });
 
 test("隔离属性：应用所有断点失败有原因且零写入，保留确认上下文", async ({ page }) => {
   await mount(page);
   await page.getByRole("button", { name: "选择图片", exact: true }).click();
-  await openPropertyGroup(page, "尺寸限制");
   for (const [label, value] of [["最小宽度", "100"], ["最大宽度", "200"]]) {
     const input = page.getByRole("spinbutton", { name: label, exact: true }); await input.fill(value); await input.press("Enter");
   }
@@ -866,7 +880,6 @@ test("隔离属性：应用所有断点失败有原因且零写入，保留确�
   }
   const before = await snapshot(page);
   const row = page.locator('[data-template-design-property="node.maxWidth"]');
-  await row.locator(".template-native__property-metadata > summary").click();
   await row.getByRole("button", { name: "应用到电脑与手机", exact: true }).click();
   await row.getByRole("button", { name: "确认统一", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("最小尺寸不能大于最大尺寸");
@@ -881,7 +894,6 @@ test("隔离属性：全部恢复继承导致父子约束冲突时原子失败�
   await page.getByRole("button", { name: "mobile", exact: true }).click();
   await page.getByRole("button", { name: "选择图片", exact: true }).click();
   const before = await snapshot(page);
-  await page.getByText("断点显示与继承", { exact: true }).click();
   await page.getByRole("button", { name: "全部恢复继承", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("不能填满适应内容宽度的父容器");
   const after = await snapshot(page);
@@ -970,7 +982,6 @@ test("隔离属性：多选焦点按轴显示共同和混合有效值，不借�
   await mount(page);
   await page.getByRole("button", { name: "选择图片", exact: true }).click();
   // 单选图片的精确百分比收在渐进披露里，先展开再填值。
-  await page.getByRole("button", { name: "精确百分比", exact: true }).click();
   const y = page.getByRole("spinbutton", { name: "垂直焦点", exact: true });
   await y.fill("64"); await y.press("Enter");
   await page.getByRole("button", { name: "多选图片", exact: true }).click();
@@ -1018,6 +1029,15 @@ test("确定性 UI：整体尺寸与外观分组，比例取消撤销及 Mock �
     // 保留主路由当前选中的草稿身份，让保存继续经过工作区控制器和模板 Repository。
     definition.templateId = state.draft!.definition.templateId;
     definition.name = "属性分组回读测试";
+    const root = definition.nodes[definition.rootNodeId];
+    root.responsive.desktop.padding = {
+      top: { value: 2, unit: "rem" },
+      right: { value: 16, unit: "px" },
+      bottom: { value: 24, unit: "px" },
+      left: { value: 32, unit: "px" },
+    };
+    root.responsive.mobile.padding = { left: { value: 8, unit: "px" } };
+    root.responsive.mobile.margin = { top: { value: 8, unit: "px" } };
     const result = state.executeCommand({ type: "transform-definition", label: "建立属性分组验收模板", transform: () => definition });
     if (!result.ok) throw new Error(result.message);
     useTemplateEditorSession.getState().selectObject(definition.rootNodeId);
@@ -1032,36 +1052,99 @@ test("确定性 UI：整体尺寸与外观分组，比例取消撤销及 Mock �
   expect(await appearance.evaluate((element) => !element.closest("details:not([open])"))).toBe(true);
   await expect(appearance.getByRole("textbox", { name: "背景颜色", exact: true })).toBeVisible();
   await expect(inspector.getByRole("textbox", { name: "背景颜色", exact: true })).toHaveCount(1);
+  const overallPadding = inspector.getByRole("group", { name: "整体留白", exact: true });
+  await expect(overallPadding).toBeVisible();
+  for (const value of [/上\s*2\s*rem/, /右\s*16\s*px/, /下\s*24\s*px/, /左\s*32\s*px/]) {
+    await expect(overallPadding).toContainText(value);
+  }
+  const restorePadding = overallPadding.getByRole("button", { name: "恢复留白继承", exact: true });
+  await expect(restorePadding).toHaveCount(0);
+  const customPadding = inspector.getByRole("heading", { name: "自定义留白", exact: true });
+  const paddingModel = inspector.locator('[data-template-spacing-model="padding"]');
+  await expect(customPadding).toBeVisible();
+  await expect(paddingModel).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("properties-overall.png"), animations: "disabled" });
-  await inspector.locator('[data-template-spacing-model="padding"]').screenshot({ path: testInfo.outputPath("properties-spacing-main.png"), animations: "disabled" });
 
-  const designWidthSettings = dimensions.locator("details.template-native__design-width");
-  const designWidthSummary = designWidthSettings.locator(":scope > summary");
-  await designWidthSummary.click();
+  const paddingBefore = await readSession(page);
+  const rootId = paddingBefore.definition!.rootNodeId;
+  const rootBefore = paddingBefore.definition!.nodes[rootId];
+  await inspector.getByRole("button", { name: "在画布调整留白", exact: true }).click();
+  const doneSpacing = page.getByRole("button", { name: "完成间距调整", exact: true });
+  const rightPadding = page.getByRole("button", { name: "拖动调整右内边距", exact: true });
+  await expect(doneSpacing).toBeFocused();
+  await expect(rightPadding).toBeVisible();
+  expect((await readSession(page)).historyPast).toEqual(paddingBefore.historyPast);
+  await rightPadding.press("ArrowLeft");
+  const spacingEdit = await readSession(page);
+  expect(spacingEdit.definition!.nodes[rootId].responsive.desktop.padding?.right).toEqual({ value: 17, unit: "px" });
+  expect(spacingEdit.historyPast).toHaveLength(paddingBefore.historyPast.length + 1);
+  await doneSpacing.press("Escape");
+  await expect(rightPadding).toBeHidden();
+  await page.getByRole("button", { name: "撤销", exact: true }).click();
+  expect((await readSession(page)).definition).toEqual(paddingBefore.definition);
+  await expect(paddingModel).toBeVisible();
+  const topPadding = paddingModel.getByRole("spinbutton", { name: "上内边距", exact: true });
+  await expect(topPadding).toHaveValue("2");
+  await expect(paddingModel.getByRole("combobox", { name: "上内边距单位", exact: true })).toHaveValue("rem");
+  await paddingModel.screenshot({ path: testInfo.outputPath("properties-spacing-main.png"), animations: "disabled" });
+  await topPadding.fill("-1");
+  await topPadding.press("Enter");
+  await expect(topPadding).toHaveAttribute("aria-invalid", "true");
+  await expect(topPadding).toBeVisible();
+  expect((await readSession(page)).definition).toEqual(paddingBefore.definition);
+  await topPadding.press("Escape");
+  await expect(topPadding).toHaveValue("2");
+  await expect(paddingModel).toBeVisible();
+
+  await page.getByRole("button", { name: /^移动端模板布局/ }).click();
+  await expect(overallPadding).toContainText(/左\s*8\s*px/);
+  await expect(restorePadding).toBeVisible();
+  expect((await readSession(page)).definition).toEqual(paddingBefore.definition);
+  expect((await readSession(page)).historyPast).toEqual(paddingBefore.historyPast);
+  await restorePadding.click();
+  await expect(overallPadding).toContainText(/左\s*32\s*px/);
+  await expect(restorePadding).toHaveCount(0);
+  const mobilePadding = await readSession(page);
+  expect(mobilePadding.historyPast).toHaveLength(paddingBefore.historyPast.length + 1);
+  const mobileRoot = mobilePadding.definition!.nodes[rootId];
+  const expectedMobile = { ...rootBefore.responsive.mobile };
+  delete expectedMobile.padding;
+  expect(mobileRoot.responsive.mobile).toEqual(expectedMobile);
+  expect(mobileRoot.responsive.desktop).toEqual(rootBefore.responsive.desktop);
+  await page.getByRole("button", { name: "撤销", exact: true }).click();
+  await expect(overallPadding).toContainText(/左\s*8\s*px/);
+  await expect(restorePadding).toBeVisible();
+  expect((await readSession(page)).definition).toEqual(paddingBefore.definition);
+  await page.getByRole("button", { name: /^桌面端模板布局/ }).click();
+
+  const designWidthSettings = dimensions.locator(".template-native__design-width");
   const designWidth = designWidthSettings.getByRole("spinbutton", { name: "设计宽度", exact: true });
   const widthBefore = await readSession(page);
   const savedWidth = await designWidth.inputValue();
   await designWidth.fill("0");
   await designWidth.press("Enter");
   await expect(designWidth).toHaveAttribute("aria-invalid", "true");
-  await designWidthSummary.click();
-  await expect(designWidthSettings).toHaveAttribute("open", "");
   await expect(designWidth).toBeVisible();
   await expect(designWidth).toHaveValue("0");
   expect((await readSession(page)).definition).toEqual(widthBefore.definition);
   expect((await readSession(page)).historyPast).toEqual(widthBefore.historyPast);
   await designWidth.press("Escape");
   await expect(designWidth).toHaveValue(savedWidth);
-  await designWidthSummary.click();
-  await expect(designWidthSettings).not.toHaveAttribute("open");
+  await expect(designWidth).toBeVisible();
 
   const heightMode = dimensions.getByRole("combobox", { name: "高度方式", exact: true });
   const ratios = dimensions.getByRole("group", { name: "模板整体比例预设", exact: true });
   expect(await ratios.evaluate((element) => {
-    const heightMode = document.querySelector('[data-template-design-property="node.height"]');
-    return Boolean(heightMode && (heightMode.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING));
+    const heightProperty = element.closest('[data-template-property-group="尺寸与位置"]')
+      ?.querySelector('[data-template-design-property="node.height"]');
+    return Boolean(heightProperty && (element.compareDocumentPosition(heightProperty) & Node.DOCUMENT_POSITION_FOLLOWING));
   })).toBe(true);
   await heightMode.selectOption("auto");
+  const ratioOption = heightMode.locator('option[value="aspect-ratio"]');
+  await expect(ratioOption).toHaveJSProperty("disabled", true);
+  await expect(ratioOption).toContainText("请使用上方画幅预设");
+  await expect(dimensions.getByText("比例来源", { exact: true })).toHaveCount(0);
+  await expect(dimensions.getByText("尺寸与预览规则", { exact: true })).toHaveCount(0);
   const before = await readSession(page);
   await ratios.getByRole("button", { name: "4:3", exact: true }).click();
   await page.getByRole("button", { name: "取消比例预览", exact: true }).click();
@@ -1072,6 +1155,8 @@ test("确定性 UI：整体尺寸与外观分组，比例取消撤销及 Mock �
   const changed = await readSession(page);
   expect(changed.historyPast).toHaveLength(before.historyPast.length + 1);
   expect(changed.definition!.nodes[changed.definition!.rootNodeId].responsive.desktop.height).toEqual({ mode: "aspect-ratio", ratio: { width: 4, height: 3 } });
+  await expect(heightMode).toHaveValue("aspect-ratio");
+  await expect(dimensions.getByRole("spinbutton", { name: /^比例[宽高]$/ })).toHaveCount(0);
   await page.getByRole("button", { name: "撤销", exact: true }).click();
   expect((await readSession(page)).definition).toEqual(before.definition);
   await page.getByRole("button", { name: "重做", exact: true }).click();
@@ -1115,16 +1200,13 @@ test("确定性 UI：手机随内容可明确转换为标准双端画幅，取�
   const readout = page.locator(".template-editor__canvas-view-readout");
   await expect(heightMode).toHaveValue("auto");
   await expect(measurement).toContainText("本节当前尺寸 · 只读");
-  await expect(measurement).toContainText("高度规则 跟随桌面比例（自动对换）");
-  await expect(measurement).not.toContainText("当前 2:3");
+  await expect(measurement).toContainText("跟随桌面");
+  await expect(measurement.getByText("比例来源", { exact: true })).toHaveCount(0);
   await expect(readout).toHaveText(/^本节尺寸 宽 390 px × 高 \d+ px · 标准比例 (?:21:9|2:1|16:9|3:2|4:3|5:4|1:1|1:2|4:5|3:4|2:3|9:16)$/);
   const standardRatio = ((await readout.innerText()).match(/标准比例 (\d+:\d+)/) ?? [])[1];
-  await expect(measurement).toContainText(`标准比例 ${standardRatio}`);
-  await expect(measurement).not.toContainText("未设标准比例");
-  await expect(measurement).not.toContainText("标准比例 未设置");
-  await expect(measurement).toContainText("设定比例 2:3（跟随桌面）");
+  await expect(measurement).toContainText(standardRatio);
   await expect(ratios.locator('button[aria-pressed="true"]')).toHaveCount(0);
-  await expect(ratios).toContainText("同时设置桌面比例与手机对换比例");
+  await expect(ratios).toContainText("确认后，桌面和手机一起应用所选画幅");
   const before = await readSession(page);
   await page.getByRole("spinbutton", { name: "画布缩放百分比", exact: true }).fill("80");
   await page.getByRole("spinbutton", { name: "画布缩放百分比", exact: true }).press("Enter");
@@ -1132,7 +1214,7 @@ test("确定性 UI：手机随内容可明确转换为标准双端画幅，取�
   expect((await readSession(page)).historyPast).toEqual(before.historyPast);
   await ratios.getByRole("button", { name: "9:16", exact: true }).click();
   await expect(heightMode).toHaveValue("auto");
-  await expect(measurement).toContainText("标准比例 9:16");
+  await expect(measurement).toContainText("9:16");
   await expect(page.getByRole("group", { name: "确认对象比例", exact: true })).toContainText("桌面 16:9，手机 9:16");
   await expect(ratios.getByRole("button", { name: "9:16", exact: true })).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "取消比例预览", exact: true }).click();
@@ -1151,7 +1233,7 @@ test("确定性 UI：手机随内容可明确转换为标准双端画幅，取�
   await expect(heightMode).toHaveValue("auto");
   expect((await readSession(page)).definition).toEqual(before.definition);
   await page.screenshot({ path: testInfo.outputPath("mobile-auto-size.png"), animations: "disabled" });
-  // 手机已有独立比例时，桌面卡片不得误称整对画幅已应用。
+  // 手机已有非标准独立比例时，桌面卡片不得误称整对画幅已应用。
   await page.evaluate(async () => {
     const sessionPath = "/src/page-builder/template-editor/templateEditorSession.ts";
     const { useTemplateEditorSession } = await import(/* @vite-ignore */ sessionPath);
@@ -1160,16 +1242,27 @@ test("确定性 UI：手机随内容可明确转换为标准双端画幅，取�
       definition.metadata.geometryPolicy = "paired-canvas";
       const root = definition.nodes[definition.rootNodeId];
       root.responsive.desktop.height = { mode: "aspect-ratio", ratio: { width: 16, height: 9 } };
-      root.responsive.mobile.height = { mode: "aspect-ratio", ratio: { width: 4, height: 5 } };
+      root.responsive.mobile.height = { mode: "aspect-ratio", ratio: { width: 7, height: 11 } };
     } });
     if (!result.ok) throw new Error(result.message);
     useTemplateEditorSession.getState().setDevice("desktop");
   });
   await expect(ratios.getByRole("button", { name: "16:9", exact: true })).toHaveAttribute("aria-pressed", "false");
+  const independent = await readSession(page);
+  await page.getByRole("button", { name: /^移动端模板布局/ }).click();
+  await expect(heightMode).toHaveValue("aspect-ratio");
+  await expect(dimensions.getByRole("spinbutton", { name: /^比例[宽高]$/ })).toHaveCount(0);
+  expect((await readSession(page)).definition).toEqual(independent.definition);
+  expect((await readSession(page)).historyPast).toEqual(independent.historyPast);
+  await ratios.getByRole("button", { name: "9:16", exact: true }).click();
+  await page.getByRole("button", { name: "取消比例预览", exact: true }).click();
+  expect((await readSession(page)).definition).toEqual(independent.definition);
+  expect((await readSession(page)).historyPast).toEqual(independent.historyPast);
 });
 
 test("隔离属性：留白盒模型保留单位、四边联动单次撤销，手机覆盖可逐项恢复", async ({ page }, testInfo) => {
   await mount(page);
+  await expect(page.getByRole("group", { name: "整体留白", exact: true })).toHaveCount(0);
   const model = page.locator('[data-template-spacing-model="padding"]');
   await expect(model).toBeVisible();
   const top = model.locator('[data-template-design-property="node.padding.top"]');
@@ -1208,7 +1301,7 @@ test("隔离属性：留白盒模型保留单位、四边联动单次撤销，�
   await expect(topInput).toHaveValue("7");
 });
 
-test("确定性 UI：图片默认内容按需展开，取景焦点只有一个完整入口", async ({ page }) => {
+test("确定性 UI：图片默认内容直接编辑，取景焦点只有一个完整入口", async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 });
   await mount(page);
   await page.getByRole("button", { name: "选择图片", exact: true }).click();
@@ -1221,13 +1314,12 @@ test("确定性 UI：图片默认内容按需展开，取景焦点只有一个�
     draft.definition.schemaVersion = 3;
     state.open(draft);
   });
-  const content = page.locator('details[data-template-default-content][data-template-default-content-kind="image"]');
+  const content = page.locator('[data-template-default-content][data-template-default-content-kind="image"]');
   await expect(content).toHaveCount(1);
-  await expect(content).not.toHaveAttribute("open");
-  await expect(page.getByRole("combobox", { name: "图片适配", exact: true })).toBeVisible();
+  await expect(content.locator(":scope > summary")).toHaveCount(0);
+  await expect(page.getByRole("group", { name: "图片适配", exact: true })).toBeVisible();
   await expect(page.locator("[data-image-focus-field]")).toHaveCount(1);
   const baseline = await snapshot(page);
-  await content.locator(":scope > summary").click();
   await expect(content.getByRole("textbox", { name: "默认图片说明", exact: true })).toBeVisible();
   await expect(content.locator("[data-image-focus-field]")).toHaveCount(0);
   await expect(page.locator("[data-image-focus-field]")).toHaveCount(1);

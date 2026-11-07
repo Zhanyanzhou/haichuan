@@ -1437,7 +1437,7 @@ export default function OrderManage() {
             allowClear
           />
           <Input.Search
-            placeholder="商品名 / 货号"
+            placeholder="商品名 / 款号"
             value={productKeywordInput}
             onChange={(e) => setProductKeywordInput(e.target.value)}
             onSearch={(v) => {
@@ -2448,7 +2448,7 @@ export default function OrderManage() {
                         重新搜索商品
                       </Button>
                     </div>
-                  ) : "输入名称或货号搜索商品"}
+                  ) : "输入名称或款号搜索商品"}
                   value={row.productId}
                   onChange={(pid: number) => {
                     setItemRows((rs) =>

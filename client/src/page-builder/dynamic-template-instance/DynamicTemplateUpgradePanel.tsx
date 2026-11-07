@@ -1,7 +1,6 @@
-import { App as AntdApp, Alert, Button, Modal, Tag } from "antd";
-import RouteLoading from "@/components/common/RouteLoading";
+import { App as AntdApp, Alert, Button, Modal, Popover, Tag } from "antd";
 import { useEditorCanvasActive } from "../workspace/editorCanvasActivity";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { unwrapResponse } from "@/utils/unwrap";
 import {
   dynamicTemplateApi,
@@ -112,6 +111,10 @@ export default function DynamicTemplateUpgradePanel({
   currentSchemaVersion,
   currentDefinitionChecksum,
   onApply,
+  onRestoreStyle,
+  onCorrectImageDescription,
+  fieldActions = [],
+  restoreStyleDisabled = false,
 }: {
   definition: TemplateDefinitionV2;
   instance: DynamicTemplateInstanceProps;
@@ -122,14 +125,25 @@ export default function DynamicTemplateUpgradePanel({
     analysis: DynamicTemplateUpgradeAnalysis,
     target: PublishedDynamicTemplateResource,
   ) => void;
+  onRestoreStyle?: () => void;
+  onCorrectImageDescription?: () => void;
+  fieldActions?: { key: string; label: string; onClick: () => void }[];
+  restoreStyleDisabled?: boolean;
 }) {
   const { message } = AntdApp.useApp();
   const canvasActive = useEditorCanvasActive();
   const [versionCheck, setVersionCheck] = useState<TemplateVersionCheckState>({ status: "loading" });
   const [reloadRequest, setReloadRequest] = useState(0);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [operationsOpen, setOperationsOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const operationsRef = useRef<HTMLElement>(null);
+  const restoreFocusAfterPreviewClose = useRef(false);
   useEffect(() => {
-    if (!canvasActive) setPreviewOpen(false);
+    if (!canvasActive) {
+      setPreviewOpen(false);
+      setOperationsOpen(false);
+    }
   }, [canvasActive]);
 
   useEffect(() => {
@@ -215,56 +229,24 @@ export default function DynamicTemplateUpgradePanel({
       : null
   ), [definition, instance, latest, versionCheck.status]);
 
-  if (versionCheck.status === "loading") {
-    return <RouteLoading scope="inline" label="正在检查模板版本…" />;
-  }
-  if (versionCheck.status === "catalog-error") {
-    return (
-      <Alert
-        type="warning"
-        showIcon
-        message={versionCheck.message}
-        action={<Button size="small" onClick={() => setReloadRequest((value) => value + 1)}>重新检查</Button>}
-      />
-    );
-  }
-  if (versionCheck.status === "catalog-missing") {
-    return (
-      <Alert
-        type="warning"
-        showIcon
-        message="目录未找到当前模板，无法判断是否最新"
-        description={`当前页面继续锁定 ${instance.templateId} v${instance.templateVersion}，页面草稿未修改。`}
-        action={<Button size="small" onClick={() => setReloadRequest((value) => value + 1)}>重新检查</Button>}
-      />
-    );
-  }
-  if (versionCheck.status === "identity-conflict") {
-    return (
-      <Alert
-        type="warning"
-        showIcon
-        message={`目录中的 v${versionCheck.latest.version} 身份与页面锁定版本不一致，无法确认是否最新`}
-        description={`当前页面继续锁定 ${instance.templateId} v${instance.templateVersion}，页面草稿未修改。`}
-        action={<Button size="small" onClick={() => setReloadRequest((value) => value + 1)}>重新检查</Button>}
-      />
-    );
-  }
-  if (versionCheck.status === "current") {
-    return (
-      <div className="homepage-editor__properties-hint" role="status">
-        {versionCheck.latest.version === instance.templateVersion
-          ? `当前已锁定最新可用版本 v${instance.templateVersion}。`
-          : `当前页面锁定 v${instance.templateVersion}，目录最新可用版本为 v${versionCheck.latest.version}；无需升级。`}
-      </div>
-    );
-  }
-  if (!upgrade || !latest) {
-    return null;
-  }
+  const versionWarning = versionCheck.status === "catalog-error" ? versionCheck.message
+    : versionCheck.status === "catalog-missing" ? "目录未找到当前模板，无法判断是否最新"
+      : versionCheck.status === "identity-conflict"
+        ? `目录中的 v${versionCheck.latest.version} 身份与页面锁定版本不一致，无法确认是否最新`
+        : null;
+  const checkingInOperations = versionCheck.status === "loading" && operationsOpen;
+  const hasOperations = Boolean(onRestoreStyle || onCorrectImageDescription || fieldActions.length || upgrade || versionWarning || checkingInOperations);
+  useEffect(() => {
+    if (!hasOperations) setOperationsOpen(false);
+  }, [hasOperations]);
+
+  const closeOperations = () => {
+    setOperationsOpen(false);
+    triggerRef.current?.focus();
+  };
 
   const applyUpgrade = () => {
-    if (!canvasActive || upgrade.blockers.length > 0) return;
+    if (!canvasActive || !upgrade || !latest || upgrade.blockers.length > 0) return;
     registerResolvedDynamicTemplate({
       templateId: latest.templateId,
       version: latest.version,
@@ -279,27 +261,105 @@ export default function DynamicTemplateUpgradePanel({
 
   return (
     <>
-      <Alert
-        type="info"
-        showIcon
-        message={`发现新版本 v${latest.version}`}
-        description={`当前页面继续使用 v${instance.templateVersion}，只有确认升级才会修改页面草稿。`}
-        action={<Button size="small" onClick={() => setPreviewOpen(true)}>查看差异</Button>}
-      />
-      <DynamicTemplateUpgradeReviewModal
-        open={previewOpen}
-        title={`模板版本升级：v${instance.templateVersion} → v${latest.version}`}
-        plans={[{
-          blockId: instance.id,
-          instanceId: instance.instanceId,
-          currentProps: instance,
-          currentDefinition: definition,
-          targetDefinition: latest.definition,
-          analysis: upgrade,
-        }]}
-        onConfirm={applyUpgrade}
-        onCancel={() => setPreviewOpen(false)}
-      />
+      {hasOperations && canvasActive ? (
+        <Popover
+          open={operationsOpen}
+          onOpenChange={setOperationsOpen}
+          afterOpenChange={(open) => {
+            if (open) operationsRef.current?.focus();
+          }}
+          trigger="click"
+          placement="bottomRight"
+          destroyOnHidden
+          content={(
+            <section
+              ref={operationsRef}
+              className="dynamic-template-operations"
+              role="dialog"
+              aria-label="区块操作"
+              tabIndex={-1}
+              onKeyDown={(event) => {
+                if (event.key !== "Escape") return;
+                event.preventDefault();
+                event.stopPropagation();
+                closeOperations();
+              }}
+            >
+              {onRestoreStyle ? (
+                <Button size="small" disabled={restoreStyleDisabled} onClick={() => {
+                  closeOperations();
+                  onRestoreStyle();
+                }}>
+                  恢复本节样式
+                </Button>
+              ) : null}
+              {onCorrectImageDescription ? (
+                <Button size="small" onClick={() => {
+                  closeOperations();
+                  onCorrectImageDescription();
+                }}>更正图片说明</Button>
+              ) : null}
+              {fieldActions.map(({ key, label, onClick }) => (
+                <Button key={key} size="small" onClick={() => {
+                  closeOperations();
+                  onClick();
+                }}>{label}</Button>
+              ))}
+              {versionWarning ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message={versionWarning}
+                  description={versionCheck.status === "catalog-error" ? undefined
+                    : `当前页面继续锁定 ${instance.templateId} v${instance.templateVersion}，页面草稿未修改。`}
+                  action={<Button size="small" onClick={() => {
+                    operationsRef.current?.focus();
+                    setReloadRequest((value) => value + 1);
+                  }}>重新检查</Button>}
+                />
+              ) : null}
+              {checkingInOperations ? <p role="status">正在检查模板版本…</p> : null}
+              {upgrade ? (
+                <div className="dynamic-template-operations__row">
+                  <span>此区块有可用更新</span>
+                  <Button size="small" onClick={() => {
+                    closeOperations();
+                    setPreviewOpen(true);
+                  }}>查看差异</Button>
+                </div>
+              ) : null}
+            </section>
+          )}
+        >
+          <Button ref={triggerRef} size="small" aria-haspopup="dialog" aria-expanded={operationsOpen}>
+            区块操作
+          </Button>
+        </Popover>
+      ) : null}
+      {upgrade && latest ? (
+        <DynamicTemplateUpgradeReviewModal
+          open={previewOpen}
+          title={`模板版本升级：v${instance.templateVersion} → v${latest.version}`}
+          plans={[{
+            blockId: instance.id,
+            instanceId: instance.instanceId,
+            currentProps: instance,
+            currentDefinition: definition,
+            targetDefinition: latest.definition,
+            analysis: upgrade,
+          }]}
+          onConfirm={applyUpgrade}
+          onCancel={() => {
+            restoreFocusAfterPreviewClose.current = true;
+            setPreviewOpen(false);
+          }}
+          afterClose={() => {
+            if (!restoreFocusAfterPreviewClose.current) return;
+            restoreFocusAfterPreviewClose.current = false;
+            triggerRef.current?.focus();
+          }}
+        />
+      ) : null}
     </>
   );
 }
@@ -310,12 +370,14 @@ export function DynamicTemplateUpgradeReviewModal({
   plans,
   onConfirm,
   onCancel,
+  afterClose,
 }: {
   open: boolean;
   title: string;
   plans: DynamicTemplateUpgradeInstancePlan[];
   onConfirm: () => void;
   onCancel: () => void;
+  afterClose?: () => void;
 }) {
   const canvasActive = useEditorCanvasActive();
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -335,6 +397,8 @@ export function DynamicTemplateUpgradeReviewModal({
       okButtonProps={{ disabled: blocked || plans.length === 0 }}
       onOk={() => { if (canvasActive) onConfirm(); }}
       onCancel={onCancel}
+      focusTriggerAfterClose={!afterClose}
+      afterClose={afterClose}
     >
       <p>确认后只修改当前内存草稿并增加一条页面历史；不会自动保存、发布或回写母模板。</p>
       <div className="dynamic-template-upgrade-review__instances" aria-label="实例升级审查列表">

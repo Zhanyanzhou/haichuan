@@ -59,11 +59,13 @@ const compactWorkspaceSource = readFileSync(
 
 export function isResponsiveDockWidth(value) {
   const match = value.match(
-    /^clamp\(\s*(\d+(?:\.\d+)?)px\s*,\s*(\d+(?:\.\d+)?)vw\s*,\s*(\d+(?:\.\d+)?)px\s*\)$/,
+    /^clamp\(\s*(\d+(?:\.\d+)?)px\s*,\s*(?:(\d+(?:\.\d+)?)vw|calc\(\s*var\(--editor-dock-basis\)\s*\*\s*(\d+(?:\.\d+)?)\s*\))\s*,\s*(\d+(?:\.\d+)?)px\s*\)$/,
   );
   if (!match) return false;
-  const [, minPx, fluidVw, maxPx] = match.map(Number);
-  return minPx > 0 && fluidVw > 0 && maxPx > minPx;
+  const [, minPx, fluidVw, basisFactor, maxPx] = match;
+  return Number(minPx) > 0
+    && Number(fluidVw ?? basisFactor) > 0
+    && Number(maxPx) > Number(minPx);
 }
 
 for (const property of editorDockProperties) {

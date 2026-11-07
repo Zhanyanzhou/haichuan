@@ -1,10 +1,9 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { Fragment, lazy, Suspense, type ReactNode } from "react";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { getBrowserPublicContentLocale } from "@/i18n/publicLocale";
 import {
   getContentTemplateIssues,
 } from "@/page-builder/generated/contentTemplates.generated";
-import { isVisiblePrimaryStageBlock } from "@/page-builder/utils/primaryStagePolicy";
 import { getMatureContentTemplateSlotType } from "@/page-builder/template-definition/validateTemplateDefinition";
 import {
   normalizeLegacyRenderColors,
@@ -19,19 +18,13 @@ import {
   type ResolvedDynamicTemplateDefinitionMap,
 } from "@/page-builder/dynamic-template-instance/types";
 import DynamicTemplateInstanceView from "@/page-builder/dynamic-template-instance/DynamicTemplateInstanceView";
+import type { TemplateContentBreakpoint } from "@/page-builder/template-definition/responsive";
 import {
-  buildDynamicTemplatePublicSurface,
-  isDynamicTemplateInstancePubliclyVisible,
-} from "@/page-builder/dynamic-template-instance/publicVisibility";
-import {
-  resolveTemplateBreakpoint,
-  toTemplateContentBreakpoint,
-  type TemplateContentBreakpoint,
-} from "@/page-builder/template-definition/responsive";
-import {
-  compileDynamicTemplateRenderPlan,
-  findFirstReachableHeadingSlotId,
-} from "@/page-builder/template-definition/renderPlan";
+  createPageBlockRenderSemantics,
+  hasRequiredPublicMedia,
+  isPubliclyRenderableBlock,
+  usePublicRendererViewportWidth,
+} from "./pageBlockRenderSemantics";
 
 export type { PuckBlock, PuckDocument } from "@/page-builder/types";
 
@@ -76,92 +69,6 @@ function UnsupportedContentTemplateState({
 
 function textValue(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
-}
-
-function hasRequiredPublicMedia(block: PuckBlock) {
-  const props = block.props || {};
-  switch (block.type) {
-    case "首屏主视觉":
-      return Boolean(textValue(props.desktopImage) || textValue(props.mobileImage));
-    default:
-      return true;
-  }
-}
-
-function usePublicRendererViewportWidth(enabled: boolean) {
-  const [width, setWidth] = useState<number | undefined>(() => (
-    enabled && typeof window !== "undefined" ? window.innerWidth : undefined
-  ));
-  useEffect(() => {
-    if (!enabled) {
-      setWidth(undefined);
-      return undefined;
-    }
-    const update = () => setWidth(window.innerWidth);
-    update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
-  }, [enabled]);
-  return width;
-}
-
-function getResolvedDynamicTemplate(
-  block: PuckBlock,
-  resolvedDynamicTemplates: ResolvedDynamicTemplateDefinitionMap,
-) {
-  if (block.type !== DYNAMIC_TEMPLATE_BLOCK_TYPE) return undefined;
-  const templateId = String(block.props?.templateId ?? "");
-  const templateVersion = Number(block.props?.templateVersion);
-  return resolvedDynamicTemplates[
-    dynamicTemplateVersionKey(templateId, templateVersion)
-  ];
-}
-
-function resolveDynamicTemplateDevice(
-  block: PuckBlock,
-  resolvedDynamicTemplates: ResolvedDynamicTemplateDefinitionMap,
-  viewportWidth: number | undefined,
-): TemplateContentBreakpoint {
-  const resolved = getResolvedDynamicTemplate(block, resolvedDynamicTemplates);
-  if (!resolved || viewportWidth === undefined) return "desktop";
-  return toTemplateContentBreakpoint(
-    resolveTemplateBreakpoint(resolved.definition, viewportWidth),
-  );
-}
-
-function isPubliclyRenderableBlock(
-  block: PuckBlock,
-  resolvedDynamicTemplates: ResolvedDynamicTemplateDefinitionMap,
-  device: TemplateContentBreakpoint,
-  pageKey?: string,
-) {
-  const normalized = normalizeLegacyRenderColors(block.props || {});
-  const props: PuckProps = normalized && typeof normalized === "object" && !Array.isArray(normalized)
-    ? normalized as PuckProps
-    : {};
-  if (props.isVisible === false) return false;
-
-  if (block.type === DYNAMIC_TEMPLATE_BLOCK_TYPE) {
-    const instanceProps = props as DynamicTemplateInstanceProps;
-    const resolved = getResolvedDynamicTemplate({ ...block, props }, resolvedDynamicTemplates);
-    if (!resolved || resolved.definition.templateId !== instanceProps.templateId) return false;
-    return isDynamicTemplateInstancePubliclyVisible({
-      definition: resolved.definition,
-      contentBySlotId: instanceProps.contentBySlotId,
-      hiddenSlotIds: instanceProps.hiddenSlotIds,
-      breakpoint: device,
-      pageKey,
-    });
-  }
-
-  const templateIssue = getContentTemplateIssues({
-    moduleType: block.type,
-    props,
-    blockId: props.id,
-    path: "public-renderer",
-  }).some((issue) => issue.severity === "error");
-  if (templateIssue || !hasRequiredPublicMedia({ ...block, props })) return false;
-  return Boolean(getMatureContentTemplateSlotType(block.type || ""));
 }
 
 export type PuckDocumentRenderMode = "public" | "preview";
@@ -320,18 +227,27 @@ export default function PuckDocumentRenderer({
   mode = "public",
   heroHeadingLevel = 1,
   primaryHeading,
+  primaryHeroBlock,
+  viewportWidthOverride,
   surface,
   pageKey,
+  renderPrimaryStage,
 }: {
   data: PuckDocument;
   mode?: PuckDocumentRenderMode;
   heroHeadingLevel?: 1 | 2;
   /** 纯装修公开页的页面标题；无有效 Hero 标题时补为唯一的视觉隐藏 h1。 */
   primaryHeading?: string;
+  /** 分段公开页从整页选出的唯一主标题来源。 */
+  primaryHeroBlock?: PuckBlock;
+  viewportWidthOverride?: number;
   surface?: "home";
   pageKey?: string;
+  /** 首页可单独呈现首个可见主舞台，缺少主舞台时传入 null。 */
+  renderPrimaryStage?: (stage: ReactNode, block?: PuckBlock) => ReactNode;
 }) {
-  const viewportWidth = usePublicRendererViewportWidth(mode === "public");
+  const measuredWidth = usePublicRendererViewportWidth(mode === "public" && viewportWidthOverride === undefined);
+  const viewportWidth = viewportWidthOverride ?? measuredWidth;
   if (!Array.isArray(data?.content)) return null;
   const english = getBrowserPublicContentLocale() === "en";
   const content = data.content;
@@ -346,70 +262,30 @@ export default function PuckDocumentRenderer({
   const resolvedDynamicTemplates = readResolvedDynamicTemplateDefinitions(
     data[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY],
   );
-  const isPrimaryStage = (block: PuckBlock) => (
-    isVisiblePrimaryStageBlock(block, resolvedDynamicTemplates)
-  );
-  const deviceForBlock = (block: PuckBlock) => resolveDynamicTemplateDevice(
-    block,
-    resolvedDynamicTemplates,
-    viewportWidth,
-  );
-  // 只复用同一次同步渲染里的判断；下一次渲染重新校验，不缓存编辑中的可变定义。
-  const publicRenderability = new Map<PuckBlock, boolean>();
-  const publiclyRenderable = (block: PuckBlock) => {
-    if (!publicRenderability.has(block)) {
-      publicRenderability.set(block, isPubliclyRenderableBlock(
-        block, resolvedDynamicTemplates, deviceForBlock(block), resolvedPageKey,
-      ));
-    }
-    return publicRenderability.get(block)!;
-  };
-  const isRenderablePrimaryStage = (block: PuckBlock) => (
-    isPrimaryStage(block)
-    && (mode !== "public" || publiclyRenderable(block))
-  );
-  const allBlocks = [...content, ...zoneBlocks];
-  const dynamicPrimaryStageHasHeading = (block: PuckBlock) => {
-    if (block.type !== DYNAMIC_TEMPLATE_BLOCK_TYPE || !isRenderablePrimaryStage(block)) return false;
-    const templateId = String(block.props?.templateId ?? "");
-    const templateVersion = Number(block.props?.templateVersion);
-    const definition = resolvedDynamicTemplates[
-      dynamicTemplateVersionKey(templateId, templateVersion)
-    ]?.definition;
-    if (!definition) return false;
-    const instanceProps = block.props as DynamicTemplateInstanceProps;
-    const device = deviceForBlock(block);
-    const result = compileDynamicTemplateRenderPlan(definition, {
-      device,
-      breakpoint: device,
-      contentBySlotId: instanceProps.contentBySlotId,
-      hiddenSlotIds: instanceProps.hiddenSlotIds,
-      layoutOverridesByNodeId: instanceProps.layoutOverridesByNodeId,
-      showEmptySlots: false,
-      publicSurface: buildDynamicTemplatePublicSurface(
-        definition,
-        instanceProps.contentBySlotId,
-        resolvedPageKey,
-      ),
+  const { deviceForBlock, publiclyRenderable, isRenderablePrimaryStage, primaryStageHasHeading } =
+    createPageBlockRenderSemantics({
+      resolvedDynamicTemplates,
+      viewportWidth,
+      pageKey: resolvedPageKey,
+      preview: mode === "preview",
     });
-    return result.ok && Boolean(findFirstReachableHeadingSlotId(result.plan.root));
-  };
-  const primaryHeroIndex = allBlocks.findIndex((block) => (
-    block.type === "首屏主视觉"
-      ? isRenderablePrimaryStage(block)
-        && typeof block.props?.title === "string"
-        && block.props.title.trim().length > 0
-      : dynamicPrimaryStageHasHeading(block)
-  ));
+  const allBlocks = [...content, ...zoneBlocks];
+  const primaryHeroIndex = heroHeadingLevel === 2
+    ? -1
+    : primaryHeroBlock
+      ? allBlocks.indexOf(primaryHeroBlock)
+      : allBlocks.findIndex(primaryStageHasHeading);
   const primaryStageIndex = allBlocks.findIndex(isRenderablePrimaryStage);
+  const presentPrimaryStage = homeSurface && mode === "public" ? renderPrimaryStage : undefined;
   // 区块级兜底：单个 block 运行时抛错只跳过该区块，避免整页白屏
   const render = (block: PuckBlock, index: number) => {
     const blockHeroHeadingLevel = index === primaryHeroIndex
       ? heroHeadingLevel
       : 2;
-    return (
+    const key = `eb-${block.props?.id || index}`;
+    const section = (
       <ErrorBoundary
-        key={`eb-${block.props?.id || index}`}
+        key={key}
         fallback={
           mode === "public" ? null : (
             <section role="status" style={{ padding: "48px 24px", textAlign: "center", color: "#5F6568" }}>
@@ -433,6 +309,9 @@ export default function PuckDocumentRenderer({
         />
       </ErrorBoundary>
     );
+    return presentPrimaryStage && index === primaryStageIndex
+      ? <Fragment key={key}>{presentPrimaryStage(section, block)}</Fragment>
+      : section;
   };
   return (
     <div className="hc-public-document" data-home-surface={homeSurface ? "true" : undefined}>
@@ -467,6 +346,7 @@ export default function PuckDocumentRenderer({
       {primaryHeading && (primaryHeroIndex < 0 || heroHeadingLevel !== 1) ? (
         <h1 className="sr-only">{primaryHeading}</h1>
       ) : null}
+      {primaryStageIndex < 0 ? presentPrimaryStage?.(null) : null}
       {content.map(render)}
       {zoneBlocks.map((block, index) =>
         render(block, content.length + index),

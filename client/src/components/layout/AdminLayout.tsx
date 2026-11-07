@@ -1,30 +1,10 @@
-/**
- * AdminLayout v7 — 单栏分层侧边栏
- *
- * ┌──────────────────────────────────────────────────────┐
- * │  ◈ HAI CHUAN                         预览  🔔  ● AC │  ← Header 48px
- * ├────────────┬─────────────────────────────────────────┤
- * │  侧边栏    │  📍 面包屑                             │
- * │  240px     ├─────────────────────────────────────────┤
- * │            │                                         │
- * │  7 分区    │              内容区                     │
- * │  12 域     │              <Outlet />                 │
- * │            │                                         │
- * │            │                                         │
- * │  👤 用户   │                                         │
- * └────────────┴─────────────────────────────────────────┘
- */
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { Outlet, useNavigate, useLocation, Link } from "react-router-dom";
-import { Button, Dropdown, Avatar, Drawer } from "antd";
+/** 普通后台由侧栏承载导航与账号；窄屏和店铺装修各自保留必要的工具栏。 */
+import { useState, useEffect, useMemo, useCallback, useRef, type CSSProperties } from "react";
+import { Outlet, useNavigate, useLocation } from "react-router-dom";
+import { Button, Drawer } from "antd";
 import {
-  UserOutlined,
-  LogoutOutlined,
   MenuOutlined,
   LeftOutlined,
-  RightOutlined,
-  ExportOutlined,
-  DownOutlined,
 } from "@ant-design/icons";
 import { useAuthStore } from "@/store/authStore";
 import {
@@ -43,21 +23,20 @@ import {
 import { canAccessAdminRoute } from "@/config/adminRouteAccess";
 import { AdminSidebar } from "./AdminSidebar";
 import { authApi } from "@/services/api";
+import { PAGE_EDITOR_DESKTOP_LAYOUT_WIDTH } from "@/page-builder/workspace/pageEditorWorkspaceTiers";
 
 /** 浏览器放大或分屏时，优先释放侧栏空间，保证主操作区可用。 */
 const ADMIN_COMPACT_BREAKPOINT = 1024;
-const ADMIN_SIDEBAR_STORAGE_KEY = "admin-primary-sidebar-collapsed";
+const NAVIGATION_OPEN_DELAY = 150;
+const NAVIGATION_CLOSE_DELAY = 250;
+
+export type AdminLayoutOutletContext = {
+  desktopNavigationOpen: boolean;
+  setDesktopNavigationSuppressed: (suppressed: boolean) => void;
+};
 
 function isCompactViewport() {
   return window.innerWidth <= ADMIN_COMPACT_BREAKPOINT;
-}
-
-function getInitialSidebarCollapsed() {
-  try {
-    return window.localStorage.getItem(ADMIN_SIDEBAR_STORAGE_KEY) === "true";
-  } catch {
-    return false;
-  }
 }
 
 /* ═══════ 按分区聚合域 ═══════ */
@@ -92,13 +71,14 @@ function useNavSections(role: string | undefined) {
 export default function AdminLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isCompact, setIsCompact] = useState(isCompactViewport);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(
-    getInitialSidebarCollapsed,
-  );
-  const [editorSidebarCollapsed, setEditorSidebarCollapsed] = useState(true);
+  const [hoverNavigationOpen, setHoverNavigationOpen] = useState(false);
+  const [desktopNavigationSuppressed, setNavigationSuppressed] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const menuToggleRef = useRef<HTMLButtonElement>(null);
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
+  const hoverNavigationRef = useRef<HTMLDivElement>(null);
+  const navigationTimer = useRef<number>(undefined);
+  const mouseInNavigation = useRef(false);
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(
     new Set(),
   );
@@ -111,9 +91,70 @@ export default function AdminLayout() {
   );
   const sections = useNavSections(user?.role);
   const isEditorWorkspace = location.pathname.startsWith("/admin/editor/");
-  const desktopSidebarCollapsed = isEditorWorkspace
-    ? editorSidebarCollapsed
-    : sidebarCollapsed;
+  const hasHoverNavigation = !isCompact && !desktopNavigationSuppressed;
+  const desktopSidebarCollapsed = !hoverNavigationOpen;
+
+  const clearNavigationTimer = useCallback(() => {
+    window.clearTimeout(navigationTimer.current);
+  }, []);
+
+  const setDesktopNavigationSuppressed = useCallback((suppressed: boolean) => {
+    setNavigationSuppressed(suppressed);
+    if (suppressed) {
+      clearNavigationTimer();
+      setHoverNavigationOpen(false);
+    }
+  }, [clearNavigationTimer]);
+
+  const closeHoverNavigation = useCallback(() => {
+    clearNavigationTimer();
+    if (hoverNavigationRef.current?.contains(document.activeElement)) {
+      sidebarToggleRef.current?.focus();
+    }
+    setAccountMenuOpen(false);
+    setHoverNavigationOpen(false);
+  }, [clearNavigationTimer]);
+
+  const scheduleNavigationClose = (accountOpen: boolean) => {
+    clearNavigationTimer();
+    if (!hoverNavigationOpen || mouseInNavigation.current || accountOpen) return;
+
+    navigationTimer.current = window.setTimeout(() => {
+      if (hoverNavigationRef.current?.querySelector(".admin-sidebar :focus-visible")) return;
+      closeHoverNavigation();
+    }, NAVIGATION_CLOSE_DELAY);
+  };
+
+  useEffect(() => {
+    setAccountMenuOpen(false);
+  }, [location.key]);
+
+  useEffect(() => () => {
+    mouseInNavigation.current = false;
+    clearNavigationTimer();
+  }, [clearNavigationTimer, hasHoverNavigation]);
+
+  useEffect(() => {
+    if (!hasHoverNavigation || !hoverNavigationOpen || accountMenuOpen) return;
+
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      closeHoverNavigation();
+    };
+    const dismissOnOutsidePress = (event: PointerEvent) => {
+      if (event.target instanceof Node && !hoverNavigationRef.current?.contains(event.target)) {
+        closeHoverNavigation();
+      }
+    };
+
+    window.addEventListener("keydown", dismissOnEscape);
+    window.addEventListener("pointerdown", dismissOnOutsidePress);
+    return () => {
+      window.removeEventListener("keydown", dismissOnEscape);
+      window.removeEventListener("pointerdown", dismissOnOutsidePress);
+    };
+  }, [accountMenuOpen, closeHoverNavigation, hoverNavigationOpen, hasHoverNavigation]);
 
   // 从路由反向推导当前导航上下文
   const navCtx = useMemo(
@@ -128,24 +169,19 @@ export default function AdminLayout() {
 
   // 响应式检测
   useEffect(() => {
-    const h = () => setIsCompact(isCompactViewport());
-    window.addEventListener("resize", h);
-    return () => window.removeEventListener("resize", h);
+    const compactViewport = window.matchMedia(`(max-width: ${ADMIN_COMPACT_BREAKPOINT}px)`);
+    const handleChange = () => {
+      setIsCompact(compactViewport.matches);
+      setMobileOpen(false);
+      setHoverNavigationOpen(false);
+      setAccountMenuOpen(false);
+    };
+    compactViewport.addEventListener("change", handleChange);
+    return () => compactViewport.removeEventListener("change", handleChange);
   }, []);
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        ADMIN_SIDEBAR_STORAGE_KEY,
-        String(sidebarCollapsed),
-      );
-    } catch {
-      // 隐私模式或存储受限时仅保留当前会话状态。
-    }
-  }, [sidebarCollapsed]);
-
-  useEffect(() => {
-    if (!isCompact || !mobileOpen) return;
+    if (!isCompact || !mobileOpen || accountMenuOpen) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -156,31 +192,7 @@ export default function AdminLayout() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isCompact, mobileOpen]);
-
-  useEffect(() => {
-    if (!isEditorWorkspace || isCompact || desktopSidebarCollapsed) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      setEditorSidebarCollapsed(true);
-      requestAnimationFrame(() => sidebarToggleRef.current?.focus());
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [desktopSidebarCollapsed, isCompact, isEditorWorkspace]);
-
-  useEffect(() => {
-    if (!isEditorWorkspace || isCompact) return;
-
-    window.dispatchEvent(
-      new CustomEvent("homepage-editor-primary-navigation-change", {
-        detail: { open: !editorSidebarCollapsed },
-      }),
-    );
-  }, [editorSidebarCollapsed, isCompact, isEditorWorkspace]);
+  }, [isCompact, mobileOpen, accountMenuOpen]);
 
   // 未登录跳转
   useEffect(() => {
@@ -222,6 +234,11 @@ export default function AdminLayout() {
     });
   }, []);
 
+  const closeMobileNavigation = useCallback(() => {
+    setAccountMenuOpen(false);
+    setMobileOpen(false);
+  }, []);
+
   const handleDomainClick = useCallback(
     (domain: NavDomain) => {
       if (domain.disabled) return;
@@ -235,7 +252,7 @@ export default function AdminLayout() {
       if (domain.directRoute) {
         setExpandedDomains(new Set());
         navigate(domain.directRoute);
-        if (isCompact) setMobileOpen(false);
+        if (isCompact) closeMobileNavigation();
         return;
       }
 
@@ -244,7 +261,7 @@ export default function AdminLayout() {
       if (defaultRoute && navCtx?.domain.key !== domain.key) {
         setExpandedDomains(new Set([domain.key]));
         navigate(defaultRoute);
-        if (isCompact) setMobileOpen(false);
+        if (isCompact) closeMobileNavigation();
         return;
       }
 
@@ -253,17 +270,17 @@ export default function AdminLayout() {
         return;
       }
 
-      if (isCompact) setMobileOpen(false);
+      if (isCompact) closeMobileNavigation();
     },
-    [isCompact, navCtx?.domain.key, navigate, toggleDomain],
+    [closeMobileNavigation, isCompact, navCtx?.domain.key, navigate, toggleDomain],
   );
 
   const handleItemClick = useCallback(
     (route: string) => {
       navigate(route);
-      if (isCompact) setMobileOpen(false);
+      if (isCompact) closeMobileNavigation();
     },
-    [navigate, isCompact],
+    [navigate, isCompact, closeMobileNavigation],
   );
 
   const handleToggleCommonPin = useCallback(
@@ -281,155 +298,152 @@ export default function AdminLayout() {
     });
   }, [logout, navigate]);
 
-  /* ── 用户菜单 ── */
-  const userMenuItems = [
-    {
-      key: "logout",
-      icon: <LogoutOutlined />,
-      label: "退出登录",
-      danger: true,
+  const account = isEditorWorkspace ? undefined : {
+    name: user?.realName || user?.username || "管理员",
+    open: accountMenuOpen,
+    onOpenChange: (open: boolean) => {
+      setAccountMenuOpen(open);
+      if (hasHoverNavigation) scheduleNavigationClose(open);
     },
-  ];
+    onLogout: handleLogout,
+  };
+
+  const desktopNavigation = (
+    <AdminSidebar
+      id="admin-navigation-sidebar"
+      collapsed={desktopSidebarCollapsed}
+      sections={sections}
+      activeDomainKey={navCtx?.domain.key}
+      expandedDomains={expandedDomains}
+      commonItems={commonItems}
+      pathname={location.pathname}
+      search={location.search}
+      role={user?.role}
+      account={account}
+      onDomainClick={handleDomainClick}
+      onToggleDomain={toggleDomain}
+      onItemClick={handleItemClick}
+      onTogglePin={handleToggleCommonPin}
+    />
+  );
+  const sidebarToggleLabel = desktopSidebarCollapsed ? "展开一级导航" : "收起一级导航";
+  const desktopNavigationToggle = (
+    <button
+      ref={sidebarToggleRef}
+      type="button"
+      className="admin-sidebar__collapse-handle admin-panel-collapse-toggle"
+      onClick={() => {
+        if (hoverNavigationOpen) {
+          closeHoverNavigation();
+        } else {
+          clearNavigationTimer();
+          setHoverNavigationOpen(true);
+        }
+      }}
+      aria-label={sidebarToggleLabel}
+      aria-controls="admin-navigation-sidebar"
+      aria-expanded={!desktopSidebarCollapsed}
+      title={sidebarToggleLabel}
+    >
+      {desktopSidebarCollapsed ? <MenuOutlined /> : <LeftOutlined />}
+    </button>
+  );
 
   return (
     <div
-      className={`admin-shell-v7${!isCompact && desktopSidebarCollapsed ? " is-sidebar-collapsed" : ""}${isEditorWorkspace && !isCompact && !desktopSidebarCollapsed ? " is-editor-navigation-open" : ""}`}
+      style={isEditorWorkspace ? {
+        "--page-editor-layout-width": `${PAGE_EDITOR_DESKTOP_LAYOUT_WIDTH}px`,
+      } as CSSProperties : undefined}
+      className={`admin-shell-v7${hasHoverNavigation ? " has-hover-navigation" : ""}${!isCompact && desktopSidebarCollapsed ? " is-sidebar-collapsed" : ""}`}
     >
-      {/* ═══ Header ═══ */}
-      <header
-        className={`admin-header${isEditorWorkspace ? " admin-header--editor" : ""}`}
-      >
-        <div className="admin-header__left">
-          {isCompact && (
-            <Button
-              ref={menuToggleRef}
-              type="text"
-              icon={<MenuOutlined />}
-              onClick={() => setMobileOpen((open) => !open)}
-              className="admin-header__menu-btn"
-              aria-label={mobileOpen ? "关闭后台导航" : "打开后台导航"}
-              aria-controls="admin-navigation-drawer"
-              aria-expanded={mobileOpen}
-            />
-          )}
-        </div>
-
-        {isEditorWorkspace ? (
-          <div
-            id="admin-editor-toolbar-slot"
-            className="admin-header__editor-slot"
-            aria-label="店铺装修工具栏"
-          />
-        ) : null}
-
-        <div className="admin-header__right">
-          {!isEditorWorkspace ? (
-            <Link
-              to="/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="admin-header__site-link"
-              aria-label="查看网站，在新标签页打开"
-            >
-              <ExportOutlined aria-hidden="true" />
-              <span className="admin-header__site-label">查看网站</span>
-            </Link>
-          ) : null}
-          {!isEditorWorkspace ? (
-            <div className="admin-header__account-group">
-              <Dropdown
-                open={accountMenuOpen}
-                onOpenChange={setAccountMenuOpen}
-                trigger={["click"]}
-                menu={{
-                  items: userMenuItems,
-                  onClick: ({ key }) => {
-                    setAccountMenuOpen(false);
-                    if (key === "logout") handleLogout();
-                  },
+      {(isCompact || isEditorWorkspace) && (
+        <header className={`admin-header ${isEditorWorkspace ? "admin-header--editor" : "admin-header--navigation"}`}>
+          <div className="admin-header__left">
+            {isCompact && (
+              <Button
+                ref={menuToggleRef}
+                type="text"
+                icon={<MenuOutlined />}
+                onClick={() => {
+                  setAccountMenuOpen(false);
+                  setMobileOpen((open) => !open);
                 }}
-              >
-                <button
-                  type="button"
-                  className="admin-header__account"
-                  aria-label={`账户菜单，当前用户${user?.realName || user?.username || "管理员"}`}
-                  aria-haspopup="menu"
-                  aria-expanded={accountMenuOpen}
-                >
-                  <Avatar
-                    size={28}
-                    icon={<UserOutlined />}
-                    style={{
-                      backgroundColor: "var(--adm-gold-soft)",
-                      color: "var(--adm-action)",
-                    }}
-                  />
-                  <span className="admin-header__account-name">
-                    {user?.realName || user?.username || "管理员"}
-                  </span>
-                  <DownOutlined
-                    className="admin-header__account-chevron"
-                    aria-hidden="true"
-                  />
-                </button>
-              </Dropdown>
-            </div>
-          ) : null}
-        </div>
-      </header>
+                className="admin-header__menu-btn"
+                aria-label={mobileOpen ? "关闭后台导航" : "打开后台导航"}
+                aria-controls="admin-navigation-drawer"
+                aria-expanded={mobileOpen}
+              />
+            )}
+          </div>
+
+          {isEditorWorkspace && (
+            <>
+              <div
+                id="admin-editor-toolbar-slot"
+                className="admin-header__editor-slot"
+                aria-label="店铺装修工具栏"
+              />
+              <div className="admin-header__right" />
+            </>
+          )}
+        </header>
+      )}
 
       {/* ═══ Body ═══ */}
       <div className="admin-body">
-        {/* 桌面端侧边栏 */}
-        {!isCompact && (
-          <AdminSidebar
-            id="admin-navigation-sidebar"
-            collapsed={desktopSidebarCollapsed}
-            sections={sections}
-            activeDomainKey={navCtx?.domain.key}
-            expandedDomains={expandedDomains}
-            commonItems={commonItems}
-            pathname={location.pathname}
-            search={location.search}
-            role={user?.role}
-            userDisplayName={user?.realName || "管理员"}
-            onDomainClick={handleDomainClick}
-            onToggleDomain={toggleDomain}
-            onItemClick={handleItemClick}
-            onTogglePin={handleToggleCommonPin}
-            onLogout={handleLogout}
-          />
-        )}
-
-        {!isCompact && (
-          <button
-            ref={sidebarToggleRef}
-            type="button"
-            className="admin-sidebar__collapse-handle admin-panel-collapse-toggle"
-            onClick={() => {
-              if (isEditorWorkspace) {
-                setEditorSidebarCollapsed((collapsed) => !collapsed);
-                return;
-              }
-              setSidebarCollapsed((collapsed) => !collapsed);
+        {hasHoverNavigation && (
+          <div
+            ref={hoverNavigationRef}
+            className="admin-hover-navigation"
+            onPointerEnter={(event) => {
+              if (event.pointerType !== "mouse") return;
+              mouseInNavigation.current = true;
+              clearNavigationTimer();
             }}
-            aria-label={desktopSidebarCollapsed ? "展开一级导航" : "收起一级导航"}
-            aria-controls="admin-navigation-sidebar"
-            aria-expanded={!desktopSidebarCollapsed}
-            title={desktopSidebarCollapsed ? "展开一级导航" : "收起一级导航"}
+            onPointerLeave={(event) => {
+              if (event.pointerType !== "mouse") return;
+              mouseInNavigation.current = false;
+              scheduleNavigationClose(accountMenuOpen);
+            }}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) {
+                scheduleNavigationClose(accountMenuOpen);
+              }
+            }}
           >
-            {desktopSidebarCollapsed ? <RightOutlined /> : <LeftOutlined />}
-          </button>
+            <div
+              className="admin-hover-navigation__edge"
+              aria-hidden="true"
+              onPointerEnter={(event) => {
+                if (event.pointerType !== "mouse" || hoverNavigationOpen || event.buttons) return;
+                navigationTimer.current = window.setTimeout(() => {
+                  const focused = document.activeElement;
+                  if (focused?.matches(":focus-visible") && focused.closest("[data-admin-nav-hover-guard]")) {
+                    return;
+                  }
+                  setHoverNavigationOpen(true);
+                }, NAVIGATION_OPEN_DELAY);
+              }}
+              onPointerLeave={clearNavigationTimer}
+            />
+            {desktopNavigationToggle}
+            {desktopNavigation}
+          </div>
         )}
 
         {/* 移动端抽屉 */}
         {isCompact && (
           <Drawer
             placement="left"
+            className={isEditorWorkspace ? undefined : "admin-navigation-drawer"}
             open={mobileOpen}
-            onClose={() => setMobileOpen(false)}
+            keyboard={!accountMenuOpen}
+            onClose={closeMobileNavigation}
             width={260}
-            styles={{ body: { padding: 0 }, header: { display: "none" } }}
+            styles={{
+              body: { padding: 0, ...(!isEditorWorkspace && { display: "flex", overflow: "hidden" }) },
+              header: { display: "none" },
+            }}
           >
             <AdminSidebar
               id="admin-navigation-drawer"
@@ -440,12 +454,11 @@ export default function AdminLayout() {
               pathname={location.pathname}
               search={location.search}
               role={user?.role}
-              userDisplayName={user?.realName || "管理员"}
+              account={account}
               onDomainClick={handleDomainClick}
               onToggleDomain={toggleDomain}
               onItemClick={handleItemClick}
               onTogglePin={handleToggleCommonPin}
-              onLogout={handleLogout}
             />
           </Drawer>
         )}
@@ -456,7 +469,10 @@ export default function AdminLayout() {
           <main
             className={`admin-main${isEditorWorkspace ? " admin-main--workspace" : ""}`}
           >
-            <Outlet />
+            <Outlet context={{
+              desktopNavigationOpen: hasHoverNavigation && hoverNavigationOpen,
+              setDesktopNavigationSuppressed,
+            } satisfies AdminLayoutOutletContext} />
           </main>
         </div>
       </div>

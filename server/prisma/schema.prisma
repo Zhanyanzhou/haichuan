@@ -337,6 +337,7 @@ model ProductImage {
   derivedImages ProductImage[] @relation("SourceImage")
   primaryOf     Product[]      @relation("PrimaryImage")
   listingOf     Product[]      @relation("ListingImage")
+  skuPreviews   ProductSKU[]   @relation("SkuPreviewImage")
   mediaAssetId  Int?           @map("media_asset_id")
   mediaAsset    MediaAsset?    @relation(fields: [mediaAssetId], references: [id], onDelete: SetNull)
 
@@ -358,8 +359,10 @@ model ProductSKU {
   id          Int          @id @default(autoincrement())
   productId   Int          @map("product_id")
   skuCode     String       @unique @map("sku_code") @db.VarChar(100)
+  imageId     Int?         @map("image_id")
   material    MaterialType @default(GOLD_999)
   size        String?      @db.VarChar(50)
+  color       String?      @db.VarChar(50)
   goldWeight  Decimal?     @map("gold_weight") @db.Decimal(8, 2)
   price       Decimal      @default(0) @db.Decimal(10, 2) // DIRECT_PURCHASE 唯一成交价事实源
   stock       Int          @default(0) // @deprecated 库存请通过 InventoryService 统一管理
@@ -368,6 +371,7 @@ model ProductSKU {
   createdAt   DateTime     @default(now()) @map("created_at")
 
   product               Product                @relation(fields: [productId], references: [id], onDelete: Cascade)
+  image                 ProductImage?          @relation("SkuPreviewImage", fields: [imageId], references: [id], onDelete: SetNull, map: "product_skus_image_id_fkey")
   inventories           Inventory[]
   orderItems            OrderItem[]
   cartItems             Cart[]
@@ -376,6 +380,7 @@ model ProductSKU {
   quotationVersionItems QuotationVersionItem[]
   quotedOrderLines      QuotedOrderLine[]
 
+  @@index([imageId], map: "product_skus_image_id_idx")
   @@map("product_skus")
 }
 

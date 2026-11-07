@@ -159,10 +159,10 @@ export function SecureImage({
   }, [normalizedSrc, retry, shouldLoad, status]);
 
   useEffect(() => {
-    // 卡片链接、缩略图按钮内部不能再嵌套按钮。它们仍可在网络恢复时自动重试；
+    // 卡片链接、缩略图按钮和表单标签内部不再嵌套重试按钮，仍可在网络恢复时自动重试；
     // 详情主图等独立图片提供原地重试操作。
     const interactiveParent = errorRef.current?.parentElement?.closest(
-      'a, button, [role="button"], [role="link"]',
+      'a, button, label, [role="button"], [role="link"]',
     );
     setCanShowRetry(Boolean(status === "error" && normalizedSrc && errorRef.current && !interactiveParent));
   }, [fallbackFailed, normalizedSrc, status]);

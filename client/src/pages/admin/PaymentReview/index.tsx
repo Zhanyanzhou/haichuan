@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { App as AntdApp, Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag } from 'antd';
 import { CheckOutlined, CloseOutlined, EyeOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { AdminLoadingState } from '@/components/common/AdminDataStates';
 import { SecureImage } from '@/components/common/SecureImage';
 import { paymentApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
@@ -111,7 +112,7 @@ export default function PaymentReview() {
   const isAdmin = role === 'SUPER_ADMIN' || role === 'ADMIN';
   const [list, setList] = useState<PaymentListItem[]>([]);
   const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [listLoading, setListLoading] = useState<'initial' | 'refreshing' | 'idle'>('initial');
   const [loadError, setLoadError] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -142,7 +143,7 @@ export default function PaymentReview() {
 
   const load = useCallback(async () => {
     const requestId = ++listRequestIdRef.current;
-    setLoading(true);
+    setListLoading((current) => current === 'initial' ? current : 'refreshing');
     setLoadError(false);
     try {
       const res = await paymentApi.getList({
@@ -160,7 +161,7 @@ export default function PaymentReview() {
       setList([]);
       setTotal(0);
     } finally {
-      if (requestId === listRequestIdRef.current) setLoading(false);
+      if (requestId === listRequestIdRef.current) setListLoading('idle');
     }
   }, [page, pageSize, statusFilter, keyword]);
 
@@ -401,7 +402,9 @@ export default function PaymentReview() {
         ))}
       </div>
 
-      {loadError ? (
+      {listLoading === 'initial' ? (
+        <AdminLoadingState subject="付款数据" allowInteraction />
+      ) : loadError ? (
         <div className="text-center py-16">
           <p className="text-brand-muted mb-4">付款数据暂时无法加载</p>
           <Button type="primary" onClick={() => void load()}>重新加载</Button>
@@ -409,7 +412,7 @@ export default function PaymentReview() {
       ) : (
         <Table
           rowKey="id"
-          loading={loading}
+          loading={listLoading === 'refreshing'}
           dataSource={list}
           size="middle"
           pagination={{

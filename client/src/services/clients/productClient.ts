@@ -1,4 +1,4 @@
-import type { ProductStatus } from "@/types";
+import type { ApiResponse, ProductStatus, SalesMode } from "@/types";
 import {
   getBrowserPublicContentLocale,
   type PublicContentLocale,
@@ -57,6 +57,7 @@ type MutableMockProduct = {
   category?: { id: number; name: string } | null;
   materialType: string;
   price?: number | null;
+  priceMin?: number | null;
   size?: string | null;
   status: string;
   visibility?: string;
@@ -84,6 +85,8 @@ export type ProductWriteInput = Record<string, unknown> & {
   code?: string;
   name?: string;
   categoryId?: number;
+  expectedCategoryId?: number;
+  expectedSalesMode?: SalesMode;
   materialType?: string;
   price?: number | null;
   status?: ProductStatus;
@@ -94,10 +97,21 @@ export type ProductWriteInput = Record<string, unknown> & {
   isCustom?: boolean;
 };
 
+export type ProductImportCodeConflict = {
+  requestedCode: string;
+  code: string;
+  id: number;
+  name: string;
+  status: ProductStatus;
+  removed?: boolean;
+};
+
 export type ProductSkuWriteInput = Record<string, unknown> & {
   skuCode?: string;
+  imageId?: number | null;
   material?: string;
   size?: string;
+  color?: string;
   goldWeight?: number;
   price?: number;
   isActive?: boolean;
@@ -308,6 +322,23 @@ export interface ProductReferenceResult {
 }
 
 export const productApi = {
+  checkImportCodes: async (codes: string[]) => {
+    if (USE_MOCK) {
+      const products = getMockProducts();
+      return mockRes(codes.flatMap((requestedCode) => {
+        const product = products.find((item) => item.code.toLowerCase() === requestedCode.toLowerCase());
+        return product ? [{
+          requestedCode,
+          code: product.code,
+          id: product.id,
+          name: product.name,
+          status: product.deletedAt ? "ARCHIVED" : product.status,
+          ...(product.deletedAt ? { removed: true } : {}),
+        }] : [];
+      }));
+    }
+    return api.post("/products/admin/import-code-conflicts", { codes }, { suppressGlobalError: true });
+  },
   getList: async (params: ProductAdminQuery, signal?: AbortSignal) => {
     if (USE_MOCK) {
       await mockDelay();
@@ -471,14 +502,14 @@ export const productApi = {
       return api.get("/products/public", requestConfig);
     }
   },
-  getById: async (id: number) => {
+  getById: async (id: number, signal?: AbortSignal) => {
     if (USE_MOCK) {
       await mockDelay();
       const p = findActiveMockProduct(id);
       if (!p) throw new Error("产品不存在");
       return mockRes(p);
     }
-    return api.get(`/products/${id}`);
+    return api.get(`/products/${id}`, { signal });
   },
   getAttributes: async (id: number) => {
     if (USE_MOCK) {
@@ -500,6 +531,7 @@ export const productApi = {
       suppressGlobalError?: boolean;
       locale?: PublicContentLocale;
       signal?: AbortSignal;
+      publicOnly?: boolean;
     } = {},
   ) => {
     const locale = options.locale ?? getBrowserPublicContentLocale();
@@ -519,7 +551,7 @@ export const productApi = {
       return mockRes(product);
     }
     const reference = encodeURIComponent(String(id));
-    if (!useCustomerAuthStore.getState().isLoggedIn) {
+    if (options.publicOnly || !useCustomerAuthStore.getState().isLoggedIn) {
       return api.get(`/products/public/${reference}`, requestOptions);
     }
     try {
@@ -566,16 +598,23 @@ export const productApi = {
     }
     return api.post("/products", data, { suppressGlobalError: true });
   },
-  update: async (id: number, data: ProductWriteInput) => {
+  update: async (id: number, data: ProductWriteInput, options?: { suppressGlobalError?: boolean }) => {
     if (USE_MOCK) {
       await mockDelay(200);
       const product = getMockProducts().find((item) => item.id === id);
       if (!product) throw new Error("商品不存在");
-      Object.assign(product, data);
+      const { expectedCategoryId, expectedSalesMode, ...changes } = data;
+      if (expectedCategoryId !== undefined && product.categoryId !== expectedCategoryId) {
+        throw mockRequestError("商品分类已变更，请刷新后重试", 409);
+      }
+      if (expectedSalesMode !== undefined && product.salesMode !== expectedSalesMode) {
+        throw mockRequestError("商品销售方式已变更，请刷新后重试", 409);
+      }
+      Object.assign(product, changes);
       persistMockProducts();
       return mockRes(product);
     }
-    return api.put(`/products/${id}`, data);
+    return api.put(`/products/${id}`, data, options);
   },
   archive: async (id: number) => {
     if (USE_MOCK) {
@@ -591,7 +630,7 @@ export const productApi = {
     }
     return api.put(`/products/${id}/archive`);
   },
-  restore: async (id: number) => {
+  restore: async (id: number, options?: { suppressGlobalError?: boolean }) => {
     if (USE_MOCK) {
       await mockDelay(200);
       const product = findActiveMockProduct(id);
@@ -603,7 +642,21 @@ export const productApi = {
       persistMockProducts();
       return mockRes(product);
     }
-    return api.put(`/products/${id}/restore`);
+    return api.put(`/products/${id}/restore`, undefined, options);
+  },
+
+  permanentlyDelete: async (id: number) => {
+    if (USE_MOCK) {
+      // 演示数据无法核对真实业务关联，因此演示模式不执行永久删除。
+      const error = mockRequestError("演示模式不支持永久删除商品", 409);
+      error.errorCode = "PRODUCT_PERMANENT_DELETE_DEMO_ONLY";
+      throw error;
+    }
+    const response = await api.delete<ApiResponse<{ id: number }>>(`/products/${id}/permanent`, {
+      suppressGlobalError: true,
+    });
+    if (response.data?.data?.id !== id) throw new Error("商品删除响应缺少对应的商品 ID");
+    return response;
   },
   /* 图片管理 */
   addImage: async (

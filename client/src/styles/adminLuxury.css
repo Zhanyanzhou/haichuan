@@ -63,7 +63,8 @@
   /* 布局 */
   --adm-header-h: 60px;
   /* 208px：导航内边距、图标、展开箭头和滚动条之后，仍完整显示 2 字一级名称与 5 字二级名称。见 UI_GUIDE A.8。 */
-  --adm-sidebar-w: 208px;
+  --adm-sidebar-expanded-w: 208px;
+  --adm-sidebar-w: var(--adm-sidebar-expanded-w);
   --adm-nav-top: clamp(58px, 3.75vw, 72px);
   --adm-nav-x: 16px;
   --adm-nav-row-h: 42px;
@@ -268,6 +269,15 @@
   gap: 12px;
 }
 
+.admin-header--navigation {
+  --adm-header-h: 48px;
+}
+
+.admin-header--navigation .admin-header__menu-btn {
+  width: var(--adm-control-large);
+  height: var(--adm-control-large);
+}
+
 .admin-header__brand {
   font-family: "Cormorant Garamond", Garamond, "Georgia", serif;
   font-size: 17px;
@@ -306,73 +316,7 @@
   background: var(--adm-gold-soft);
 }
 
-.admin-header__site-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: var(--adm-control-default);
-  padding: 0 12px;
-  border: 1px solid var(--adm-line-strong);
-  border-radius: 4px;
-  color: var(--adm-text);
-  font-size: 13px;
-  text-decoration: none;
-  white-space: nowrap;
-  transition:
-    color 0.15s,
-    border-color 0.15s,
-    background 0.15s;
-}
-
-.admin-header__site-link:hover {
-  border-color: var(--adm-action);
-  color: var(--adm-action);
-  background: var(--adm-neutral-bg);
-}
-
-.admin-header__account-group {
-  display: flex;
-  align-items: center;
-  margin-left: 8px;
-  padding-left: 16px;
-  border-left: 1px solid var(--adm-line);
-}
-
-.admin-header__account {
-  display: inline-flex;
-  height: var(--adm-control-default);
-  padding: 0 8px;
-  align-items: center;
-  gap: 8px;
-  border: 0;
-  border-radius: 4px;
-  color: var(--adm-text);
-  background: transparent;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.admin-header__account:hover,
-.admin-header__account[aria-expanded="true"] {
-  background: var(--adm-neutral-bg);
-}
-
-.admin-header__account-name {
-  max-width: 128px;
-  overflow: hidden;
-  font-size: 13px;
-  line-height: 20px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.admin-header__account-chevron {
-  color: var(--adm-muted);
-  font-size: 12px;
-}
-
-/* 紧凑工作区：浏览器放大或分屏时保留主操作区，次级文字入口让位给抽屉菜单。 */
+/* 窄屏使用抽屉导航。 */
 @media (max-width: 1024px) {
   .admin-header {
     padding-inline: 20px;
@@ -380,26 +324,6 @@
 
   .admin-header__right {
     gap: 8px;
-  }
-
-  .admin-header__site-link {
-    width: var(--adm-control-default);
-    padding: 0;
-  }
-
-  .admin-header__site-label,
-  .admin-header__account-name,
-  .admin-header__account-chevron {
-    display: none;
-  }
-
-  .admin-header__account-group {
-    margin-left: 4px;
-    padding-left: 12px;
-  }
-
-  .admin-header__account {
-    padding: 0 4px;
   }
 
   .admin-sidebar__collapse-handle {
@@ -441,9 +365,32 @@
   border-right-width: 0;
 }
 
-/* 收起后不保留空白侧轨，普通后台与店铺装修使用同一种零宽收纳结果。 */
+/* 收起时正文使用侧栏释放的空间。 */
 .admin-shell-v7.is-sidebar-collapsed {
   --adm-sidebar-w: 0px;
+}
+
+/* 由侧栏的实际宽度撑开这一列，正文随侧栏一起移动。 */
+.admin-hover-navigation {
+  position: relative;
+  /* 零宽时，边缘感应区仍需接到指针事件，包括工作台带层级的面板。 */
+  z-index: 51;
+  flex: none;
+  display: flex;
+}
+
+.admin-hover-navigation > .admin-sidebar {
+  flex: 0 0 auto;
+}
+
+.admin-hover-navigation__edge {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 8px;
+}
+
+.admin-hover-navigation:has(.admin-sidebar:not(.is-collapsed)) > .admin-hover-navigation__edge {
+  pointer-events: none;
 }
 
 /* 全后台与装修工作台共用同一种面板收纳按钮。 */
@@ -486,7 +433,7 @@
   outline-offset: 2px;
 }
 
-.admin-shell-v7.is-sidebar-collapsed .admin-sidebar__collapse-handle {
+.admin-shell-v7:is(.is-sidebar-collapsed, .has-hover-navigation) .admin-sidebar__collapse-handle {
   position: absolute;
   top: 6px;
   left: 8px;
@@ -784,30 +731,58 @@
 
 /* ═══ 底部用户区 ═══ */
 .admin-sidebar__footer {
-  display: none;
   flex-shrink: 0;
   border-top: 1px solid var(--adm-line);
-  padding: 10px 12px;
+  padding: 8px 12px;
+}
+.admin-navigation-drawer .admin-sidebar {
+  flex: 1 1 100%;
+  width: 100%;
+}
+.admin-navigation-drawer .admin-sidebar__nav {
+  min-height: 0;
 }
 .admin-sidebar__user {
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
+  min-height: var(--adm-control-large, 40px);
   cursor: pointer;
-  padding: 5px 8px;
-  border-radius: 6px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--adm-ink);
+  background: transparent;
+  text-align: left;
   transition: background 0.12s ease;
 }
-.admin-sidebar__user:hover {
+.admin-sidebar__user:hover,
+.admin-sidebar__user[aria-expanded="true"] {
   background: var(--adm-active-bg);
 }
+.admin-sidebar__user:focus-visible {
+  outline: 2px solid var(--adm-focus, var(--adm-ink));
+  outline-offset: 2px;
+}
+.admin-sidebar__user-avatar {
+  flex-shrink: 0;
+  color: var(--adm-ink);
+  background-color: var(--adm-active-bg);
+}
 .admin-sidebar__user-name {
-  font-size: 12px;
-  color: var(--adm-text);
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 20px;
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.admin-sidebar__user-chevron {
+  flex-shrink: 0;
+  font-size: 12px;
 }
 
 /* ═══════════════════════════════════════════════
@@ -858,6 +833,11 @@
   flex: 1;
   overflow: auto;
   padding: var(--adm-content-gutter) var(--adm-content-gutter) 48px;
+}
+
+/* 侧栏为零宽时，展开按钮仍在左上角，给正文留出焦点轮廓的空间。 */
+.admin-shell-v7.has-hover-navigation .admin-main:not(.admin-main--workspace) {
+  padding-inline-start: max(var(--adm-content-gutter), 44px);
 }
 
 .admin-shell-v7--workspace {

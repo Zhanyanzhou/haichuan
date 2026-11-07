@@ -1,10 +1,12 @@
 import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect } from "react";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { RequestErrorNotice } from "@/components/common/RequestErrorNotice";
 import RouteLoading from "@/components/common/RouteLoading";
 import { rolesForAdminRoute } from "@/config/adminRouteAccess";
 import { CONTENT_TEMPLATE_PAGE_PATHS } from "@/page-builder/generated/contentTemplates.generated";
+import { scheduleChineseDisplayFonts } from "@/styles/loadChineseDisplayFonts";
+import { preloadPublicPageRenderer } from "@/page-builder/runtime/loadPublicPageRenderer";
 import {
   type PublicContentLocale,
   resolveRetiredEnglishRedirect,
@@ -15,6 +17,9 @@ const PublicLayout = lazy(loadPublicLayout);
 // 公开页提前下载壳层；后台无需为页面装修合同、公开内容和导航承担入口载荷。
 if (typeof window !== "undefined" && !/^\/admin(?:\/|$)/.test(window.location.pathname)) {
   void loadPublicLayout().catch(() => undefined);
+  if (window.location.pathname === "/") {
+    preloadPublicPageRenderer();
+  }
 }
 
 // 后台布局与后台鉴权失败页依赖 Ant Design，不应进入前台首屏依赖图。
@@ -31,7 +36,11 @@ const AdminIndexRedirect = lazy(
   () => import("@/pages/admin/AdminIndexRedirect"),
 );
 // Lazy load pages
-const Home = lazy(() => import("@/pages/public/Home"));
+const loadHome = () => import("@/pages/public/Home");
+const Home = lazy(loadHome);
+if (typeof window !== "undefined" && window.location.pathname === "/") {
+  void loadHome().catch(() => undefined);
+}
 const HomePreview = lazy(() =>
   import("@/pages/public/Home/Preview").then((m) => ({ default: m.HomePreview })),
 );
@@ -248,6 +257,11 @@ function publicRouteElements(locale: PublicContentLocale) {
 }
 
 function App() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    if (pathname !== "/") scheduleChineseDisplayFonts();
+  }, [pathname]);
+
   return (
     <ErrorBoundary>
       <RequestErrorNotice />

@@ -290,6 +290,7 @@ export default function LeadManage() {
   const [keyword, setKeyword] = useState("");
   const [keywordInput, setKeywordInput] = useState("");
   const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState(false);
   const [detailId, setDetailId] = useState<{ type: LeadType; id: number } | null>(
     null,
@@ -393,7 +394,10 @@ export default function LeadManage() {
       if (requestId !== listRequestIdRef.current) return;
       setError(true);
     } finally {
-      if (requestId === listRequestIdRef.current) setLoading(false);
+      if (requestId === listRequestIdRef.current) {
+        setInitialLoading(false);
+        setLoading(false);
+      }
     }
   }, [keyword, leadType, page, pageSize, requestedRetentionDue, status]);
 
@@ -1296,7 +1300,9 @@ export default function LeadManage() {
         </Space>
       </Card>
 
-      {error ? (
+      {initialLoading ? (
+        <AdminLoadingState subject="客户线索" allowInteraction />
+      ) : error ? (
         <AdminErrorState onRetry={fetchList} />
       ) : (
         <Table
@@ -1350,7 +1356,7 @@ export default function LeadManage() {
                   <Space direction="vertical" size={0}>
                     <span>{detail.product.name}</span>
                     <span style={{ color: "var(--adm-muted)", fontSize: 12 }}>
-                      货号：{detail.product.code || "历史记录未保留货号"}
+                      款号：{detail.product.code || "历史记录未保留款号"}
                     </span>
                   </Space>
                 </Descriptions.Item>
@@ -1763,7 +1769,7 @@ export default function LeadManage() {
             }}
           />
         ) : (
-          <AdminLoadingState subject="线索详情" />
+          <AdminLoadingState subject="线索详情" compact />
         )}
       </Drawer>
     </div>

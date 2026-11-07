@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Table,
   Button,
@@ -17,7 +17,7 @@ import { PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
 import { attributeApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import AdminPageHeader from "@/components/common/AdminPageHeader";
-import { AdminErrorState } from "@/components/common/AdminDataStates";
+import { AdminErrorState, AdminLoadingState } from "@/components/common/AdminDataStates";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 
 interface AttrValue {
@@ -41,6 +41,7 @@ export default function AttributeManage() {
   const { message } = AntdApp.useApp();
   const [list, setList] = useState<Attr[]>([]);
   const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [editing, setEditing] = useState<Attr | null>(null);
   const [attrModalOpen, setAttrModalOpen] = useState(false);
@@ -49,18 +50,25 @@ export default function AttributeManage() {
   const [editingValue, setEditingValue] = useState<AttrValue | null>(null);
   const [form] = Form.useForm();
   const [valueForm] = Form.useForm();
+  const listRequestId = useRef(0);
 
   const load = useCallback(async () => {
+    const requestId = ++listRequestId.current;
     setLoading(true);
     setLoadError(false);
     try {
       const res = await attributeApi.getAll();
+      if (requestId !== listRequestId.current) return;
       setList(unwrapResponse<Attr[]>(res) || []);
     } catch (e: unknown) {
+      if (requestId !== listRequestId.current) return;
       setLoadError(true);
       message.error(getSafeAdminErrorMessage(e, "属性加载失败，请稍后重试。"));
     } finally {
-      setLoading(false);
+      if (requestId === listRequestId.current) {
+        setInitialLoading(false);
+        setLoading(false);
+      }
     }
   }, [message]);
 
@@ -220,7 +228,9 @@ export default function AttributeManage() {
           </Space>
         }
       >
-        {loadError ? (
+        {initialLoading ? (
+          <AdminLoadingState subject="属性" allowInteraction />
+        ) : loadError ? (
           <AdminErrorState subject="属性" onRetry={() => void load()} />
         ) : (
           <Table

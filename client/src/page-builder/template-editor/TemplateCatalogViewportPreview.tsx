@@ -11,6 +11,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import RouteLoading from "@/components/common/RouteLoading";
+import { PageEditorMediaScaleContext } from "../workspace/editorCanvasActivity";
 import {
   AUTO_ARTBOARD_MIN_HEIGHT,
   syncTemplateViewportStyles,
@@ -610,7 +611,9 @@ export default function TemplateCatalogViewportPreview({
                   <ContentTemplateRenderSurfaceProvider
                     surface={CONTENT_TEMPLATE_RENDER_SURFACE.CATALOG_PREVIEW}
                   >
-                    {children}
+                    <PageEditorMediaScaleContext.Provider value={presentation === "thumbnail" ? measurement.scale : null}>
+                      {children}
+                    </PageEditorMediaScaleContext.Provider>
                   </ContentTemplateRenderSurfaceProvider>
                 </div>
               </TemplateCatalogPreviewErrorBoundary>,

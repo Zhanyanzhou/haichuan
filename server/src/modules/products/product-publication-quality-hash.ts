@@ -15,6 +15,7 @@ type PublicationQualityHashInput = {
   gemInfo: unknown;
   craftTechnique: unknown;
   salesMode: unknown;
+  priceMin?: unknown;
   inventoryPolicy: unknown;
   fulfillmentType: unknown;
   dispatchTime: unknown;
@@ -58,8 +59,10 @@ type PublicationQualityHashInput = {
   }>;
   skus: Array<{
     id: number;
+    imageId?: number | null;
     material: unknown;
     size: unknown;
+    color?: unknown;
     price: unknown;
     goldWeight: unknown;
     inventories: readonly unknown[];
@@ -89,6 +92,10 @@ export function computeProductPublicationQualityHash(
     gemInfo: product.gemInfo,
     craftTechnique: product.craftTechnique,
     salesMode: product.salesMode,
+    // 旧记录没有公开参考价时保留既有哈希；新公开的参考价纳入质量快照。
+    ...(product.salesMode === "CUSTOM_INQUIRY" && Number(product.priceMin) > 0
+      ? { customStartingPrice: String(product.priceMin) }
+      : {}),
     inventoryPolicy: product.inventoryPolicy,
     fulfillmentType: product.fulfillmentType,
     dispatchTime: product.dispatchTime,
@@ -132,8 +139,11 @@ export function computeProductPublicationQualityHash(
       .sort((left, right) => left.id - right.id),
     skus: product.skus.map((sku) => ({
       id: sku.id,
+      ...(sku.imageId == null ? {} : { imageId: sku.imageId }),
       material: sku.material,
       size: sku.size,
+      // 迁移给旧 SKU 补 NULL；空颜色仍沿用原来的签认哈希。
+      ...(sku.color == null ? {} : { color: sku.color }),
       price: String(sku.price),
       goldWeight: sku.goldWeight == null ? null : String(sku.goldWeight),
       inventoryRecords: sku.inventories.length,

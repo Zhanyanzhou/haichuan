@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 import { readFile, writeFile } from "node:fs/promises";
 import { installAdminSession } from "./fixtures/session-auth";
 import { LAUNCH_TEMPLATE_MASTERS } from "../src/page-builder/template-creation/launchTemplateSet";
@@ -14,13 +14,54 @@ import {
   DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY,
   dynamicTemplateVersionKey,
 } from "../src/page-builder/dynamic-template-instance/types";
-import { planDynamicTemplateDocumentUpgrade } from "../src/page-builder/dynamic-template-instance/upgrade";
+import { analyzeDynamicTemplateUpgrade, planDynamicTemplateDocumentUpgrade } from "../src/page-builder/dynamic-template-instance/upgrade";
 import {
   hasVisiblePrimaryStage,
   isVisiblePrimaryStageBlockInDocument,
 } from "../src/page-builder/utils/primaryStagePolicy";
 
 const appMode = process.env.PLAYWRIGHT_APP_MODE === "mock" ? "mock" : "development";
+
+async function openBlockActions(page: Page, inspector: Locator) {
+  const trigger = inspector.getByRole("button", { name: "区块操作", exact: true });
+  await expect(trigger).toBeVisible();
+  if (await trigger.getAttribute("aria-expanded") !== "true") await trigger.click();
+  return page.getByRole("dialog", { name: "区块操作", exact: true });
+}
+
+async function openVersionDiff(page: Page, inspector: Locator) {
+  const actions = await openBlockActions(page, inspector);
+  await actions.getByRole("button", { name: "查看差异", exact: true }).click();
+}
+
+async function openImageDescription(page: Page, field: Locator) {
+  const review = page.getByRole("region", { name: "本次发布检查" });
+  if (!(await review.isVisible())) {
+    await page.getByRole("button", { name: "更多编辑操作" }).click();
+    await page.getByRole("menuitem", { name: /发布检查（\d+ 项）/ }).click();
+  }
+  const nodeId = await field.getAttribute("data-inspector-object-id");
+  await review.locator(`[data-page-publish-object="${nodeId}"][data-page-publish-field="alt"]`)
+    .getByRole("button", { name: "定位", exact: true }).click();
+  return field.getByRole("textbox", { name: /替代文字$/ });
+}
+
+async function selectInternalPage(page: Page, field: Locator, name: string) {
+  await field.getByRole("button", { name: "页面", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "选择页面", exact: true });
+  await dialog.getByRole("radio", { name, exact: true }).check();
+  await dialog.getByRole("button", { name: "确认选择", exact: true }).click();
+  await expect(dialog).toBeHidden();
+}
+
+async function uploadFixtureImage(page: Page, field: Locator, url: string) {
+  const buffer = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+  const uploadUrl = "**/api/upload/image";
+  await page.route(uploadUrl, (route) => route.fulfill(json({ url })), { times: 1 });
+  const response = page.waitForResponse((item) => item.url().endsWith("/api/upload/image") && item.request().method() === "POST");
+  await field.locator('input[type="file"]').first().setInputFiles({ name: "test-image.png", mimeType: "image/png", buffer });
+  await response;
+}
 
 
 function json(data: unknown, status = 200) {
@@ -588,8 +629,10 @@ function pageDocument(v1 = definition(1)) {
   };
 }
 
-async function prepareEditor(page: Page, options: { frameMaster?: "16:9" | "2:1"; mediaSide?: boolean | "column"; failVersionCheck?: boolean; catalogMissing?: boolean; sameVersionIdentityMismatch?: boolean; retiredNodeType?: "Carousel" | "ProductCollection"; complex?: boolean; business?: boolean; directBusiness?: boolean; image?: boolean; swappedHero?: boolean; heroImage?: boolean; descriptorPolicy?: boolean; duplicate?: boolean; lockedBusiness?: boolean; legacyLayout?: boolean; restoreTemplateValue?: boolean; lockedLeftover?: boolean; lockedLayout?: boolean; primaryStage?: boolean; upgradeWouldDuplicatePrimaryStage?: boolean; noNewVersion?: boolean; invalidLatestDefinition?: boolean; invalidCurrentVersion?: boolean; incompatibleHeader?: boolean; missingCurrentVersion?: boolean; mixedUpgradeScenario?: MixedUpgradeScenario; templateConflict?: boolean; requiredUpgrade?: boolean; destructiveRemoval?: boolean; restrictLatestLayout?: boolean; personalUpgradeHint?: boolean; saveFailureStatus?: 409 | 500; adminRole?: "SUPER_ADMIN" | "ADMIN" | "EDITOR"; pageMedia?: { failFirst?: boolean; items: Array<Record<string, unknown>> }; publishIssues?: Array<{ code: string; message: string; severity: "error" | "warning" | "info"; blockId?: string; path?: string; field?: string }> } = {}) {
-  const sourceDefinition = options.frameMaster
+async function prepareEditor(page: Page, options: { frameMaster?: "16:9" | "2:1"; mediaSide?: boolean | "column"; failVersionCheck?: boolean; catalogMissing?: boolean; sameVersionIdentityMismatch?: boolean; retiredNodeType?: "Carousel" | "ProductCollection"; complex?: boolean; business?: boolean; directBusiness?: boolean; image?: boolean; imageDescriptionWarnings?: boolean; swappedHero?: boolean | "single-image"; heroImage?: boolean; descriptorPolicy?: boolean; duplicate?: boolean; lockedBusiness?: boolean; legacyLayout?: boolean; restoreTemplateValue?: boolean; lockedLeftover?: boolean; lockedLayout?: boolean; primaryStage?: boolean; upgradeWouldDuplicatePrimaryStage?: boolean; noNewVersion?: boolean; invalidLatestDefinition?: boolean; invalidCurrentVersion?: boolean; incompatibleHeader?: boolean; missingCurrentVersion?: boolean; mixedUpgradeScenario?: MixedUpgradeScenario; templateConflict?: boolean; requiredUpgrade?: boolean; destructiveRemoval?: boolean; restrictLatestLayout?: boolean; personalUpgradeHint?: boolean; saveFailureStatus?: 409 | 500; adminRole?: "SUPER_ADMIN" | "ADMIN" | "EDITOR"; pageMedia?: { failFirst?: boolean; items: Array<Record<string, unknown>> }; publishIssues?: Array<{ code: string; message: string; severity: "error" | "warning" | "info"; blockId?: string; path?: string; field?: string }> } = {}, presetRole?: "creation-grid" | "editorial-split") {
+  const sourceDefinition = presetRole
+    ? structuredClone(LAUNCH_TEMPLATE_MASTERS.find((item) => item.metadata.sectionRole === presetRole)!)
+    : options.frameMaster
     ? frameMasterDefinition(options.frameMaster)
     : options.retiredNodeType === "Carousel"
     ? carouselDefinition()
@@ -634,6 +677,17 @@ async function prepareEditor(page: Page, options: { frameMaster?: "16:9" | "2:1"
     sourceDefinition.slots.slot_heading.hideable = true;
   }
   const draft = pageDocument(sourceDefinition);
+  if (presetRole) {
+    draft.puckData.content[0].props.contentBySlotId = {};
+    draft.puckData.resolvedDynamicTemplates[`${sourceDefinition.templateId}@1`].schemaVersion = sourceDefinition.schemaVersion;
+  }
+  if (options.swappedHero === "single-image") {
+    sourceDefinition.nodes.node_container.childIds = ["node_image"];
+    delete sourceDefinition.nodes.node_heading;
+    delete sourceDefinition.slots.slot_heading;
+    delete sourceDefinition.defaultContent.slot_heading;
+    draft.puckData.content[0].props.contentBySlotId = {};
+  }
   if (options.frameMaster) {
     draft.puckData.content[0].props.contentBySlotId = {};
     draft.puckData.resolvedDynamicTemplates[`${sourceDefinition.templateId}@1`].schemaVersion = sourceDefinition.schemaVersion;
@@ -782,7 +836,9 @@ async function prepareEditor(page: Page, options: { frameMaster?: "16:9" | "2:1"
   const templateWrites: Array<{ method: string; path: string; payload?: Record<string, unknown> }> = [];
   let templateSavedPayload: Record<string, unknown> | null = null;
   const latestVersion = options.noNewVersion ? 1 : options.mixedUpgradeScenario ? 3 : 2;
-  const latestDefinition = options.frameMaster
+  const latestDefinition = presetRole || options.swappedHero === "single-image" || (options.directBusiness && options.noNewVersion)
+    ? structuredClone(sourceDefinition)
+    : options.frameMaster
     ? frameMasterDefinition(options.frameMaster)
     : options.descriptorPolicy
     ? descriptorPolicyDefinition(latestVersion)
@@ -1042,20 +1098,36 @@ async function prepareEditor(page: Page, options: { frameMaster?: "16:9" | "2:1"
         }
         return route.fulfill(json({ valid: true, errors: [], issues: [] }));
       }
-      const issues = options.publishIssues ?? [];
+      const issues = [...(options.publishIssues ?? [])];
+      if (options.imageDescriptionWarnings) {
+        const body = request.postDataJSON() as typeof draft;
+        for (const [index, block] of (body.puckData?.content ?? []).entries()) {
+          for (const [slotId, value] of Object.entries(block.props.contentBySlotId ?? {})) {
+            if (!value || typeof value !== "object" || !("src" in value)
+              || !value.src || ("alt" in value && value.alt)) continue;
+            issues.push({
+              message: "图片替代文字不能为空",
+              severity: "warning",
+              blockId: block.props.id,
+              path: `content[${index}].props.contentBySlotId.${slotId}.alt`,
+              field: slotId,
+            });
+          }
+        }
+      }
       return route.fulfill(json({
         valid: !issues.some((issue) => issue.severity === "error"),
         errors: issues.filter((issue) => issue.severity === "error").map((issue) => issue.message),
         issues,
       }));
     }
-    if ((options.business || options.directBusiness) && path.endsWith("/products/admin/resolve-references")) {
+    if ((options.business || options.directBusiness || presetRole === "creation-grid") && path.endsWith("/products/admin/resolve-references")) {
       const body = request.postDataJSON() as { codes?: string[] };
       return route.fulfill(json((body.codes ?? []).map((code) => ({
         code,
         id: code === "P-600" ? 600 : 500,
         name: `业务商品 ${code}`,
-        thumbnail: "/svg/product.svg",
+        thumbnail: "/images/audit/template-v1-jewelry-banner.png",
         price: 12800,
         status: "PUBLISHED",
         visibility: "PUBLIC",
@@ -1063,7 +1135,7 @@ async function prepareEditor(page: Page, options: { frameMaster?: "16:9" | "2:1"
         reason: "AVAILABLE",
       }))));
     }
-    if ((options.business || options.directBusiness) && path.endsWith("/products") && request.method() === "GET") {
+    if ((options.business || options.directBusiness || presetRole === "creation-grid") && path.endsWith("/products") && request.method() === "GET") {
       return route.fulfill(json({
         list: ["P-500", "P-600"].map((code, index) => ({
           id: 500 + index * 100,
@@ -1073,7 +1145,7 @@ async function prepareEditor(page: Page, options: { frameMaster?: "16:9" | "2:1"
           status: "PUBLISHED",
           visibility: "PUBLIC",
           category: { id: 1, name: "戒指" },
-          images: [{ url: "/svg/product.svg", type: "FRONT", isPrimary: true }],
+          images: [{ url: "/images/audit/template-v1-jewelry-banner.png", type: "FRONT", isPrimary: true }],
         })),
         total: 2,
         page: 1,
@@ -1208,6 +1280,24 @@ async function navigateToolbarOwnerPage(page: Page, pageKey: "products" | "about
     data: { type: "homepage-editor:page-navigation", path: `/${key}` },
   })), pageKey);
   await expect(page.getByLabel("切换装修页面")).toHaveValue(pageKey);
+}
+
+function renderedPageInstance(page: Page, instanceId = "dynamic-upgrade-instance") {
+  return page.frameLocator(".homepage-editor__canvas-scale iframe")
+    .locator(`[data-dynamic-template-instance-id="${instanceId}"]`);
+}
+
+async function dragImageFocusToCorner(page: Page, focus: Locator, corner: "top-left" | "bottom-right") {
+  await focus.scrollIntoViewIfNeeded();
+  const bounds = await focus.boundingBox();
+  if (!bounds) throw new Error("缺少画面焦点拖动板");
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(
+    corner === "top-left" ? bounds.x - 1 : bounds.x + bounds.width + 1,
+    corner === "top-left" ? bounds.y - 1 : bounds.y + bounds.height + 1,
+  );
+  await page.mouse.up();
 }
 
 test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹具）", () => {
@@ -1663,7 +1753,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       await gate;
       return route.fulfill(json(aboutDocument));
     });
-    await fixture.inspector.getByRole("button", { name: "查看差异", exact: true }).click();
+    await openVersionDiff(page, fixture.inspector);
     const upgradeDialog = page.getByRole("dialog", { name: "模板版本升级：v1 → v2" });
     await expect(upgradeDialog).toBeVisible();
     // 复现来自同源画布导航的跨页动作：不需要先关闭已打开的只读审查。
@@ -1693,12 +1783,13 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await page.screenshot({ path: testInfo.outputPath("portal-page-handoff-restored.png") });
   });
 
-  test("性能回归：首发母版选择在失活后关闭且恢复不重开", async ({ page }) => {
+  test("模板设计切换页面后仍不恢复首发母版入口", async ({ page }) => {
     const fixture = await prepareEditor(page);
     await page.getByRole("button", { name: "模板设计", exact: true }).click();
-    await page.getByRole("button", { name: "从首发母版开始", exact: true }).click();
     const picker = page.getByRole("dialog", { name: "选择首发母版" });
-    await expect(picker).toBeVisible();
+    const retiredEntry = page.getByRole("button", { name: "从首发母版开始", exact: true, includeHidden: true });
+    await expect(retiredEntry).toHaveCount(0);
+    await expect(picker).toHaveCount(0);
     const aboutDocument = structuredClone(fixture.currentDocument());
     aboutDocument.pageKey = "about";
     let releaseRead!: () => void;
@@ -1720,8 +1811,14 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     })));
     await started;
     await expect(picker).toBeHidden();
+    const aboutRead = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname.endsWith("/document/admin") && url.searchParams.get("pageKey") === "about";
+    });
     releaseRead();
-    await expect(page.getByRole("button", { name: "从首发母版开始", exact: true })).toBeVisible();
+    await aboutRead;
+    await expect(page.getByRole("region", { name: "空模板画布", exact: true })).toBeVisible();
+    await expect(retiredEntry).toHaveCount(0);
     await expect(picker).toBeHidden();
     expect(fixture.pageWrites).toEqual([]);
     expect(fixture.templateWrites).toEqual([]);
@@ -1855,12 +1952,8 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     const preview = page.getByRole("button", {
       name: "预览内容展示｜版本升级版本2",
     });
-    const addFromCard = page.getByRole("button", {
-      name: "添加到页面：内容展示｜版本升级 v2",
-    });
     const selectedLayer = page.locator(".homepage-editor__layer-item.is-active");
     await expect(preview).toBeVisible();
-    await expect(addFromCard).toBeVisible();
     await expect(selectedLayer).toHaveAttribute("data-layer-id", "dynamic-upgrade-block");
     await expect(page.getByRole("button", { name: "撤销" })).toBeDisabled();
 
@@ -1869,6 +1962,11 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     const canvasPreview = canvas.locator("[data-canvas-template-preview]");
     await expect(page.getByRole("dialog", { name: "放大预览：内容展示｜版本升级" })).toHaveCount(0);
     await expect(canvasPreview).toContainText("版本 2 默认标题");
+    const previewProperties = page.getByRole("region", { name: "模板预览属性" });
+    await expect(previewProperties).toContainText("内容展示｜版本升级 · v2");
+    await expect(previewProperties).toContainText("正在预览 · 尚未加入页面");
+    const existingBlock = canvas.locator('[data-editor-block-id="dynamic-upgrade-block"]');
+    await expect(existingBlock.locator("[data-editor-select-handle]")).toHaveAttribute("aria-pressed", "false");
     await expect(canvasPreview).not.toContainText("尚未加入页面");
     await expect(canvasPreview).not.toContainText("正在画布中预览");
     await expect(canvasPreview).not.toContainText("精确版本");
@@ -1884,36 +1982,45 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       const existingBlock = document.querySelector("[data-editor-block-id='dynamic-upgrade-block']");
       if (!previewNode || !existingBlock) return false;
       const follows = Boolean(
-        previewNode.compareDocumentPosition(existingBlock) & Node.DOCUMENT_POSITION_FOLLOWING,
+        existingBlock.compareDocumentPosition(previewNode) & Node.DOCUMENT_POSITION_FOLLOWING,
       );
       const previewTop = previewNode.getBoundingClientRect().top;
       const existingTop = existingBlock.getBoundingClientRect().top;
-      return follows && previewTop < existingTop;
+      return follows && existingTop < previewTop;
     })).toBe(true);
     await expect(canvasPreview).toBeInViewport();
     const previewLayer = page.locator(".homepage-editor__layer-item[data-layer-preview]");
     await expect(previewLayer).toContainText("内容展示｜版本升级");
     await expect(previewLayer).toContainText("尚未加入页面");
-    await expect(page.locator(".homepage-editor__layer-item").first()).toHaveAttribute("data-layer-preview", "true");
+    await expect(page.locator(".homepage-editor__layer-item").last()).toHaveAttribute("data-layer-preview", "true");
     await expect(previewLayer).toHaveClass(/is-active/);
     await expect(page.locator(".homepage-editor__layer-item.is-active")).toHaveCount(1);
+    await existingBlock.click();
+    await expect(previewProperties).toHaveCount(0);
+    await expect(selectedLayer).toHaveAttribute("data-layer-id", "dynamic-upgrade-block");
+    await previewLayer.locator(".homepage-editor__layer-select").click();
+    await expect(previewProperties).toContainText("内容展示｜版本升级 · v2");
+    await expect(canvasPreview).toBeInViewport();
     await expect(previewLayer.getByRole("button", { name: "隐藏内容展示｜版本升级" })).toBeVisible();
     await expect(previewLayer.getByRole("button", { name: "删除内容展示｜版本升级" })).toBeVisible();
     await previewLayer.getByRole("button", { name: "隐藏内容展示｜版本升级" }).click();
     await expect(canvasPreview).toHaveCount(0);
+    await expect(previewProperties).toContainText("预览已隐藏 · 尚未加入页面");
     await expect(previewLayer).toHaveClass(/is-hidden/);
     await expect(page.getByRole("button", { name: "撤销" })).toBeDisabled();
     await previewLayer.getByRole("button", { name: "显示内容展示｜版本升级" }).click();
     await expect(canvasPreview).toBeVisible();
     await expect(page.locator('.homepage-editor__layer-item[data-layer-id="dynamic-upgrade-block"]')).not.toHaveClass(/is-active/);
     await expect(page.getByRole("button", { name: "撤销" })).toBeDisabled();
-    await expect(page.getByText("修改已更新，尚未保存页面草稿", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("status", { name: /草稿状态：有未保存修改/ })).toHaveCount(0);
     expect(savedPayload()).toBeNull();
     expect(pageWrites).toEqual([]);
     expect(templateWrites).toEqual([]);
 
     await previewLayer.getByRole("button", { name: "删除内容展示｜版本升级" }).click();
     await expect(canvasPreview).toHaveCount(0);
+    await expect(previewProperties).toHaveCount(0);
+    await expect(existingBlock.locator("[data-editor-select-handle]")).toHaveAttribute("aria-pressed", "true");
     await expect(page.locator(".homepage-editor__layer-item[data-layer-preview]")).toHaveCount(0);
     await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(1);
     await expect(page.locator(".homepage-editor__layer-item.is-active")).toHaveAttribute("data-layer-id", "dynamic-upgrade-block");
@@ -1922,10 +2029,11 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     expect(templateWrites).toEqual([]);
 
     await preview.click();
-    await addFromCard.click();
+    await previewProperties.getByRole("button", { name: "添加并编辑" }).click();
     await expect(page.locator(".homepage-editor__layer-item[data-layer-preview]")).toHaveCount(0);
     await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(2);
-    await expect(page.getByText("修改已更新，尚未保存页面草稿", { exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "模板实例属性" }).getByRole("textbox", { name: "标题", exact: true })).toBeVisible();
+    await expect(page.getByRole("status", { name: /草稿状态：有未保存修改/ })).toBeVisible();
     await expect(page.getByRole("button", { name: "撤销" })).toBeEnabled();
     expect(pageWrites).toEqual([]);
     expect(templateWrites).toEqual([]);
@@ -1951,11 +2059,19 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       const { inspector, savedPayload, pageWrites, templateWrites } = await prepareEditor(page, { frameMaster: ratio });
       const expandLibrary = page.getByRole("button", { name: "展开模板组件库" });
       if (await expandLibrary.isVisible()) await expandLibrary.click();
-      await page.getByRole("button", { name: /添加到页面：.* v2$/ }).click();
+      await page.getByRole("textbox", { name: "搜索模板" }).fill("单图海报");
+      const purpose = page.getByRole("combobox", { name: "模板用途" });
+      await purpose.selectOption({ label: "作品展示" });
+      await expect(page.getByRole("button", { name: "添加到页面：单图海报 v2", exact: true })).toHaveCount(0);
+      await purpose.selectOption({ label: "海报与图文" });
+      await page.getByRole("button", { name: "添加到页面：单图海报 v2", exact: true }).click();
       const layers = page.locator(".homepage-editor__layer-item");
       await expect(layers).toHaveCount(2);
       await expect(layers.last()).toHaveClass(/is-active/);
       const id = (await layers.last().getAttribute("data-layer-id"))!;
+      const titleSlot = Object.values(frameMasterDefinition(ratio).slots).find((slot) => slot.key === "title")!;
+      const title = inspector.getByRole("region", { name: "标题与说明" }).getByRole("textbox", { name: titleSlot.label });
+      await expect(title).toHaveValue("");
       const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
       const block = canvas.locator(`[data-editor-block-id="${id}"]`);
       const shell = block.locator("[data-template-root-node-id]");
@@ -2019,6 +2135,8 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       await page.getByRole("button", { name: /移动端布局/ }).click();
       await checkImage("mobile");
       await checkRatio(true);
+      await title.fill("当期珠宝作品");
+      await expect(block.locator(`[data-template-slot-id="${titleSlot.slotId}"]`)).toHaveText("当期珠宝作品");
       await page.getByRole("button", { name: "预览当前画布", exact: true }).click();
       await checkImage("mobile");
       await checkRatio(true);
@@ -2035,11 +2153,13 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       expect(payload.puckData.content[1].props.contentBySlotId[imageSlot.slotId]).toMatchObject({
         src: "/uploads/page-assets/desktop-frame.png", mobileSrc: "/uploads/page-assets/mobile-frame.png",
       });
+      expect(payload.puckData.content[1].props.contentBySlotId[titleSlot.slotId]).toBe("当期珠宝作品");
       await page.reload();
       await page.locator(`.homepage-editor__layer-item[data-layer-id="${id}"] .homepage-editor__layer-select`).click({ position: { x: 12, y: 18 } });
       await page.getByRole("button", { name: /移动端布局/ }).click();
       await checkImage("mobile");
       await checkRatio(true);
+      await expect(title).toHaveValue("当期珠宝作品");
     });
   }
 
@@ -2085,6 +2205,11 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     }, lastId)).toBe(true);
     await expect(page.locator(".ant-message-notice")).toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath("appended-template-visible.png") });
+    await page.getByRole("button", { name: "放大预览：内容展示｜版本升级" }).click();
+    await expect(canvas.locator("[data-canvas-template-preview]")).toBeInViewport();
+    await expect(page.getByRole("region", { name: "模板预览属性" })).toContainText("内容展示｜版本升级 · v2");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("region", { name: "模板预览属性" })).toHaveCount(0);
     await page.getByRole("button", { name: "撤销", exact: true }).click();
     await expect(layers).toHaveCount(10);
     await page.getByRole("button", { name: "重做", exact: true }).click();
@@ -2094,6 +2219,10 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await page.getByRole("button", { name: /移动端布局/ }).click();
     await expect(lastBlock.locator("[data-page-instance-empty]")).toBeVisible();
     await page.getByRole("button", { name: /桌面端布局/ }).click();
+    await page.getByRole("button", { name: "收起属性面板" }).click();
+    await expect(inspector).toBeHidden();
+    await lastBlock.locator("[data-page-instance-empty]").click();
+    await expect(inspector).toBeVisible();
     await inspector.getByRole("textbox", { name: "标题", exact: true }).fill("新模板的页面标题");
     await expect(lastBlock.locator("[data-page-instance-empty]")).toHaveCount(0);
     await expect(lastBlock).toContainText("新模板的页面标题");
@@ -2160,20 +2289,19 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await page.locator(
       '.homepage-editor__layer-item[data-layer-id="dynamic-upgrade-block"] .homepage-editor__layer-select',
     ).click({ position: { x: 12, y: 18 } });
-    const openReview = inspector.getByRole("button", { name: "查看差异" });
-    await openReview.click();
+    await openVersionDiff(page, inspector);
     const dialog = page.getByRole("dialog", { name: "模板版本升级：v1 → v2" });
     await expect(dialog).toContainText("只修改当前内存草稿并增加一条页面历史");
     await expect(dialog).toContainText("不会自动保存、发布或回写母模板");
     await dialog.getByRole("button", { name: "保留当前版本" }).click();
-    await openReview.click();
+    await openVersionDiff(page, inspector);
     await page.getByRole("dialog", { name: "模板版本升级：v1 → v2" })
       .getByRole("button", { name: "确认升级页面草稿" })
       .click();
 
-    await expect(inspector).toContainText("固定版本 tpl_page_upgrade v2");
+    await expect(renderedPageInstance(page)).toHaveAttribute("data-dynamic-template-version", "2");
     await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(2);
-    await expect(page.getByText("修改已更新，尚未保存页面草稿", { exact: true })).toBeVisible();
+    await expect(page.getByRole("status", { name: /草稿状态：有未保存修改/ })).toBeVisible();
     expect(savedPayload()).toBeNull();
     expect(currentDocument().publishedRevisionId).toBe(91);
     expect(templateWrites).toEqual([]);
@@ -2220,12 +2348,12 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await page.locator(
       '.homepage-editor__layer-item[data-layer-id="dynamic-upgrade-block"] .homepage-editor__layer-select',
     ).click({ position: { x: 12, y: 18 } });
-    await inspector.getByRole("button", { name: "查看差异" }).click();
+    await openVersionDiff(page, inspector);
     const dialog = page.getByRole("dialog", { name: "模板版本升级：v1 → v2" });
     await expect(dialog).not.toContainText("升级后会产生多个主舞台实例");
     await dialog.getByRole("button", { name: "确认升级页面草稿" }).click();
     await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(2);
-    await expect(page.getByText("修改已更新，尚未保存页面草稿", { exact: true })).toBeVisible();
+    await expect(page.getByRole("status", { name: /草稿状态：有未保存修改/ })).toBeVisible();
     expect(savedPayload()).toBeNull();
     expect(templateWrites).toEqual([]);
   });
@@ -2387,10 +2515,10 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect(page.getByRole("button", {
       name: "添加到页面：内容展示｜版本升级 v2",
     })).toBeVisible();
-    await expect(inspector).toContainText("固定版本 tpl_page_upgrade v1");
-    await expect(inspector).toContainText("发现新版本 v2");
+    await expect(renderedPageInstance(page)).toHaveAttribute("data-dynamic-template-version", "1");
+    await expect(await openBlockActions(page, inspector)).toContainText("此区块有可用更新");
 
-    await inspector.getByRole("button", { name: "查看差异" }).click();
+    await openVersionDiff(page, inspector);
     const dialog = page.getByRole("dialog", { name: "模板版本升级：v1 → v2" });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByLabel("桌面端当前 v1")).toContainText("页面实例填写内容");
@@ -2398,13 +2526,13 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect(dialog.getByLabel("移动端当前 v1")).toContainText("页面实例填写内容");
     await expect(dialog.getByLabel("移动端目标 v2")).toContainText("页面实例填写内容");
     await dialog.getByRole("button", { name: "保留当前版本" }).click();
-    await expect(inspector).toContainText("固定版本 tpl_page_upgrade v1");
+    await expect(renderedPageInstance(page)).toHaveAttribute("data-dynamic-template-version", "1");
 
-    await inspector.getByRole("button", { name: "查看差异" }).click();
+    await openVersionDiff(page, inspector);
     await page.getByRole("dialog", { name: "模板版本升级：v1 → v2" })
       .getByRole("button", { name: "确认升级页面草稿" })
       .click();
-    await expect(inspector).toContainText("固定版本 tpl_page_upgrade v2");
+    await expect(renderedPageInstance(page)).toHaveAttribute("data-dynamic-template-version", "2");
     await page.getByRole("button", { name: "保存当前装修草稿" }).click();
     await expect.poll(() => savedPayload()).not.toBeNull();
     const payload = savedPayload() as { puckData: { content: Array<{ props: Record<string, unknown> }> } };
@@ -2417,37 +2545,35 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await page.locator(
       '.homepage-editor__layer-item[data-layer-id="dynamic-upgrade-block"] .homepage-editor__layer-select',
     ).click({ position: { x: 12, y: 18 } });
-    await expect(page.getByRole("region", { name: "模板实例属性" }))
-      .toContainText("固定版本 tpl_page_upgrade v2");
+    await expect(renderedPageInstance(page)).toHaveAttribute("data-dynamic-template-version", "2");
   });
 
   test("新增必填槽位允许显式升级，取消零副作用且确认只增加一条历史并定位待填字段", async ({ page }) => {
     const { inspector, pageWrites, templateWrites } = await prepareEditor(page, {
       requiredUpgrade: true,
     });
-    const openReview = inspector.getByRole("button", { name: "查看差异" });
-    await openReview.click();
+    await openVersionDiff(page, inspector);
     const review = page.getByRole("dialog", { name: "模板版本升级：v1 → v2" });
     await expect(review).toContainText("升级后待填写：新增必填正文");
     await expect(review.getByRole("button", { name: "确认升级页面草稿" })).toBeEnabled();
     await review.getByRole("button", { name: "保留当前版本" }).click();
-    await expect(inspector).toContainText("固定版本 tpl_page_upgrade v1");
+    await expect(renderedPageInstance(page)).toHaveAttribute("data-dynamic-template-version", "1");
     await expect(page.getByRole("button", { name: "撤销" })).toBeDisabled();
     expect(pageWrites).toEqual([]);
     expect(templateWrites).toEqual([]);
 
-    await openReview.click();
+    await openVersionDiff(page, inspector);
     await review.getByRole("button", { name: "确认升级页面草稿" }).click();
-    await expect(inspector).toContainText("固定版本 tpl_page_upgrade v2");
+    await expect(renderedPageInstance(page)).toHaveAttribute("data-dynamic-template-version", "2");
     const pendingField = inspector.getByRole("textbox", { name: "新增必填正文" });
     await expect(pendingField).toBeFocused();
     expect(pageWrites).toEqual([]);
     expect(templateWrites).toEqual([]);
 
     await page.getByRole("button", { name: "撤销" }).click();
-    await expect(inspector).toContainText("固定版本 tpl_page_upgrade v1");
+    await expect(renderedPageInstance(page)).toHaveAttribute("data-dynamic-template-version", "1");
     await page.getByRole("button", { name: "重做" }).click();
-    await expect(inspector).toContainText("固定版本 tpl_page_upgrade v2");
+    await expect(renderedPageInstance(page)).toHaveAttribute("data-dynamic-template-version", "2");
   });
 
   test("图片位置可在页面属性栏切换，画布桌面镜像、可撤销且保存前零写", async ({ page }) => {
@@ -2455,21 +2581,21 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       mediaSide: true,
       noNewVersion: true,
     });
-    const control = inspector.getByRole("group", { name: "图片位置" });
+    const control = inspector.getByRole("group", { name: "布局排列" });
     await expect(control).toBeVisible();
-    await expect(control.getByRole("button", { name: "图在左" })).toHaveAttribute("aria-pressed", "true");
+    await expect(control.getByRole("button", { name: "图片在左" })).toHaveAttribute("aria-pressed", "true");
     const row = page.frameLocator(".homepage-editor__canvas-scale iframe")
       .locator('[data-dynamic-template-instance-id="dynamic-upgrade-instance"] [data-template-node-id="node_container"]');
     await expect(row).not.toHaveAttribute("data-template-mirrored", "true");
 
-    await control.getByRole("button", { name: "图在右" }).click();
-    await expect(control.getByRole("button", { name: "图在右" })).toHaveAttribute("aria-pressed", "true");
+    await control.getByRole("button", { name: "图片在右" }).click();
+    await expect(control.getByRole("button", { name: "图片在右" })).toHaveAttribute("aria-pressed", "true");
     await expect(row).toHaveAttribute("data-template-mirrored", "true");
     expect(pageWrites).toEqual([]);
     expect(templateWrites).toEqual([]);
 
     await page.getByRole("button", { name: "撤销" }).click();
-    await expect(control.getByRole("button", { name: "图在左" })).toHaveAttribute("aria-pressed", "true");
+    await expect(control.getByRole("button", { name: "图片在左" })).toHaveAttribute("aria-pressed", "true");
     await expect(row).not.toHaveAttribute("data-template-mirrored", "true");
     await page.getByRole("button", { name: "重做" }).click();
     await expect(row).toHaveAttribute("data-template-mirrored", "true");
@@ -2477,16 +2603,15 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     expect(templateWrites).toEqual([]);
   });
 
-  test("目标容器在桌面不是横排时，图片位置禁用并说明原因", async ({ page }) => {
-    const { inspector, pageWrites } = await prepareEditor(page, {
+  test("目标容器在桌面不是横排时隐藏图片位置且保持零写", async ({ page }) => {
+    const { inspector, pageWrites, templateWrites } = await prepareEditor(page, {
       mediaSide: "column",
       noNewVersion: true,
     });
-    const control = inspector.getByRole("group", { name: "图片位置" });
-    await expect(control).toBeVisible();
-    await expect(control.getByRole("button", { name: "图在右" })).toBeDisabled();
-    await expect(inspector).toContainText("这一节的模板在桌面不是左右排列，暂时无法换边");
+    const control = inspector.getByRole("group", { name: "布局排列" });
+    await expect(control).toHaveCount(0);
     expect(pageWrites).toEqual([]);
+    expect(templateWrites).toEqual([]);
   });
 
   test("新增必填槽位未完成时发布预检定位字段且不发送发布请求", async ({ page }) => {
@@ -2501,7 +2626,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
         field: "slot_required",
       }],
     });
-    await inspector.getByRole("button", { name: "查看差异" }).click();
+    await openVersionDiff(page, inspector);
     await page.getByRole("dialog", { name: "模板版本升级：v1 → v2" })
       .getByRole("button", { name: "确认升级页面草稿" }).click();
     await page.getByRole("button", { name: "保存当前装修草稿" }).click();
@@ -2536,23 +2661,23 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await page.locator(
       '.homepage-editor__layer-item[data-layer-id="dynamic-upgrade-block"] .homepage-editor__layer-select',
     ).click({ position: { x: 12, y: 18 } });
-    await inspector.getByRole("button", { name: "查看差异" }).click();
+    await openVersionDiff(page, inspector);
     await page.getByRole("dialog", { name: "模板版本升级：v1 → v2" })
       .getByRole("button", { name: "确认升级页面草稿" })
       .click();
-    await expect(inspector).toContainText("固定版本 tpl_page_upgrade v2");
+    await expect(renderedPageInstance(page)).toHaveAttribute("data-dynamic-template-version", "2");
     expect(pageWrites).toEqual([]);
     expect(templateWrites).toEqual([]);
     await page.getByRole("button", { name: "撤销" }).click();
     await page.locator(
       '.homepage-editor__layer-item[data-layer-id="dynamic-upgrade-block"] .homepage-editor__layer-select',
     ).click({ position: { x: 12, y: 18 } });
-    await expect(inspector).toContainText("固定版本 tpl_page_upgrade v1");
+    await expect(renderedPageInstance(page)).toHaveAttribute("data-dynamic-template-version", "1");
     await page.getByRole("button", { name: "重做" }).click();
     await page.locator(
       '.homepage-editor__layer-item[data-layer-id="dynamic-upgrade-block"] .homepage-editor__layer-select',
     ).click({ position: { x: 12, y: 18 } });
-    await expect(inspector).toContainText("固定版本 tpl_page_upgrade v2");
+    await expect(renderedPageInstance(page)).toHaveAttribute("data-dynamic-template-version", "2");
   });
 
   for (const scenario of mixedUpgradeScenarios) {
@@ -2583,7 +2708,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       expect(currentDocument().puckData.content.map((block) => block.props.templateVersion))
         .toEqual([1, 2]);
       await expect(page.getByRole("button", { name: "撤销" })).toBeDisabled();
-      await expect(page.getByText("修改已更新，尚未保存页面草稿", { exact: true })).toHaveCount(0);
+      await expect(page.getByRole("status", { name: /草稿状态：有未保存修改/ })).toHaveCount(0);
       const firstVersion = currentDocument().puckData.content.find((block) => (
         block.props.instanceId === "dynamic-upgrade-instance"
       ))?.props.templateVersion;
@@ -2601,7 +2726,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     const { inspector, pageWrites, templateWrites } = await prepareEditor(page, {
       destructiveRemoval: true,
     });
-    await inspector.getByRole("button", { name: "查看差异" }).click();
+    await openVersionDiff(page, inspector);
     const single = page.getByRole("dialog", { name: "模板版本升级：v1 → v2" });
     await expect(single).toContainText("原页面内容无法无损保留");
     await expect(single.getByRole("button", { name: "确认升级页面草稿" })).toBeDisabled();
@@ -2618,7 +2743,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       legacyLayout: true,
       restrictLatestLayout: true,
     });
-    await inspector.getByRole("button", { name: "查看差异" }).click();
+    await openVersionDiff(page, inspector);
     const review = page.getByRole("dialog", { name: "模板版本升级：v1 → v2" });
     await expect(review).toContainText("桌面端节点“标题”");
     await expect(review).toContainText("移动端节点“标题”");
@@ -2633,7 +2758,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     const hint = page.getByRole("status").filter({ hasText: /历史(?:个人)?模板实例可升级/ });
     // 首期不恢复退役的个人模板升级入口；兼容读取仍须保持原 JSON 与零写入。
     await expect(hint).toHaveCount(0);
-    await expect(page.getByText("修改已更新，尚未保存页面草稿", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("status", { name: /草稿状态：有未保存修改/ })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "撤销" })).toBeDisabled();
     expect(currentDocument().puckData.content[1].props.__templateOrigin).toEqual({
       kind: "personal",
@@ -2649,9 +2774,10 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
 
   test("升级审查在四个验收视口无横向溢出，Esc 关闭后焦点返回触发按钮", async ({ page }) => {
     const { inspector } = await prepareEditor(page);
-    const trigger = inspector.getByRole("button", { name: "查看差异" });
+    const trigger = inspector.getByRole("button", { name: "区块操作", exact: true });
     await trigger.focus();
     await page.keyboard.press("Enter");
+    await page.getByRole("dialog", { name: "区块操作", exact: true }).getByRole("button", { name: "查看差异" }).press("Enter");
     const dialog = page.getByRole("dialog", { name: "模板版本升级：v1 → v2" });
     for (const viewport of [
       { width: 1600, height: 1000 },
@@ -2679,7 +2805,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       requiredUpgrade: true,
       adminRole: "EDITOR",
     });
-    await inspector.getByRole("button", { name: "查看差异" }).click();
+    await openVersionDiff(page, inspector);
     await page.getByRole("dialog", { name: "模板版本升级：v1 → v2" })
       .getByRole("button", { name: "确认升级页面草稿" }).click();
     await page.getByRole("button", { name: "保存当前装修草稿" }).click();
@@ -2696,7 +2822,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     const { inspector, pageWrites, templateWrites, validationRequestCount } = await prepareEditor(page, {
       adminRole: "ADMIN",
     });
-    await inspector.getByRole("button", { name: "查看差异" }).click();
+    await openVersionDiff(page, inspector);
     await page.getByRole("dialog", { name: "模板版本升级：v1 → v2" })
       .getByRole("button", { name: "确认升级页面草稿" }).click();
     await page.getByRole("button", { name: "保存当前装修草稿" }).click();
@@ -2724,7 +2850,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
         requiredUpgrade: true,
         saveFailureStatus: failure.status,
       });
-      await inspector.getByRole("button", { name: "查看差异" }).click();
+      await openVersionDiff(page, inspector);
       await page.getByRole("dialog", { name: "模板版本升级：v1 → v2" })
         .getByRole("button", { name: "确认升级页面草稿" }).click();
       await page.getByRole("button", { name: "保存当前装修草稿" }).click();
@@ -2735,9 +2861,9 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       } else {
         await expect(page.getByText("整页草稿保存失败，请重试", { exact: true })).toBeVisible();
       }
-      await expect(inspector).toContainText("固定版本 tpl_page_upgrade v2");
+      await expect(renderedPageInstance(page)).toHaveAttribute("data-dynamic-template-version", "2");
       await expect(inspector.getByRole("textbox", { name: "新增必填正文" })).toHaveValue("");
-      await expect(page.getByText("修改已更新，尚未保存页面草稿", { exact: true })).toBeVisible();
+      await expect(page.getByRole("status", { name: /草稿状态：保存失败/ })).toBeVisible();
       expect(currentDocument().puckData.content[0].props.templateVersion).toBe(1);
       expect(pageWrites.map(({ method }) => method)).toEqual(["PUT"]);
       expect(templateWrites).toEqual([]);
@@ -2751,7 +2877,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       pageWrites,
       templateWrites,
     } = await prepareEditor(page, { catalogMissing: true });
-    const missing = inspector.getByRole("alert").filter({
+    const missing = (await openBlockActions(page, inspector)).getByRole("alert").filter({
       hasText: "目录未找到当前模板，无法判断是否最新",
     });
     await expect(missing).toContainText("当前页面继续锁定 tpl_page_upgrade v1，页面草稿未修改");
@@ -2765,13 +2891,12 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     expect(templateWrites).toEqual([]);
   });
 
-  test("目录精确版本与当前锁定一致时明确显示真正最新", async ({ page }) => {
+  test("目录精确版本与当前锁定一致时收起无操作的版本提示", async ({ page }) => {
     const { inspector, pageWrites, templateWrites } = await prepareEditor(page, {
       noNewVersion: true,
     });
-    await expect(inspector.getByRole("status").filter({
-      hasText: "当前已锁定最新可用版本 v1",
-    })).toBeVisible();
+    await expect(renderedPageInstance(page)).toHaveAttribute("data-dynamic-template-version", "1");
+    await expect(inspector.getByText("当前已锁定最新可用版本 v1")).toHaveCount(0);
     await expect(inspector.getByRole("button", { name: "查看差异" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "撤销" })).toBeDisabled();
     expect(pageWrites).toEqual([]);
@@ -2783,7 +2908,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       noNewVersion: true,
       sameVersionIdentityMismatch: true,
     });
-    const conflict = inspector.getByRole("alert").filter({
+    const conflict = (await openBlockActions(page, inspector)).getByRole("alert").filter({
       hasText: "目录中的 v1 身份与页面锁定版本不一致，无法确认是否最新",
     });
     await expect(conflict).toBeVisible();
@@ -2804,14 +2929,14 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       pageWrites,
       templateWrites,
     } = await prepareEditor(page, { failVersionCheck: true });
-    await expect(inspector).toContainText("固定版本 tpl_page_upgrade v1");
-    await expect(inspector).toContainText("暂时无法检查模板新版本，当前页面版本未改变");
+    await expect(renderedPageInstance(page)).toHaveAttribute("data-dynamic-template-version", "1");
+    await expect(await openBlockActions(page, inspector)).toContainText("暂时无法检查模板新版本，当前页面版本未改变");
     const readsBeforeRetry = versionReadCount();
-    await inspector.getByRole("button", { name: "重新检查" }).click();
+    await (await openBlockActions(page, inspector)).getByRole("button", { name: "重新检查" }).click();
     await expect.poll(() => versionReadCount()).toBeGreaterThan(readsBeforeRetry);
-    await expect(inspector).toContainText("暂时无法检查模板新版本，当前页面版本未改变");
+    await expect(await openBlockActions(page, inspector)).toContainText("暂时无法检查模板新版本，当前页面版本未改变");
     await expect(inspector.getByRole("button", { name: "保存页面草稿" })).toHaveCount(0);
-    await expect(inspector.getByRole("status", { name: /页面草稿已保存/ })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "草稿与线上一致" })).toBeVisible();
     expect(pageWrites).toEqual([]);
     expect(templateWrites).toEqual([]);
   });
@@ -2827,18 +2952,18 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     } = await prepareEditor(page, {
       failVersionCheck: true,
     });
-    await expect(inspector).toContainText("暂时无法检查模板新版本，当前页面版本未改变");
+    await expect(await openBlockActions(page, inspector)).toContainText("暂时无法检查模板新版本，当前页面版本未改变");
     recoverVersionCheck();
-    await inspector.getByRole("button", { name: "重新检查" }).click();
+    await (await openBlockActions(page, inspector)).getByRole("button", { name: "重新检查" }).click();
     await expect.poll(() => versionReadCount()).toBeGreaterThan(1);
-    await expect(inspector).toContainText("发现新版本 v2");
+    await expect(await openBlockActions(page, inspector)).toContainText("此区块有可用更新");
     expect(pageWrites).toEqual([]);
 
-    await inspector.getByRole("button", { name: "查看差异" }).click();
+    await openVersionDiff(page, inspector);
     await page.getByRole("dialog", { name: "模板版本升级：v1 → v2" })
       .getByRole("button", { name: "确认升级页面草稿" })
       .click();
-    await expect(inspector).toContainText("固定版本 tpl_page_upgrade v2");
+    await expect(renderedPageInstance(page)).toHaveAttribute("data-dynamic-template-version", "2");
     expect(pageWrites).toEqual([]);
 
     await page.getByRole("button", { name: "保存当前装修草稿" }).click();
@@ -2853,8 +2978,129 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await page.locator(
       '.homepage-editor__layer-item[data-layer-id="dynamic-upgrade-block"] .homepage-editor__layer-select',
     ).click({ position: { x: 12, y: 18 } });
-    await expect(page.getByRole("region", { name: "模板实例属性" }))
-      .toContainText("固定版本 tpl_page_upgrade v2");
+    await expect(renderedPageInstance(page)).toHaveAttribute("data-dynamic-template-version", "2");
+  });
+
+  test("已配置区块可跨页复制，保留目标内容、锁定版本和两页独立草稿", async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    const fixture = await prepareEditor(page, { legacyLayout: true });
+    const targetDefinition = { ...definition(1), templateId: "tpl_page_copy_target" };
+    const aboutDocument = pageDocument(targetDefinition);
+    aboutDocument.pageKey = "about";
+    aboutDocument.puckData.content[0].props.id = "original-about-block";
+    aboutDocument.puckData.content[0].props.instanceId = "original-about-instance";
+    aboutDocument.puckData.content[0].props.contentBySlotId.slot_heading = "目标页原有内容";
+    const existingId = aboutDocument.puckData.content[0].props.id;
+    let allowCopy = false;
+    const targetWrites: Array<typeof aboutDocument> = [];
+    await page.route("**/api/page-modules/dynamic-templates/catalog?*", (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("pageKey") === "about" && !allowCopy) {
+        return route.fulfill(json({ items: [] }));
+      }
+      return route.fallback();
+    });
+    await page.route("**/api/page-modules/document/admin?*", (route) => (
+      new URL(route.request().url()).searchParams.get("pageKey") === "about"
+        ? route.fulfill(json(targetWrites.at(-1) ?? aboutDocument))
+        : route.fallback()
+    ));
+    await page.route("**/api/page-modules/document", (route) => {
+      const payload = route.request().postDataJSON() as typeof aboutDocument;
+      if (payload.pageKey !== "about") return route.fallback();
+      const saved = {
+        ...aboutDocument,
+        ...payload,
+        // 真实接口会按保存的区块引用补回各精确版本。
+        puckData: {
+          ...payload.puckData,
+          resolvedDynamicTemplates: {
+            ...aboutDocument.puckData.resolvedDynamicTemplates,
+            ...fixture.currentDocument().puckData.resolvedDynamicTemplates,
+          },
+        },
+        updatedAt: "2026-08-28T12:03:00.000Z",
+      };
+      targetWrites.push(saved);
+      return route.fulfill(json(saved));
+    });
+
+    const heading = fixture.inspector.getByRole("textbox", { name: "标题", exact: true });
+    const sourceTitle = "源页已配置的珠宝标题";
+    await heading.fill(sourceTitle);
+    const chooseAbout = async () => {
+      await page.getByRole("button", { name: "复制到其他页面", exact: true }).click();
+      const chooser = page.getByRole("dialog", { name: "复制到其他页面" });
+      await chooser.getByRole("combobox", { name: "目标页面" }).click();
+      await page.getByRole("listbox").getByRole("option", { name: "关于海川", exact: true }).click();
+      await chooser.getByRole("button", { name: "前往目标页" }).click();
+      return chooser;
+    };
+    const destination = page.getByRole("dialog", { name: "添加复制的区块" });
+    const layers = page.locator(".homepage-editor__layer-item");
+    const chooser = await chooseAbout();
+    await expect(chooser.getByRole("alert")).toContainText("「关于海川」的模板组件库不提供此模板");
+    await expect(page.getByRole("dialog", { name: "离开当前编辑？" })).toBeHidden();
+    await expect(page.getByLabel("切换装修页面")).toHaveValue("products");
+    expect(fixture.pageWrites).toHaveLength(0);
+
+    allowCopy = true;
+    await chooser.getByRole("button", { name: "前往目标页" }).click();
+    await page.getByRole("button", { name: "继续编辑", exact: true }).click();
+    await expect(page.getByLabel("切换装修页面")).toHaveValue("products");
+    await expect(heading).toHaveValue(sourceTitle);
+    expect(fixture.pageWrites).toHaveLength(0);
+    expect(targetWrites).toHaveLength(0);
+
+    await page.getByLabel("切换装修页面").selectOption("about");
+    await page.getByRole("button", { name: "放弃修改", exact: true }).click();
+    await expect(layers.first()).toHaveAttribute("data-layer-id", existingId);
+    await expect(destination).toBeHidden();
+    await page.getByLabel("切换装修页面").selectOption("products");
+    await layers.first().locator(".homepage-editor__layer-select").click();
+    await heading.fill(sourceTitle);
+
+    await chooseAbout();
+    await page.getByRole("button", { name: "保存并离开", exact: true }).click();
+    await expect(destination).toBeVisible();
+    const add = destination.getByRole("button", { name: "添加到页面", exact: true });
+    allowCopy = false;
+    await add.click();
+    await expect(destination.getByRole("alert")).toContainText("目标页面的模板组件库不再提供此模板");
+    expect(targetWrites).toHaveLength(0);
+    allowCopy = true;
+    await add.click();
+    await expect(destination).toBeHidden();
+    await expect(heading).toHaveValue(sourceTitle);
+    await expect(layers).toHaveCount(2);
+    const copyId = await layers.last().getAttribute("data-layer-id");
+    expect(copyId).not.toBe(existingId);
+    await page.getByRole("button", { name: "撤销", exact: true }).click();
+    await expect(layers).toHaveCount(1);
+    await page.getByRole("button", { name: "重做", exact: true }).click();
+    await expect(layers.last()).toHaveAttribute("data-layer-id", copyId!);
+    await layers.last().locator(".homepage-editor__layer-select").click();
+    await heading.fill("目标页独立修改");
+    await page.getByRole("button", { name: "保存当前装修草稿", exact: true }).click();
+    await expect.poll(() => targetWrites.length).toBe(1);
+    const [original, copied] = targetWrites[0].puckData.content;
+    const sourceProps = fixture.currentDocument().puckData.content[0].props;
+    expect(original.props.contentBySlotId.slot_heading).toBe("目标页原有内容");
+    expect(copied.props.templateVersion).toBe(sourceProps.templateVersion);
+    expect(copied.props.instanceId).not.toBe(sourceProps.instanceId);
+    expect(copied.props.layoutOverridesByNodeId).toEqual(sourceProps.layoutOverridesByNodeId);
+    expect(copied.props.contentBySlotId.slot_heading).toBe("目标页独立修改");
+    expect(sourceProps.contentBySlotId.slot_heading).toBe(sourceTitle);
+    expect(fixture.templateWrites).toHaveLength(0);
+
+    await page.reload();
+    await expect(page.getByLabel("切换装修页面")).toHaveValue("about");
+    await layers.last().locator(".homepage-editor__layer-select").click();
+    await expect(heading).toHaveValue("目标页独立修改");
+    await page.getByLabel("切换装修页面").selectOption("products");
+    await expect(layers).toHaveCount(1);
+    await layers.first().locator(".homepage-editor__layer-select").click();
+    await expect(heading).toHaveValue(sourceTitle);
   });
 
   test("页面运营通过真实 UI 原子复制、排序、显隐和删除实例，并在保存重载后保持稳定身份", async ({ page }) => {
@@ -2969,10 +3215,9 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await page.locator(
       `.homepage-editor__layer-item[data-layer-id="${copiedBlockId}"] .homepage-editor__layer-select`,
     ).click({ position: { x: 12, y: 18 } });
-    const visibility = inspector.getByRole("switch", { name: "在页面显示" });
-    await expect(visibility).toBeChecked();
-    await visibility.click();
-    await expect(visibility).not.toBeChecked();
+    const copiedLayer = page.locator(`.homepage-editor__layer-item[data-layer-id="${copiedBlockId}"]`);
+    await expect(inspector.getByRole("switch", { name: "在页面显示" })).toHaveCount(0);
+    await copiedLayer.getByTitle("隐藏模块").click();
     await expect(canvas.locator(`[data-dynamic-template-instance-id="${copiedInstanceId}"]`))
       .toContainText(/已隐藏/);
     await page.getByRole("button", { name: "预览当前画布" }).click();
@@ -2981,8 +3226,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect(canvas.locator('[data-dynamic-template-instance-id="dynamic-upgrade-instance"]'))
       .toHaveCount(1);
     await page.getByRole("button", { name: "退出当前画布预览" }).click();
-    await visibility.click();
-    await expect(visibility).toBeChecked();
+    await copiedLayer.getByTitle("显示模块").click();
     await expect.poll(renderedInstanceIds).toEqual([
       copiedInstanceId,
       "dynamic-upgrade-instance",
@@ -2999,10 +3243,10 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     expect(templateWrites).toEqual([]);
 
     await undo.click();
-    await expect(visibility).not.toBeChecked();
+    await expect(copiedLayer.getByTitle("显示模块")).toBeAttached();
     await expect(layers).toHaveCount(2);
     await redo.click();
-    await expect(visibility).toBeChecked();
+    await expect(copiedLayer.getByTitle("隐藏模块")).toBeAttached();
     await dock.getByRole("button", { name: "删除当前模块" }).click();
     await page.getByRole("dialog", { name: "删除“内容展示｜版本升级”？" })
       .getByRole("button", { name: "删除模块" })
@@ -3078,6 +3322,47 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     expect(templateWrites).toEqual([]);
   });
 
+  test("已有装修实例跨过固定业务区后保留身份、内容和版式", async ({ page }) => {
+    const fixture = await prepareEditor(page, {
+      duplicate: true,
+      lockedBusiness: true,
+      legacyLayout: true,
+    });
+    const original = structuredClone(fixture.currentDocument().puckData.content.slice(0, 2));
+    const [first, second] = original.map(({ props }) => props.id);
+    const region = "contact-business-region";
+    const layers = page.locator(".homepage-editor__layer-item[data-layer-id]");
+    const layer = (id: string) => page.locator(`[data-layer-id="${id}"]`);
+    const layerOrder = () => layers.evaluateAll((items) => items.map((item) => item.getAttribute("data-layer-id")));
+    await expect.poll(layerOrder).toEqual([first, second, region]);
+    await expect(layer(region)).toHaveAttribute("draggable", "false");
+    await expect(layer(region).locator(".homepage-editor__layer-actions")).toHaveCount(0);
+
+    await layer(second).getByRole("button").first().click();
+    const dock = page.getByRole("toolbar", { name: "调整“内容展示｜版本升级”模块" });
+    await dock.getByRole("button", { name: "下移当前模块" }).click();
+    await expect.poll(layerOrder).toEqual([first, region, second]);
+
+    await layer(second).dragTo(layer(region));
+    await expect.poll(layerOrder).toEqual([first, second, region]);
+
+    await layer(first).getByRole("button").first().click();
+    await layer(second).getByRole("button").first().click({ modifiers: ["Shift"] });
+    await page.locator(".homepage-editor__layer-batch").getByRole("button", { name: "下移" }).click();
+    await expect.poll(layerOrder).toEqual([region, first, second]);
+    expect(fixture.pageWrites).toEqual([]);
+    expect(fixture.templateWrites).toEqual([]);
+
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+    await expect.poll(fixture.savedPayload).not.toBeNull();
+    const saved = fixture.savedPayload() as { puckData: { content: typeof original } };
+    expect(saved.puckData.content.map(({ props }) => props.id)).toEqual([region, first, second]);
+    expect(saved.puckData.content.slice(1)).toMatchObject(original);
+
+    await page.reload();
+    await expect.poll(layerOrder).toEqual([region, first, second]);
+  });
+
   test("390px 下实例操作可由键盘非拖拽完成，锁定与边界状态可见且页面无横向溢出", async ({ page }) => {
     const { pageWrites, templateWrites } = await prepareEditor(page, {
       duplicate: true,
@@ -3087,7 +3372,6 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       '.homepage-editor__layer-item[data-layer-id="dynamic-upgrade-block-2"] .homepage-editor__layer-select',
     ).click({ position: { x: 12, y: 18 } });
     await page.setViewportSize({ width: 390, height: 844 });
-    const layers = page.locator(".homepage-editor__layer-item");
     const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
     const renderedInstances = canvas.locator("[data-dynamic-template-instance-id]");
     const renderedInstanceIds = () => renderedInstances.evaluateAll((items) => (
@@ -3124,6 +3408,9 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       "dynamic-upgrade-instance-2",
       copiedInstanceId,
     ]);
+    await expect(moveDown).toBeEnabled();
+    await moveDown.focus();
+    await page.keyboard.press("Enter");
     await expect(moveDown).toBeDisabled();
 
     const deleteTrigger = dock.getByRole("button", { name: "删除当前模块" });
@@ -3169,17 +3456,16 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
   test("整个页面实例显隐在编辑、预览、保存与刷新之间保持一致", async ({ page }) => {
     const { inspector, savedPayload } = await prepareEditor(page);
     const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
-    const visibility = inspector.getByRole("switch", { name: "在页面显示" });
+    const layer = page.locator('.homepage-editor__layer-item[data-layer-id="dynamic-upgrade-block"]');
     const publicStatus = inspector.getByRole("status", { name: "前台展示状态" });
-    await expect(visibility).toBeChecked();
-    await expect(publicStatus).toHaveAttribute("data-state", "ready");
+    await expect(inspector.getByRole("switch", { name: "在页面显示" })).toHaveCount(0);
+    await expect(publicStatus).toHaveCount(0);
     await expect(canvas.locator('[data-dynamic-template-instance-id="dynamic-upgrade-instance"]'))
       .toHaveAttribute("data-dynamic-template-render-mode", "editor");
 
-    await visibility.click();
-    await expect(visibility).not.toBeChecked();
+    await layer.getByTitle("隐藏模块").click();
     await expect(publicStatus).toHaveAttribute("data-state", "hidden");
-    await expect(publicStatus).toContainText("前台已关闭");
+    await expect(publicStatus).toContainText("可在图层面板恢复");
     await expect(canvas.getByText("当前页面中已隐藏", { exact: true })).toBeVisible();
 
     await page.getByRole("button", { name: "预览当前画布" }).click();
@@ -3201,39 +3487,42 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       .first()
       .click({ position: { x: 12, y: 18 } });
     const refreshedInspector = page.getByRole("region", { name: "模板实例属性" });
-    const refreshedVisibility = refreshedInspector.getByRole("switch", { name: "在页面显示" });
     const refreshedPublicStatus = refreshedInspector.getByRole("status", { name: "前台展示状态" });
-    await expect(refreshedVisibility).not.toBeChecked();
     await expect(refreshedPublicStatus).toHaveAttribute("data-state", "hidden");
-    await refreshedVisibility.click();
-    await expect(refreshedPublicStatus).toHaveAttribute("data-state", "ready");
+    await layer.getByTitle("显示模块").click();
+    await expect(refreshedPublicStatus).toHaveCount(0);
     await expect(refreshedCanvas.getByText("页面实例填写内容", { exact: true })).toBeVisible();
   });
 
-  test("动态模板画布点击只保持模板级完整属性面板", async ({ page }) => {
+  test("动态模板画布点选字段后定位属性栏，切换设备保留选中项", async ({ page }) => {
     const { inspector, templateWrites } = await prepareEditor(page, { legacyLayout: true });
     const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
     const renderer = canvas.locator('[data-dynamic-template-instance-id="dynamic-upgrade-instance"] .hc-dynamic-template');
     const heading = canvas.locator('[data-template-node-id="node_heading"]');
 
     await expect(renderer).toHaveAttribute("data-dynamic-template-editor-surface", "page-instance");
-    const propertyScope = inspector.getByRole("group", { name: "页面实例属性范围" });
-    await expect(propertyScope.getByRole("button", { name: "全部内容", exact: true }))
-      .toHaveAttribute("aria-pressed", "true");
-    await expect(inspector.getByRole("region", { name: "实例管理" })).toBeVisible();
+    await expect(inspector.getByRole("group", { name: "页面实例属性范围" })).toHaveCount(0);
+    await expect(inspector.getByText("定位字段", { exact: true })).toHaveCount(0);
     await expect(heading).not.toHaveAttribute("role", "group");
     await expect(heading).not.toHaveAttribute("tabindex", "0");
 
+    await page.getByRole("button", { name: "收起属性面板" }).click();
+    await expect(inspector).toBeHidden();
+    await canvas.locator('[data-editor-block-id="dynamic-upgrade-block"] [data-editor-select-handle]').click();
+    await expect(inspector.getByRole("textbox", { name: "标题", exact: true })).toBeVisible();
     await heading.click();
-    await expect(inspector).toContainText("页面实例编辑边界");
-    await expect(inspector).not.toContainText("当前选择：标题");
+    const titleField = inspector.locator('[data-slot-id="slot_heading"]');
+    await expect(titleField).toHaveAttribute("data-page-field-selected", "true");
+    await expect(titleField).toBeFocused();
+    await page.getByRole("button", { name: /移动端布局/ }).click();
+    await expect(titleField).toHaveAttribute("data-page-field-selected", "true");
     await expect(canvas.locator('[data-template-selected="true"]')).toHaveCount(0);
     await expect(inspector.getByRole("textbox", { name: "标题" })).toBeVisible();
     await expect(inspector.getByRole("button", { name: "调整区域" })).toHaveCount(0);
     expect(templateWrites).toEqual([]);
   });
 
-  test("页面字段任务分组与 Inspector 选择、设计覆盖只消费共享 descriptor", async ({ page }) => {
+  test("页面字段任务分组与可编辑性只消费共享 descriptor", async ({ page }) => {
     const contentField: DynamicTemplatePageFieldDescriptor = {
       nodeId: "node_content",
       slotId: "slot_content",
@@ -3312,47 +3601,17 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     });
     expect(descriptorBySlotId.slot_locked_copy.effectiveDesignOverrideCapabilities).toBeNull();
     for (const field of descriptors) {
-      await expect(inspector.locator(`[data-slot-id="${field.slotId}"]`))
-        .toHaveAttribute("data-page-field-policy", JSON.stringify(field.effectiveDesignOverrideCapabilities));
+      const slot = inspector.locator(`[data-slot-id="${field.slotId}"]`);
+      if (field.editable) {
+        await expect(slot).toHaveAttribute("data-page-field-policy", JSON.stringify(field.effectiveDesignOverrideCapabilities));
+      } else {
+        await expect(slot).toHaveCount(0);
+      }
     }
-    const lockedField = inspector.locator('[data-slot-id="slot_locked_copy"]');
-    await expect(lockedField).toContainText("此内容由模板锁定，页面不能修改。");
-    await expect(lockedField.getByRole("textbox", { name: "只读说明" })).toHaveCount(0);
-    const propertyScope = inspector.getByRole("group", { name: "页面实例属性范围" });
-    await expect(propertyScope.getByRole("button", { name: "只读说明", exact: true })).toHaveCount(0);
-
-    await propertyScope.getByRole("button", { name: "标题", exact: true }).click();
+    await expect(inspector.getByRole("textbox", { name: "只读说明" })).toHaveCount(0);
+    await expect(inspector.getByRole("group", { name: "页面实例属性范围" })).toHaveCount(0);
     await expect(inspector.getByRole("textbox", { name: "标题", exact: true })).toBeVisible();
-    const headingSelection = await page.evaluate(async () => {
-      const { useVisualEditorSession } = await import("/src/page-builder/visual-editor/visualEditorSession.ts");
-      const selection = useVisualEditorSession.getState().selection;
-      return selection && {
-        nodeId: selection.nodeId,
-        canAdjustLayout: selection.canAdjustLayout,
-        canAdjustMedia: selection.canAdjustMedia,
-      };
-    });
-
-    await propertyScope.getByRole("button", { name: "主图", exact: true }).click();
-    const imageSelection = await page.evaluate(async () => {
-      const { useVisualEditorSession } = await import("/src/page-builder/visual-editor/visualEditorSession.ts");
-      const selection = useVisualEditorSession.getState().selection;
-      return selection && {
-        nodeId: selection.nodeId,
-        canAdjustLayout: selection.canAdjustLayout,
-        canAdjustMedia: selection.canAdjustMedia,
-      };
-    });
-
-    expect([headingSelection, imageSelection]).toEqual([
-      { nodeId: "node_heading", canAdjustLayout: false, canAdjustMedia: false },
-      { nodeId: "node_image", canAdjustLayout: false, canAdjustMedia: true },
-    ]);
-    await propertyScope.getByRole("button", { name: "全部内容", exact: true }).click();
-    await expect.poll(async () => page.evaluate(async () => {
-      const { useVisualEditorSession } = await import("/src/page-builder/visual-editor/visualEditorSession.ts");
-      return useVisualEditorSession.getState().selection;
-    })).toBeNull();
+    await expect(inspector.locator('[data-media-field="slot_image"]')).toBeVisible();
     expect(currentDocument().puckData.content[0].props).toEqual(initialInstanceProps);
     expect(pageWrites).toEqual([]);
     expect(templateWrites).toEqual([]);
@@ -3364,16 +3623,14 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       noNewVersion: true,
       lockedLeftover: true,
     });
-    const lockedField = inspector.locator('[data-slot-id="slot_locked_copy"]');
-    await expect(lockedField).toContainText("此内容由模板锁定，页面不能修改。");
-    await expect(lockedField).toContainText("当前草稿仍保留旧的页面覆盖，发布前需要移除。");
-    await expect(inspector.getByRole("button", { name: "移除锁定字段的页面覆盖" })).toBeVisible();
-    await expect(lockedField.getByRole("button", { name: "恢复模板文案" })).toBeVisible();
+    await expect(inspector.locator('[data-slot-id="slot_locked_copy"]')).toHaveCount(0);
+    const cleanup = inspector.getByRole("status").filter({ hasText: "1 个锁定字段仍保留页面覆盖" });
+    const removeOverrides = cleanup.getByRole("button", { name: "移除锁定字段的页面覆盖" });
+    await expect(removeOverrides).toBeVisible();
     expect(currentDocument().puckData.content[0].props.contentBySlotId.slot_locked_copy).toBe("旧页面覆盖说明");
 
-    await lockedField.getByRole("button", { name: "恢复模板文案" }).click();
-    await expect(lockedField.getByRole("button", { name: "恢复模板文案" })).toHaveCount(0);
-    await expect(lockedField).not.toContainText("当前草稿仍保留旧的页面覆盖，发布前需要移除。");
+    await removeOverrides.click();
+    await expect(cleanup).toHaveCount(0);
     await expect(inspector.getByRole("button", { name: "移除锁定字段的页面覆盖" })).toHaveCount(0);
     expect(currentDocument().puckData.content[0].props.contentBySlotId.slot_locked_copy).toBe("旧页面覆盖说明");
     expect(pageWrites).toEqual([]);
@@ -3402,147 +3659,410 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     expect(templateWrites).toEqual([]);
   });
 
-  test("母模板授权的几何、文字和间距由精确属性面板写入同一实例覆盖", async ({ page }) => {
-    const { inspector, savedPayload, templateWrites } = await prepareEditor(page, { legacyLayout: true });
+  test("页面直接清空和修改文字，保存回读保留旧实例的精确构图", async ({ page }) => {
+    const { inspector, savedPayload, currentDocument, templateWrites } = await prepareEditor(page, {
+      legacyLayout: true,
+    });
+    const originalProps = structuredClone(currentDocument().puckData.content[0].props);
+    const heading = renderedPageInstance(page).locator('[data-template-node-id="node_heading"]');
+    await expect(heading).toHaveAttribute("style", /translate\(8%, -4%\)/);
+    await expect(heading.getByRole("heading")).toHaveCSS("font-size", "40px");
+    await expect(inspector.getByRole("spinbutton", { name: /水平偏移|垂直偏移|区域宽度|层级|字号|间距/ })).toHaveCount(0);
+    await expect(inspector.getByRole("combobox", { name: "标题文字对齐" })).toHaveCount(0);
+    await expect(inspector.getByText("清除本页内容", { exact: true })).toHaveCount(0);
+    const title = inspector.getByRole("textbox", { name: "标题", exact: true });
+    await expect(inspector.getByRole("switch", { name: "在桌面端收起这段文字" })).toHaveCount(0);
+    await title.fill("");
+    await expect(title).toHaveValue("");
+    await expect(inspector.getByRole("switch", { name: "在桌面端收起这段文字" })).toHaveCount(0);
+    await title.fill("页面直接修改标题");
+    await expect(heading).toContainText("页面直接修改标题");
+    await expect(heading).toHaveAttribute("style", /translate\(8%, -4%\)/);
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+    await expect.poll(savedPayload).not.toBeNull();
+    const payload = savedPayload() as { puckData: { content: Array<{ props: Record<string, unknown> }> } };
+    expect(payload.puckData.content[0].props.layoutOverridesByNodeId).toEqual(originalProps.layoutOverridesByNodeId);
+    expect(payload.puckData.content[0].props.contentBySlotId).toEqual({ slot_heading: "页面直接修改标题" });
+    expect(templateWrites).toEqual([]);
+    await page.reload();
+    await expect(heading).toContainText("页面直接修改标题");
+    await expect(heading.getByRole("heading")).toHaveCSS("font-size", "40px");
+  });
+
+  for (const role of ["ADMIN", "SUPER_ADMIN"] as const) {
+    test(`${role} 装修只编辑页面实例，不显示恢复样式或回填母版入口`, async ({ page }) => {
+      const { inspector, currentDocument, pageWrites, templateWrites } = await prepareEditor(page, {
+        legacyLayout: true,
+        adminRole: role,
+        noNewVersion: true,
+      });
+      const originalProps = structuredClone(currentDocument().puckData.content[0].props);
+      await expect(inspector.getByRole("textbox", { name: "标题", exact: true })).toHaveValue("页面实例填写内容");
+      await expect(inspector.getByText(/本节样式与来源|页面内容覆盖|页面设计覆盖|模板版本与样式/)).toHaveCount(0);
+      await expect(inspector.getByLabel("当前字段来源")).toHaveCount(0);
+      await expect(inspector.getByRole("button", { name: "应用设计覆盖到母模板草稿" })).toHaveCount(0);
+      await expect(inspector.getByRole("button", { name: "恢复模板样式" })).toHaveCount(0);
+      await expect(renderedPageInstance(page)).toHaveAttribute("data-dynamic-template-version", "1");
+      expect(currentDocument().puckData.content[0].props).toEqual(originalProps);
+      expect(pageWrites).toEqual([]);
+      expect(templateWrites).toEqual([]);
+    });
+  }
+
+  test("模板升级保留单端文字收起，并阻断无法保留的作品跳转", () => {
+    const currentDefinition = LAUNCH_TEMPLATE_MASTERS.find((item) => item.metadata.sectionRole === "creation-grid")!;
+    const targetDefinition = structuredClone(currentDefinition);
+    const workSlotId = Object.values(currentDefinition.slots).find((slot) => slot.key === "workA")!.slotId;
+    const heading = Object.values(currentDefinition.nodes).find((node) => node.slotId && currentDefinition.slots[node.slotId]?.key === "title")!;
+    const input = {
+      currentDefinition,
+      targetDefinition,
+      targetVersion: 2,
+      instance: {
+        id: "grid-upgrade-test",
+        instanceId: "grid-upgrade-instance",
+        instanceSchemaVersion: 1 as const,
+        templateId: currentDefinition.templateId,
+        templateVersion: 1,
+        moduleName: "作品网格",
+        contentBySlotId: { [workSlotId]: { src: "/images/example.jpg", alt: "作品", workProductCode: "P-500" } },
+        hiddenSlotIds: [],
+        layoutOverridesByNodeId: { [heading.nodeId]: { mobile: { visuallyCollapsed: true } } },
+      },
+    };
+    const compatible = analyzeDynamicTemplateUpgrade(input);
+    expect(compatible.blockers).toEqual([]);
+    expect(compatible.nextProps.layoutOverridesByNodeId).toEqual(input.instance.layoutOverridesByNodeId);
+    targetDefinition.metadata.sectionRole = "editorial-split";
+    expect(analyzeDynamicTemplateUpgrade(input).destructiveBlockers).toContainEqual(expect.objectContaining({
+      slotId: workSlotId,
+      reason: expect.stringContaining("原作品跳转无法无损保留"),
+    }));
+  });
+
+  test("恢复本节样式仅修改构图，并可撤销", async ({ page }) => {
+    const { inspector, pageWrites } = await prepareEditor(page, { legacyLayout: true, noNewVersion: true });
     const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
     const heading = canvas.locator('[data-template-node-id="node_heading"]');
-    await inspector.getByRole("group", { name: "页面实例属性范围" })
-      .getByRole("button", { name: "标题", exact: true }).click();
-    await expect(inspector.getByRole("group", { name: "页面实例属性范围" })
-      .getByRole("button", { name: "标题", exact: true }))
-      .toHaveAttribute("aria-pressed", "true");
-    await expect(inspector.getByRole("button", { name: "调整区域" })).toHaveCount(0);
+    const title = inspector.getByRole("textbox", { name: "标题", exact: true });
+    const management = await openBlockActions(page, inspector);
     await expect(heading).toHaveAttribute("style", /translate\(8%, -4%\)/);
-    const horizontalOffset = inspector.getByRole("spinbutton", { name: "水平偏移" });
-    await horizontalOffset.fill("999");
-    await horizontalOffset.press("Enter");
-    await expect(horizontalOffset).toHaveAttribute("aria-invalid", "true");
-    await expect(inspector.getByRole("alert").filter({ hasText: "水平偏移不能大于 20。" }))
-      .toHaveText("水平偏移不能大于 20。");
+    await management.getByRole("button", { name: "恢复本节样式" }).click();
+    await expect(heading).not.toHaveAttribute("style", /translate\(8%, -4%\)/);
+    await expect(title).toHaveValue("页面实例填写内容");
+    await expect(management).toBeHidden();
+    await page.getByRole("button", { name: "撤销", exact: true }).click();
     await expect(heading).toHaveAttribute("style", /translate\(8%, -4%\)/);
-    await horizontalOffset.fill("7");
-    await inspector.getByRole("spinbutton", { name: "垂直偏移" }).fill("-6");
-    await inspector.getByRole("spinbutton", { name: "区域宽度" }).fill("110");
-    await inspector.getByRole("spinbutton", { name: "层级" }).fill("4");
-    await inspector.getByRole("spinbutton", { name: "标题字号" }).fill("42");
-    await inspector.getByRole("combobox", { name: "标题文字对齐" }).locator("xpath=../..").click();
-    await page.locator(".ant-select-dropdown:visible .ant-select-item-option").filter({ hasText: "右对齐" }).click();
-    await inspector.getByRole("spinbutton", { name: "标题上间距" }).fill("14");
-    await inspector.getByRole("spinbutton", { name: "标题下间距" }).fill("20");
-    await inspector.getByRole("textbox", { name: "标题" }).fill("授权实例精确构图");
-    await expect(heading).toHaveAttribute("style", /translate\(7%, -6%\)/);
-    await expect(heading).toHaveAttribute("style", /width: 110%/);
-    await expect(heading.getByRole("heading")).toHaveCSS("font-size", "42px");
-    await expect(heading.getByRole("heading")).toHaveCSS("text-align", "right");
-    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
-    await expect.poll(() => savedPayload()).not.toBeNull();
-    const payload = savedPayload() as { puckData: { content: Array<{ props: Record<string, unknown> }> } };
-    expect(payload.puckData.content[0].props.layoutOverridesByNodeId).toEqual({
-      node_heading: {
-        desktop: {
-          offsetXPercent: 7,
-          offsetYPercent: -6,
-          widthPercent: 110,
-          zIndex: 4,
-          fontSizePx: 42,
-          textAlign: "right",
-          marginTopPx: 14,
-          marginBottomPx: 20,
-        },
-      },
-    });
-    expect(payload.puckData.content[0].props.contentBySlotId).toEqual({ slot_heading: "授权实例精确构图" });
-    expect(templateWrites).toEqual([]);
-  });
-
-  test("页面来源清晰可见，安全设计覆盖经确认进入未保存母模板草稿且不夹带页面内容", async ({ page }) => {
-    const { inspector, currentDocument, pageWrites, templateSavedPayload, templateWrites } = await prepareEditor(page, { legacyLayout: true });
-    const initialInstanceProps = structuredClone(currentDocument().puckData.content[0].props);
-    await expect(inspector.getByLabel("当前字段来源")).toContainText("模板基线 · 固定版本");
-    await expect(inspector.getByLabel("当前字段来源")).toContainText("页面内容覆盖 1");
-    await expect(inspector.getByLabel("当前字段来源")).toContainText("页面设计覆盖 8");
-    await expect(inspector.locator('[data-slot-id="slot_heading"]')).toContainText("标题");
-
-    const promote = inspector.getByRole("button", { name: "应用设计覆盖到母模板草稿" });
-    await expect(promote).toBeEnabled();
-    await promote.click();
-    expect(templateWrites).toEqual([]);
-
-    let confirm = page.getByRole("dialog", { name: "应用 5 项设计覆盖到母模板草稿？" });
-    await expect(confirm).toContainText("不会带入");
-    await expect(confirm).toContainText("不会自动保存、发布或更新其他页面");
-    await confirm.getByRole("button", { name: /取\s*消/ }).click();
-    await expect(confirm).toBeHidden();
-    expect(currentDocument().puckData.content[0].props).toEqual(initialInstanceProps);
     expect(pageWrites).toEqual([]);
-    expect(templateWrites).toEqual([]);
-
-    await promote.click();
-    confirm = page.getByRole("dialog", { name: "应用 5 项设计覆盖到母模板草稿？" });
-    await confirm.getByRole("button", { name: "打开模板草稿" }).click();
-
-    await expect(page.getByLabel("模板状态：有未保存修改")).toBeVisible();
-    await expect(page.getByRole("button", { name: "保存模板" })).toBeVisible();
-    expect(templateWrites).toEqual([]);
-
-    await page.getByRole("button", { name: "撤销" }).click();
-    await expect(page.getByLabel("模板状态：有未发布修改")).toBeVisible();
-    await page.getByRole("button", { name: "重做" }).click();
-    await expect(page.getByLabel("模板状态：有未保存修改")).toBeVisible();
-
-    await page.getByRole("button", { name: "保存模板" }).click();
-    await expect.poll(() => templateSavedPayload()).not.toBeNull();
-    const payload = templateSavedPayload() as {
-      expectedRevision: number;
-      definition: Record<string, any>;
-    };
-    expect(payload.expectedRevision).toBe(7);
-    expect(payload.definition.nodes.node_heading.responsive.desktop.width).toEqual({ value: 115, unit: "%" });
-    expect(payload.definition.nodes.node_heading.responsive.desktop.margin).toMatchObject({
-      top: { value: 12, unit: "px" },
-      bottom: { value: 18, unit: "px" },
-    });
-    expect(payload.definition.slots.slot_heading.desktopRules).toMatchObject({
-      fontSize: { value: 40, unit: "px" },
-      textAlign: "center",
-    });
-    expect(payload.definition.nodes.node_heading.responsive.desktop).not.toHaveProperty("placement");
-    expect(payload.definition).not.toHaveProperty("contentBySlotId");
-    expect(JSON.stringify(payload.definition)).not.toContain("页面实例填写内容");
-    expect(templateWrites).toHaveLength(1);
-    expect(templateWrites[0]).toMatchObject({
-      method: "PATCH",
-      path: "/api/page-modules/dynamic-templates/tpl_page_upgrade/draft",
-    });
   });
 
-  test("页面设计覆盖回填只向超级管理员开放，并在母模板同字段变化时整次阻断", async ({ page }) => {
-    const admin = await prepareEditor(page, { legacyLayout: true, adminRole: "ADMIN" });
-    const restrictedAction = admin.inspector.getByRole("button", { name: "应用设计覆盖到母模板草稿" });
-    await expect(restrictedAction).toBeDisabled();
-    await expect(admin.inspector).toContainText("只有超级管理员可以把页面设计覆盖应用到母模板草稿");
-    expect(admin.templateWrites).toEqual([]);
-
-    await page.unrouteAll({ behavior: "wait" });
-    const superAdmin = await prepareEditor(page, { legacyLayout: true, templateConflict: true });
-    await superAdmin.inspector.getByRole("button", { name: "应用设计覆盖到母模板草稿" }).click();
-    const conflict = page.getByRole("dialog", { name: "未应用：母模板草稿存在安全冲突" });
-    await expect(conflict).toContainText("母模板草稿已修改同一字段");
-    await expect(conflict).toContainText("页面草稿未被修改");
-    expect(superAdmin.templateWrites).toEqual([]);
-    await conflict.getByRole("button", { name: "知道了" }).click();
-    await expect(page.getByRole("button", { name: "保存当前装修草稿" })).toBeVisible();
+  test("左右图文的标题、主图和链接直接可编辑并可保存回读", async ({ page }) => {
+    const { inspector, savedPayload, pageWrites } = await prepareEditor(page, { noNewVersion: true }, "editorial-split");
+    const link = inspector.getByRole("group", { name: "次级链接", exact: true });
+    await expect(inspector.getByRole("textbox", { name: "主标题", exact: true })).toBeVisible();
+    await expect(inspector.getByRole("textbox", { name: "描述", exact: true })).toBeVisible();
+    const mainFields = await inspector.locator('fieldset[data-page-field-consumer="page"]:visible').evaluateAll(
+      (fields) => fields.map((field) => field.getAttribute("data-page-field-label")),
+    );
+    expect(mainFields.slice(0, 3)).toEqual(["主标题", "描述", "主图"]);
+    await expect(inspector.locator("summary")).toHaveCount(0);
+    await expect(inspector.getByRole("group", { name: "副图 1", exact: true })).toBeVisible();
+    await expect(inspector.getByRole("region", { name: "文字", exact: true }).locator("strong").first()).toHaveCSS("font-weight", "600");
+    await link.getByRole("textbox", { name: "次级链接文案" }).fill("了解工艺");
+    await selectInternalPage(page, link, "关于海川");
+    expect(pageWrites).toEqual([]);
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+    await expect.poll(savedPayload).not.toBeNull();
+    await page.reload();
+    await page.locator('.homepage-editor__layer-item[data-layer-id="dynamic-upgrade-block"] .homepage-editor__layer-select').click();
+    await expect(link.getByRole("textbox", { name: "次级链接文案" })).toHaveValue("了解工艺");
+    await expect(link).toContainText("跳转至「关于海川」");
   });
 
-  test("普通图片槽位的适配、缩放和焦点按设备写入当前实例并在刷新后重放", async ({ page }) => {
+  test("空作品推荐可批量导入公开主图，单独换图后调整顺序并保存回读", async ({ page }) => {
+    const { inspector, savedPayload, pageWrites } = await prepareEditor(page, { noNewVersion: true }, "creation-grid");
+    let secondWorkHasPrimary = false;
+    await page.route("**/api/products/public/**", (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path.includes("/media/")) {
+        return route.fulfill({
+          contentType: "image/png",
+          body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
+        });
+      }
+      const code = path.split("/").at(-1);
+      const id = code === "P-500" ? 500 : 600;
+      return route.fulfill(json({
+        id,
+        code,
+        name: `业务商品 ${code}`,
+        primaryImage: id === 500 || secondWorkHasPrimary
+          ? { id: id + 1, mediaUrl: `/products/public/${id}/media/${id + 1}`, isVideo: false }
+          : null,
+      }));
+    });
+    const works = inspector.getByRole("region", { name: "作品", exact: true });
+    const fields = works.locator("fieldset");
+    const first = fields.nth(0);
+    const second = fields.nth(1);
+    const picker = page.getByRole("dialog", { name: "批量选作品" });
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const autoImage = canvas.getByRole("img", { name: "业务商品 P-500", exact: true });
+    await works.getByRole("button", { name: "批量选作品" }).click();
+    await picker.getByRole("button", { name: /业务商品 P-500/ }).click();
+    await picker.getByRole("button", { name: /业务商品 P-600/ }).click();
+    await picker.getByRole("button", { name: "确认选择（2）" }).click();
+    await expect(picker.getByRole("alert")).toHaveText("作品 P-600 的公开主图不可用。请选择其他作品后重试。");
+    await expect(autoImage).toHaveCount(0);
+    expect(pageWrites).toEqual([]);
+
+    secondWorkHasPrimary = true;
+    await picker.getByRole("button", { name: "确认选择（2）" }).click();
+    await expect(picker).toBeHidden();
+    await expect(autoImage).toHaveAttribute("src", /\/api\/products\/public\/500\/media\/501/);
+    await expect(first.getByRole("button", { name: "更换商品：业务商品 P-500" })).toBeVisible();
+    await expect(second.getByRole("button", { name: "更换商品：业务商品 P-600" })).toBeVisible();
+    await page.getByRole("button", { name: "撤销", exact: true }).click();
+    await expect(autoImage).toHaveCount(0);
+    await page.getByRole("button", { name: "重做", exact: true }).click();
+    await expect(autoImage).toBeVisible();
+
+    await first.getByRole("button", { name: "更换商品：业务商品 P-500" }).click();
+    const singlePicker = page.getByRole("dialog", { name: "选择商品", exact: true });
+    await singlePicker.getByRole("button", { name: /业务商品 P-600/ }).click();
+    await singlePicker.getByRole("button", { name: "确认选择", exact: true }).click();
+    await expect(singlePicker).toBeHidden();
+    await expect(canvas.getByRole("img", { name: "业务商品 P-600", exact: true })).toHaveCount(2);
+    await expect(autoImage).toHaveCount(0);
+    await page.getByRole("button", { name: "撤销", exact: true }).click();
+    await expect(autoImage).toHaveAttribute("src", /\/api\/products\/public\/500\/media\/501/);
+
+    const replacement = "/images/audit/template-v1-jewelry-banner.png";
+    await uploadFixtureImage(page, first, replacement);
+    await expect(autoImage).toHaveAttribute("src", replacement);
+    const mobileReplacement = `${replacement}?mobile=1`;
+    await page.getByRole("button", { name: /移动端布局/ }).click();
+    await uploadFixtureImage(page, first, mobileReplacement);
+    await expect(first.locator('img[alt="预览"]')).toHaveAttribute("src", mobileReplacement);
+    await page.getByRole("button", { name: /桌面端布局/ }).click();
+    await first.getByRole("button", { name: "作品图 1后移" }).click();
+    await expect(first.getByRole("button", { name: "更换商品：业务商品 P-600" })).toBeVisible();
+    await expect(second.getByRole("button", { name: "更换商品：业务商品 P-500" })).toBeVisible();
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+    await expect.poll(savedPayload).toMatchObject({
+      puckData: { content: [{ props: { contentBySlotId: {
+        tpl_launch_creation_grid_slot_workA: {
+          src: "/products/public/600/media/601", workProductCode: "P-600", alt: "业务商品 P-600",
+        },
+        tpl_launch_creation_grid_slot_workB: {
+          src: replacement, mobileSrc: mobileReplacement, workProductCode: "P-500", alt: "业务商品 P-500",
+        },
+      } } }] },
+    });
+    await page.reload();
+    await page.locator('.homepage-editor__layer-item[data-layer-id="dynamic-upgrade-block"] .homepage-editor__layer-select').click();
+    await expect(autoImage).toHaveAttribute("src", replacement);
+    await expect(first.getByRole("button", { name: "更换商品：业务商品 P-600" })).toBeVisible();
+    await expect(second.getByRole("button", { name: "更换商品：业务商品 P-500" })).toBeVisible();
+  });
+
+  test("作品四格显示缺图进度，作品跳转仅应用于已绑定的图片并保存回读", async ({ page }) => {
+    const workSlotId = "tpl_launch_creation_grid_slot_workA";
+    const { inspector, savedPayload, pageWrites } = await prepareEditor(page, {
+      noNewVersion: true,
+      imageDescriptionWarnings: true,
+      publishIssues: [{
+        code: "work-reference-invalid",
+        message: "所选作品已下架，请重新选择",
+        severity: "error",
+        blockId: "dynamic-upgrade-block",
+        path: `content[0].props.contentBySlotId.${workSlotId}.workProductCode`,
+        field: workSlotId,
+      }],
+    }, "creation-grid");
+    const works = inspector.getByRole("region", { name: "作品", exact: true });
+    await expect(works.getByRole("status")).toHaveText("还缺 4 张作品图");
+    const imageFields = works.locator("fieldset");
+    await expect(imageFields).toHaveCount(4);
+    for (const [index, imageField] of (await imageFields.all()).entries()) {
+      await uploadFixtureImage(page, imageField, "/images/audit/template-v1-jewelry-banner.png");
+      if (index === 0) continue;
+      await (await openImageDescription(page, imageField)).fill(`作品图 ${index + 1} 的珠宝细节`);
+      await imageField.getByRole("button", { name: "完成图片说明" }).click();
+    }
+    await page.getByRole("button", { name: "关闭本次发布检查" }).click();
+    await expect(works.getByRole("status")).toHaveText("已填齐 4 张作品图");
+    const batchTrigger = works.getByRole("button", { name: "批量选作品" });
+    const batchPicker = page.getByRole("dialog", { name: "批量选作品" });
+    await batchTrigger.click();
+    await batchPicker.getByRole("button", { name: /业务商品 P-600/ }).click();
+    await batchPicker.getByRole("button", { name: /^取\s*消$/ }).click();
+    await expect(imageFields.first()).not.toContainText("业务商品 P-600");
+    await batchTrigger.click();
+    await batchPicker.getByRole("button", { name: /业务商品 P-600/ }).click();
+    await batchPicker.getByRole("button", { name: /业务商品 P-500/ }).click();
+    await batchPicker.getByRole("button", { name: "确认选择（2）" }).click();
+    await expect(imageFields.nth(0)).toContainText("业务商品 P-600");
+    await expect(imageFields.nth(1)).toContainText("业务商品 P-500");
+    await page.getByRole("button", { name: "撤销", exact: true }).click();
+    await expect(imageFields.nth(0)).not.toContainText("业务商品 P-600");
+    await expect(imageFields.nth(1)).not.toContainText("业务商品 P-500");
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    await canvas.locator('[data-template-node-type="ImageSlot"]').filter({
+      has: canvas.getByRole("img", { name: "作品图 3 的珠宝细节", exact: true }),
+    }).click();
+    await expect(imageFields.nth(2)).toHaveAttribute("data-page-field-selected", "true");
+    await expect(imageFields.nth(2)).toBeFocused();
+    const firstWork = imageFields.first();
+    const linkSettings = firstWork.locator('[data-inspector-field="workProductCode"]');
+    await firstWork.getByRole("button", { name: "选择商品", exact: true }).click();
+    const picker = page.getByRole("dialog", { name: "选择商品" });
+    await picker.getByRole("button", { name: /业务商品 P-500/ }).click();
+    await picker.getByRole("button", { name: "确认选择", exact: true }).click();
+    await expect(linkSettings).toContainText("业务商品 P-500");
+    await expect(linkSettings.getByText("图片需要说明，才能作为商品链接。")).toBeVisible();
+    await linkSettings.getByRole("button", { name: "填写图片说明" }).click();
+    const description = firstWork.getByRole("textbox", { name: /替代文字/ });
+    await expect(description).toBeFocused();
+    await description.fill("作品图 1 的珠宝细节");
+    await firstWork.getByRole("button", { name: "完成图片说明" }).click();
+    await expect(linkSettings.getByText("图片需要说明，才能作为商品链接。")).toHaveCount(0);
+    await expect(canvas.locator('a[href="/products/P-500"]')).toHaveCount(0);
+    await page.getByRole("button", { name: "预览当前画布" }).click();
+    await expect(canvas.getByRole("link", { name: "作品图 1 的珠宝细节" })).toHaveAttribute("href", "/products/P-500");
+    await expect(canvas.getByRole("link", { name: "作品图 2 的珠宝细节" })).toHaveCount(0);
+    await page.getByRole("button", { name: "退出当前画布预览" }).click();
+    await firstWork.getByRole("button", { name: "作品图 1后移" }).click();
+    await expect(imageFields.nth(1).locator('[data-inspector-field="workProductCode"]')).toContainText("业务商品 P-500");
+    await page.getByRole("button", { name: "撤销", exact: true }).click();
+    await expect(linkSettings).toContainText("业务商品 P-500");
+    expect(pageWrites).toEqual([]);
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+    await expect.poll(savedPayload).toMatchObject({
+      puckData: { content: [{ props: { contentBySlotId: { [workSlotId]: { workProductCode: "P-500" } } } }] },
+    });
+    await page.reload();
+    await page.locator('.homepage-editor__layer-item[data-layer-id="dynamic-upgrade-block"] .homepage-editor__layer-select').click();
+    await expect(works.getByRole("status")).toHaveText("已填齐 4 张作品图");
+    await expect(linkSettings.getByRole("button", { name: "更换商品：业务商品 P-500" })).toBeVisible();
+    await expect(linkSettings.locator(".homepage-editor__linked-product-image"))
+      .toHaveAttribute("src", "/images/audit/template-v1-jewelry-banner.png");
+    await page.getByRole("button", { name: "发布到前台网站" }).click();
+    const review = page.getByRole("region", { name: "本次发布检查" });
+    await review.locator('[data-page-publish-field="workProductCode"]').getByRole("button", { name: "定位" }).click();
+    await expect(linkSettings).toHaveAttribute("data-page-publish-located", "true");
+    expect(pageWrites.some(({ path }) => path.endsWith("/publish"))).toBe(false);
+    await page.getByRole("button", { name: "关闭本次发布检查" }).click();
+    await firstWork.getByRole("button", { name: "作品图 1后移" }).click();
+    await batchTrigger.click();
+    await batchPicker.getByRole("button", { name: /业务商品 P-600/ }).click();
+    await batchPicker.getByRole("button", { name: "确认选择（1）" }).click();
+    await expect(firstWork).toContainText("业务商品 P-600");
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+    const secondSlotId = "tpl_launch_creation_grid_slot_workB";
+    await expect.poll(savedPayload).toMatchObject({
+      puckData: { content: [{ props: { contentBySlotId: {
+        [workSlotId]: { alt: "作品图 2 的珠宝细节", workProductCode: "P-600" },
+        [secondSlotId]: { alt: "作品图 1 的珠宝细节", workProductCode: "P-500" },
+      } } }] },
+    });
+    await page.reload();
+    await page.locator('.homepage-editor__layer-item[data-layer-id="dynamic-upgrade-block"] .homepage-editor__layer-select').click();
+    await expect(firstWork.getByRole("button", { name: "更换商品：业务商品 P-600" })).toBeVisible();
+    await expect(imageFields.nth(1).getByRole("button", { name: "更换商品：业务商品 P-500" })).toBeVisible();
+  });
+
+  test("单图首屏优先显示画幅与图片，可直接调取景且没有空版本或数字入口", async ({ page }) => {
+    const { inspector, savedPayload, pageWrites } = await prepareEditor(page, {
+      image: true,
+      swappedHero: "single-image",
+      noNewVersion: true,
+      imageDescriptionWarnings: true,
+    });
+    const imageField = inspector.locator('[data-slot-id="slot_image"]');
+    const mediaField = imageField.locator('[data-media-field="slot_image"]');
+    const canvasImage = page.frameLocator(".homepage-editor__canvas-scale iframe")
+      .locator('[data-template-node-id="node_image"] img');
+    const alt = imageField.getByRole("textbox", { name: "主图替代文字" });
+    const save = page.getByRole("button", { name: "保存当前装修草稿" });
+    const layer = page.locator('.homepage-editor__layer-item[data-layer-id="dynamic-upgrade-block"] .homepage-editor__layer-select');
+    const savedStatus = page.getByRole("status").filter({ hasText: "草稿与线上一致" });
+    await expect(imageField.locator("[data-image-asset-guidance]")).toHaveText("建议 1440 × 810 px");
+    await expect(mediaField).toHaveAttribute("data-media-frame", "16:9");
+    await expect(imageField.getByText(/手机沿用桌面图/)).toHaveCount(0);
+    await expect(alt).toHaveCount(0);
+    await expect(mediaField.getByRole("button", { name: "图片链接" })).toHaveCount(0);
+    await expect(inspector.getByText("图片已含标题", { exact: true })).toHaveCount(0);
+    await expect(inspector.getByText("定位字段", { exact: true })).toHaveCount(0);
+    await expect(inspector.getByRole("switch", { name: "在页面显示" })).toHaveCount(0);
+    await expect(inspector.getByText("固定版本 tpl_page_upgrade v1")).toHaveCount(0);
+
+    const imageUrl = "/images/audit/template-v1-jewelry-banner.png";
+    await uploadFixtureImage(page, mediaField, imageUrl);
+    await expect(canvasImage).toBeVisible();
+    await expect(imageField.locator("[data-image-asset-guidance]")).toHaveCount(0);
+    await expect(alt).toHaveCount(0);
+    await expect(imageField).not.toContainText(/原图像素未知|正在读取原图像素/);
+    expect(pageWrites).toEqual([]);
+    await save.click();
+    await expect.poll(savedPayload).not.toBeNull();
+    await expect(savedStatus).toBeVisible();
+    await page.reload();
+    await layer.click();
+    await expect(canvasImage).toBeVisible();
+
+    const focus = imageField.getByRole("slider", { name: "拖动调整画面焦点" });
+    await expect(focus).toBeVisible();
+    await expect(imageField.getByRole("spinbutton", { name: /水平焦点|垂直焦点|缩放/ })).toHaveCount(0);
+    await expect(imageField.getByText("调整图片取景", { exact: true })).toHaveCount(0);
+    const undo = page.getByRole("button", { name: "撤销", exact: true });
+    await expect(undo).toBeDisabled();
+    await focus.press("Shift+ArrowLeft");
+    await expect(canvasImage).toHaveCSS("object-position", "40% 50%");
+    await expect(undo).toBeEnabled();
+    await undo.click();
+    await expect(canvasImage).toHaveCSS("object-position", "50% 50%");
+    await layer.click();
+
+    await page.getByRole("button", { name: /移动端布局/ }).click();
+    await expect(imageField.locator('[data-media-field="slot_image-mobile"]')).toHaveAttribute("data-media-frame", "9:16");
+    await expect(imageField.locator("[data-media-inherited-hint]")).toHaveText("手机沿用桌面图");
+    await expect(imageField.getByText(/沿用桌面图/)).toHaveCount(1);
+    await imageField.getByRole("button", { name: "添加图片说明", exact: true }).click();
+    await expect(alt).toBeFocused();
+    await alt.fill("首屏图片说明");
+    await imageField.getByRole("button", { name: "完成图片说明" }).click();
+    await expect(alt).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "关闭本次发布检查" })).toHaveCount(0);
+    await expect(inspector.getByText("模板版本与样式", { exact: true })).toHaveCount(0);
+    await expect(renderedPageInstance(page)).toHaveAttribute("data-dynamic-template-version", "1");
+    expect(pageWrites).toHaveLength(1);
+
+    await save.click();
+    await expect.poll(savedPayload).toMatchObject({
+      puckData: { content: [{ props: { contentBySlotId: { slot_image: { src: imageUrl, alt: "首屏图片说明" } } } }] },
+    });
+    await expect(savedStatus).toBeVisible();
+    await page.reload();
+    await layer.click();
+    await expect(alt).toHaveCount(0);
+    await expect(canvasImage).toHaveAttribute("alt", "首屏图片说明");
+    await page.frameLocator(".homepage-editor__canvas-scale iframe")
+      .locator('[data-template-node-id="node_image"]').click();
+    const actions = await openBlockActions(page, inspector);
+    await actions.getByRole("button", { name: "更正图片说明" }).click();
+    await expect(alt).toHaveValue("首屏图片说明");
+    await imageField.getByRole("button", { name: "完成图片说明" }).click();
+    await expect(alt).toHaveCount(0);
+  });
+
+  test("普通图片槽位直接显示构图设置，与画布即时同步并在刷新后重放", async ({ page }) => {
     const { inspector, savedPayload } = await prepareEditor(page, { image: true });
     const publicStatus = inspector.getByRole("status", { name: "前台展示状态" });
-    await expect(publicStatus).toHaveAttribute("data-state", "ready");
-    await expect(publicStatus).toContainText("可以公开");
-    await expect(publicStatus).toContainText("没有页面图片");
+    await expect(publicStatus).toHaveCount(0);
     await expect(inspector.locator('[data-slot-id="slot_image"]')).toContainText("主图");
     await expect(inspector.locator('[data-image-asset-guidance="slot_image"]'))
-      .toHaveText("建议素材：1200 × 900 像素。当前画框 4:3。建议像素是文件尺寸，不是页面上的画框。");
+      .toHaveText("建议 1200 × 900 px");
     const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
     const image = canvas.locator('[data-template-node-id="node_image"] img');
     await expect(image).toHaveCount(0);
@@ -3553,58 +4073,54 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
 
     await expect(inspector.locator('[data-media-field="slot_image"]'))
       .toHaveAttribute("data-workspace-field-shared", "true");
-    await expect(inspector.getByRole("spinbutton", { name: "主图缩放" }).locator("xpath=../.."))
-      .toHaveAttribute("data-workspace-field-control", "number");
-    await expect(inspector.locator('[data-image-focus-field]'))
-      .toHaveAttribute("data-workspace-field-control", "image-focus");
-    await expect(inspector.getByText("当前沿用模板构图，尚未单独设置。")).toBeVisible();
+    const desktopComposition = inspector.locator('[data-image-composition="desktop"]');
+    await expect(desktopComposition).toHaveCount(0);
+    await expect(inspector.getByRole("textbox", { name: "主图替代文字" })).toHaveCount(0);
 
     const mediaField = inspector.locator('[data-media-field="slot_image"]');
     await expect(mediaField.getByRole("button", { name: "本页图片", exact: true })).toBeVisible();
     await expect(mediaField).toHaveAttribute("data-has-page-media", "true");
-    await mediaField.getByRole("button", { name: "图片链接" }).click();
-    await mediaField.getByPlaceholder("输入图片 URL；清空后确认 = 删除图片")
-      .fill("/images/audit/template-v1-jewelry-banner.png");
-    await mediaField.getByRole("button", { name: /确\s*认/ }).click();
+    await uploadFixtureImage(page, mediaField, "/images/audit/template-v1-jewelry-banner.png");
     await expect(image).toHaveCSS("object-fit", "cover");
     await expect(image).toHaveCSS("object-position", "50% 50%");
-    await expect(publicStatus).toHaveAttribute("data-state", "ready");
-    await expect(publicStatus).toContainText("保存只保留草稿");
-    await expect(publicStatus).toContainText("点击页面“发布”后");
+    await expect(mediaField.locator("[data-image-source-pixels]")).toHaveCount(0);
+    await expect(mediaField.getByRole("button", { name: "本页图片", exact: true })).toHaveCount(0);
+    await mediaField.getByRole("button", { name: "图片操作" }).click();
+    const reuseImage = page.getByRole("menuitem", { name: "复用本页图片" });
+    await expect(reuseImage).toBeVisible();
+    await reuseImage.press("Escape");
+    await expect(reuseImage).toBeHidden();
+    const desktopFit = desktopComposition.getByRole("group", { name: "主图图片适配" });
+    await expect(desktopComposition.locator("summary")).toHaveCount(0);
+    await expect(desktopFit).toBeVisible();
+    await expect(desktopFit.getByRole("button", { name: "填满并裁切" })).toHaveAttribute("aria-pressed", "true");
+    await expect(desktopComposition.getByRole("spinbutton")).toHaveCount(0);
+    await expect(inspector.getByRole("button", { name: /重置取景|恢复主图的模板取景/ })).toHaveCount(0);
+    await expect(mediaField.locator(".homepage-editor__media-warning")).toHaveCount(0);
+    await expect(publicStatus).toHaveCount(0);
 
-    await inspector.getByRole("combobox", { name: "主图图片适配" }).locator("xpath=../..").click();
-    await page.locator(".ant-select-dropdown:visible .ant-select-item-option").filter({ hasText: "完整显示" }).click();
-    await inspector.getByRole("spinbutton", { name: "主图缩放" }).fill("130");
+    const showFullImage = desktopFit.getByRole("button", { name: "完整显示", exact: true });
+    await showFullImage.press("Enter");
+    await expect(showFullImage).toHaveAttribute("aria-pressed", "true");
     const focusPad = inspector.getByRole("slider", { name: "拖动调整画面焦点" });
     await expect(focusPad).toBeVisible();
-    const focusPadBox = await focusPad.boundingBox();
-    if (!focusPadBox) throw new Error("缺少画面焦点拖动板");
-    await focusPad.click({
-      position: {
-        x: Math.round(focusPadBox.width * 0.8),
-        y: Math.round(focusPadBox.height * 0.2),
-      },
-    });
-    await expect(image).not.toHaveCSS("object-position", "50% 50%");
-    const desktopComposition = inspector.locator('[data-image-composition="desktop"]');
-    const focusGroup = desktopComposition.getByRole("group", { name: "主图画面焦点常用位置" });
-    await focusGroup.getByRole("button", { name: "左上", exact: true }).click();
-    await expect(desktopComposition.getByRole("button", { name: "清除这一端的构图" }))
-      .toHaveAttribute("data-workspace-field-shared", "true");
+    await dragImageFocusToCorner(page, focusPad, "top-left");
+    await expect(inspector.getByRole("button", { name: /重置取景|恢复主图的模板取景/ })).toHaveCount(0);
+    const actions = await openBlockActions(page, inspector);
+    await expect(actions.getByRole("button", { name: "恢复主图的模板取景" })).toBeVisible();
+    await actions.press("Escape");
     await expect(image).toHaveCSS("object-fit", "contain");
     await expect(image).toHaveCSS("object-position", "0% 0%");
-    await expect(image).toHaveCSS("transform", /matrix\(1\.3/);
     const mediaPreview = inspector.locator('[data-media-field="slot_image"] img[alt="预览"]');
     await expect(mediaPreview).toHaveCSS("object-fit", "contain");
     await expect(mediaPreview).toHaveCSS("object-position", "0% 0%");
-    await expect(mediaPreview).toHaveCSS("transform", /matrix\(1\.3/);
 
     await page.getByRole("button", { name: "保存当前装修草稿" }).click();
     await expect.poll(() => savedPayload()).not.toBeNull();
     const payload = savedPayload() as { puckData: { content: Array<{ props: Record<string, any> }> } };
     expect(payload.puckData.content[0].props.layoutOverridesByNodeId).toEqual({
       node_image: {
-        desktop: { objectFit: "contain", imageScalePercent: 130, focusXPercent: 0, focusYPercent: 0 },
+        desktop: { objectFit: "contain", focusXPercent: 0, focusYPercent: 0 },
       },
     });
 
@@ -3612,7 +4128,21 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     const imageAfterReload = page.frameLocator(".homepage-editor__canvas-scale iframe").locator('[data-template-node-id="node_image"] img');
     await expect(imageAfterReload).toHaveCSS("object-fit", "contain");
     await expect(imageAfterReload).toHaveCSS("object-position", "0% 0%");
-    await expect(imageAfterReload).toHaveCSS("transform", /matrix\(1\.3/);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", { name: "展开属性面板" }).click();
+    const drawer = page.getByRole("dialog", { name: "属性面板" });
+    await expect(drawer.getByRole("button", { name: "图片操作" })).toBeVisible();
+    await expect(drawer.getByRole("button", { name: "替换图片" })).toBeVisible();
+    const narrowComposition = drawer.locator('[data-image-composition="desktop"]');
+    await expect(narrowComposition.getByRole("button", { name: "完整显示", exact: true })).toBeVisible();
+    await expect(narrowComposition.getByRole("button", { name: "完整显示", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(drawer.getByRole("button", { name: /重置取景|恢复主图的模板取景/ })).toHaveCount(0);
+    await expect(narrowComposition.getByRole("spinbutton")).toHaveCount(0);
+    await expect(drawer.getByRole("slider", { name: "拖动调整画面焦点" })).toBeVisible();
+    await expect.poll(() => drawer.locator(".homepage-editor__properties-scroll").evaluate(
+      (panel) => panel.scrollWidth - panel.clientWidth,
+    )).toBeLessThanOrEqual(1);
   });
 
   test("移动端首屏没有手机图时，上传预览按模板对换后的竖框", async ({ page }) => {
@@ -3620,10 +4150,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     const mediaField = inspector.locator('[data-media-field="slot_image"]');
     const mobileField = inspector.locator('[data-media-field="slot_image-mobile"]');
 
-    await mediaField.getByRole("button", { name: "图片链接" }).click();
-    await mediaField.getByPlaceholder("输入图片 URL；清空后确认 = 删除图片")
-      .fill("/images/audit/template-v1-jewelry-banner.png");
-    await mediaField.getByRole("button", { name: /确\s*认/ }).click();
+    await uploadFixtureImage(page, mediaField, "/images/audit/template-v1-jewelry-banner.png");
     await expect(mediaField).toHaveAttribute("data-media-frame", "16:9");
 
     await page.getByRole("button", { name: /移动端布局/ }).click();
@@ -3632,8 +4159,8 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect(mobileField).toHaveAttribute("data-media-frame", "9:16");
     await expect(mobileField.locator("[data-image-focus-pad]")).toHaveCSS("aspect-ratio", "9 / 16");
     await expect(inspector.locator("[data-media-inherited-hint]")).not.toContainText("按原比例显示");
-    await expect(inspector.locator('[data-image-asset-guidance="slot_image"]')).toContainText("9:16");
-    await expect(inspector.locator('[data-image-asset-guidance="slot_image"]')).toContainText("810 × 1440");
+    await expect(inspector.locator('[data-image-asset-guidance="slot_image"]'))
+      .toHaveText("手机沿用桌面图");
   });
 
   test("未上传手机图时，切到移动端后焦点板按手机画框只写手机构图", async ({ page }) => {
@@ -3644,17 +4171,13 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     const mediaField = inspector.locator('[data-media-field="slot_image"]');
     const mobileField = inspector.locator('[data-media-field="slot_image-mobile"]');
 
-    await mediaField.getByRole("button", { name: "图片链接" }).click();
-    await mediaField.getByPlaceholder("输入图片 URL；清空后确认 = 删除图片")
-      .fill("/images/audit/template-v1-jewelry-banner.png");
-    await mediaField.getByRole("button", { name: /确\s*认/ }).click();
+    await uploadFixtureImage(page, mediaField, "/images/audit/template-v1-jewelry-banner.png");
     await expect(image).toHaveCSS("object-position", "50% 50%");
     await expect(mobileField).toHaveCount(0);
 
     const desktopComposition = inspector.locator('[data-image-composition="desktop"]');
     await expect(mediaField).toHaveAttribute("data-media-frame", "4:3");
-    await desktopComposition.getByRole("group", { name: "主图画面焦点常用位置" })
-      .getByRole("button", { name: "左上", exact: true }).click();
+    await dragImageFocusToCorner(page, mediaField.getByRole("slider", { name: "拖动调整画面焦点" }), "top-left");
     await expect(renderer).toHaveAttribute("data-dynamic-template-device", "desktop");
     await expect(image).toHaveCSS("object-position", "0% 0%");
     await expect(inspector.locator('[data-media-device="mobile"]')).toHaveCount(0);
@@ -3693,20 +4216,21 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await page.waitForTimeout(300);
 
     const mobileComposition = inspector.locator('[data-image-composition="mobile"]');
-    await mobileComposition.getByRole("group", { name: "主图画面焦点常用位置" })
-      .getByRole("button", { name: "右下", exact: true }).click();
-    await expect(image).toHaveCSS("object-position", "100% 100%");
+    await expect(mobileComposition.getByRole("group", { name: "主图图片适配" })).toBeVisible();
+    await expect(inspector.getByRole("button", { name: /重置取景|恢复主图的模板取景/ })).toHaveCount(0);
+    await expect(mobileComposition.getByRole("spinbutton")).toHaveCount(0);
+    await mobilePad.press("ArrowRight");
+    await expect(image).not.toHaveCSS("object-position", positionAfterPad);
     await page.waitForTimeout(300);
     await page.getByRole("button", { name: "撤销" }).click();
     await expect.poll(() => image.evaluate((element) => getComputedStyle(element).objectPosition))
       .toBe(positionAfterPad);
     await expect(mobilePreview).toHaveCSS("object-position", positionAfterPad);
 
-    await mobileComposition.getByRole("group", { name: "主图画面焦点常用位置" })
-      .getByRole("button", { name: "右下", exact: true }).click();
+    await dragImageFocusToCorner(page, mobilePad, "bottom-right");
     await expect(image).toHaveCSS("object-position", "100% 100%");
     await page.waitForTimeout(300);
-    await inspector.getByRole("button", { name: "清除这一端的构图" }).click();
+    await (await openBlockActions(page, inspector)).getByRole("button", { name: "恢复主图的模板取景" }).click();
     await expect(image).toHaveCSS("object-position", "50% 0%");
     await expect(mobilePreview).toHaveCSS("object-position", "50% 0%");
     await page.waitForTimeout(300);
@@ -3800,7 +4324,17 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     expect(thumbnailProbes.filter((probe) => probe.storageKey === "page-assets/shared-thumb-fallback.png" && probe.width === "480")).toHaveLength(1);
     expect(thumbnailProbes.filter((probe) => probe.storageKey === "page-assets/shared-thumb-fallback.png" && probe.width === null)).toHaveLength(1);
 
-    await mediaField.getByRole("button", { name: `使用素材：${sharedAsset.name}` }).dispatchEvent("click");
+    await mediaField.getByRole("button", { name: `使用素材：${fallbackAsset.name}` }).click();
+    await expect(mediaField.locator('img[alt="预览"]')).toBeVisible();
+    await mediaField.getByRole("button", { name: "图片操作" }).click();
+    await page.getByRole("menuitem", { name: "复用本页图片" }).click();
+    const mediaSearch = mediaField.getByRole("textbox", { name: "搜索素材文件名" });
+    await mediaSearch.fill("没有匹配的测试素材");
+    await expect(mediaField.getByText("没有匹配的素材，可修改文件名关键词。")).toBeVisible();
+    await mediaSearch.fill(sharedAsset.name);
+    await expect(mediaField.getByRole("button", { name: `使用素材：${fallbackAsset.name}` })).toHaveCount(0);
+    await expect(mediaField.getByRole("button", { name: `使用素材：${sharedAsset.name}` })).toHaveText(sharedAsset.name);
+    await mediaField.getByRole("button", { name: `使用素材：${sharedAsset.name}` }).click();
     await expect(mediaField.locator('img[alt="预览"]')).toBeVisible();
     await page.locator('[data-workspace-action="save"]').evaluate((button: HTMLButtonElement) => button.click());
     await expect.poll(() => savedPayload()).not.toBeNull();
@@ -3834,10 +4368,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     });
 
     const mediaField = inspector.locator('[data-media-field="slot_image"]');
-    await mediaField.getByRole("button", { name: "图片链接" }).click();
-    await mediaField.getByPlaceholder("输入图片 URL；清空后确认 = 删除图片")
-      .fill("/uploads/page-assets/replaced.png");
-    await mediaField.getByRole("button", { name: /确\s*认/ }).click();
+    await uploadFixtureImage(page, mediaField, "/uploads/page-assets/replaced.png");
 
     const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
     const image = canvas.locator('[data-template-node-id="node_image"] img');
@@ -3881,15 +4412,37 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
   });
 
   test("可选图片清空保留替代文字且不回填默认图，保存重开后图片保持为空", async ({ page }) => {
-    const { inspector, savedPayload } = await prepareEditor(page, { image: true });
+    const { inspector, savedPayload, currentDocument } = await prepareEditor(page, { image: true, imageDescriptionWarnings: true });
     const mediaField = inspector.locator('[data-media-field="slot_image"]');
-    await mediaField.getByRole("button", { name: "图片链接" }).click();
-    await mediaField.getByPlaceholder("输入图片 URL；清空后确认 = 删除图片")
-      .fill("/images/audit/template-v1-jewelry-banner.png");
-    await mediaField.getByRole("button", { name: /确\s*认/ }).click();
-    await inspector.getByRole("textbox", { name: "主图替代文字" }).fill("清空前保留的说明");
-    await mediaField.getByLabel("更多图片操作").click();
-    await mediaField.getByRole("button", { name: "删除图片" }).click();
+    await uploadFixtureImage(page, mediaField, "/images/audit/template-v1-jewelry-banner.png");
+    const imageField = inspector.locator('[data-slot-id="slot_image"]');
+    await (await openImageDescription(page, imageField)).fill("清空前保留的说明");
+    await imageField.getByRole("button", { name: "完成图片说明" }).click();
+    await page.getByRole("button", { name: "关闭本次发布检查" }).click();
+    await page.getByRole("button", { name: /移动端布局/ }).click();
+    const mobileField = inspector.locator('[data-media-field="slot_image-mobile"]');
+    await expect(mobileField).toHaveAttribute("data-media-inherited", "true");
+    await expect(mobileField.getByRole("button", { name: "移除手机专用图" })).toHaveCount(0);
+    await uploadFixtureImage(page, mobileField, "/images/audit/template-v1-jewelry-banner.png?mobile=1");
+    await expect(imageField.getByText("正在使用手机专用图", { exact: true })).toBeVisible();
+    await expect(mobileField.locator('img[alt="预览"]')).toHaveAttribute("src", /mobile=1$/);
+    await page.getByRole("button", { name: /桌面端布局/ }).click();
+    await expect(mediaField.locator('img[alt="预览"]')).toHaveAttribute("src", /template-v1-jewelry-banner\.png$/);
+    await page.getByRole("button", { name: /移动端布局/ }).click();
+    await expect(mobileField.locator('img[alt="预览"]')).toHaveAttribute("src", /mobile=1$/);
+    await mobileField.getByRole("button", { name: "图片操作" }).click();
+    await page.getByRole("menuitem", { name: "恢复沿用桌面图" }).click();
+    await expect(mobileField).toHaveAttribute("data-media-inherited", "true");
+    const restoredImage = page.frameLocator(".homepage-editor__canvas-scale iframe").locator('[data-template-node-id="node_image"] img');
+    await expect(restoredImage).toHaveAttribute("alt", "清空前保留的说明");
+
+    await page.getByRole("button", { name: /桌面端布局/ }).click();
+    await expect(mediaField.locator('img[alt="预览"]')).toHaveAttribute("src", /template-v1-jewelry-banner\.png$/);
+    await mediaField.getByRole("button", { name: "图片操作" }).click();
+    await page.getByRole("menuitem", { name: "移除桌面图片" }).click();
+    const confirm = page.getByRole("dialog", { name: "移除桌面图片？" });
+    await expect(confirm).toContainText("手机端也会失去沿用的桌面图");
+    await confirm.getByRole("button", { name: "确认移除" }).click();
     await expect(mediaField.locator('img[alt="预览"]')).toHaveCount(0);
 
     await page.getByRole("button", { name: "保存当前装修草稿" }).click();
@@ -3905,15 +4458,15 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect(imageAfterReload).toHaveCount(0);
     await page.locator('.homepage-editor__layer-item[data-layer-id="dynamic-upgrade-block"] .homepage-editor__layer-select')
       .click({ position: { x: 12, y: 18 } });
-    await expect(page.getByRole("textbox", { name: "主图替代文字" })).toHaveValue("清空前保留的说明");
+    await expect(page.getByRole("textbox", { name: "主图替代文字" })).toHaveCount(0);
+    expect(currentDocument().puckData.content[0].props.contentBySlotId.slot_image).toEqual({ src: "", alt: "清空前保留的说明" });
   });
 
   test("母模板未授权时页面仍只编辑真实内容且不开放构图输入", async ({ page }) => {
     const { inspector, savedPayload } = await prepareEditor(page, { lockedLayout: true });
     const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
     const headingNode = canvas.locator('[data-template-node-id="node_heading"]');
-    await inspector.getByRole("group", { name: "页面实例属性范围" })
-      .getByRole("button", { name: "标题", exact: true }).click();
+    await expect(inspector.getByRole("group", { name: "页面实例属性范围" })).toHaveCount(0);
     await expect(inspector.getByRole("button", { name: "调整区域" })).toHaveCount(0);
     await expect(inspector.getByRole("spinbutton", { name: "水平偏移" })).toHaveCount(0);
     await expect(inspector.getByRole("spinbutton", { name: "标题字号" })).toHaveCount(0);
@@ -3942,123 +4495,87 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     expect(payload.puckData.content[0].props.contentBySlotId).toEqual({ slot_heading: "页面只修改真实文字" });
   });
 
-  test("只有真实页面内容时恢复模板值禁用且不提供无效操作", async ({ page }) => {
-    const { inspector, pageWrites, templateWrites } = await prepareEditor(page);
-    await expect(inspector).toContainText("固定版本 tpl_page_upgrade v1");
+  test("只有页面内容时右栏无维护和保存状态，发布提醒由顶部入口查看", async ({ page }) => {
+    const reminder = "页面素材源文件体积超过建议值";
+    const { inspector, pageWrites, templateWrites } = await prepareEditor(page, {
+      noNewVersion: true,
+      publishIssues: [{ severity: "warning", path: "metadata", message: reminder }],
+    });
+    await expect(renderedPageInstance(page)).toHaveAttribute("data-dynamic-template-version", "1");
     await expect(inspector.getByRole("textbox", { name: "标题" })).toHaveValue("页面实例填写内容");
-    await expect(inspector.getByRole("button", { name: "恢复模板样式" })).toBeDisabled();
-    await expect(page.getByRole("dialog", { name: "恢复模板样式？" })).toHaveCount(0);
+    await expect(inspector.getByText(/固定版本|本节样式与来源|模板版本与样式/)).toHaveCount(0);
+    await expect(inspector.getByRole("button", { name: "恢复模板样式" })).toHaveCount(0);
+    await expect(inspector.getByRole("button", { name: "查看差异" })).toHaveCount(0);
+    await expect(inspector.getByRole("button", { name: "区块操作" })).toHaveCount(0);
+    await expect(inspector.locator(".homepage-editor__properties-actions")).toHaveCount(0);
+    await page.getByRole("button", { name: "更多编辑操作" }).click();
+    await page.getByRole("menuitem", { name: "发布提醒（1 项）" }).click();
+    await expect(page.getByRole("dialog", { name: "不影响发布的提醒 · 1 项" })).toContainText(reminder);
     expect(pageWrites).toEqual([]);
     expect(templateWrites).toEqual([]);
   });
 
-  test("恢复模板值保留当前实例内容与锁定版本，只清除设计覆盖且单步撤销可恢复", async ({ page }) => {
-    const { inspector, savedPayload, pageWrites, templateWrites } = await prepareEditor(page, {
+  test("编辑已隐藏实例的内容保留显隐、旧构图和锁定版本，撤销重做不影响其他实例", async ({ page }) => {
+    const { inspector, currentDocument, savedPayload, pageWrites, templateWrites } = await prepareEditor(page, {
       duplicate: true,
       legacyLayout: true,
       restoreTemplateValue: true,
     });
-    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
-    const firstHeading = canvas
-      .locator('[data-dynamic-template-instance-id="dynamic-upgrade-instance"]')
+    const [original, otherInstance] = structuredClone(currentDocument().puckData.content);
+    const first = renderedPageInstance(page);
+    const secondHeading = renderedPageInstance(page, "dynamic-upgrade-instance-2")
       .locator('[data-template-node-id="node_heading"]');
-    const secondHeading = canvas
-      .locator('[data-dynamic-template-instance-id="dynamic-upgrade-instance-2"]')
-      .locator('[data-template-node-id="node_heading"]');
-    const restoreTemplateValue = inspector.getByRole("button", { name: "恢复模板样式" });
-    const visibility = inspector.getByRole("switch", { name: "在页面显示" });
-    const headingVisibility = inspector.getByRole("switch", { name: "标题可见" });
-    const headingContent = "页面原文：戒指 & 项链｜编号 A-01（逐字保留）";
-    const undo = page.getByRole("button", { name: "撤销" });
-    const redo = page.getByRole("button", { name: "重做" });
+    const title = inspector.getByRole("textbox", { name: "标题" });
+    const visibility = inspector.getByRole("status", { name: "前台展示状态" });
+    const headingVisibility = inspector.locator('[data-slot-id="slot_heading"] legend').getByText("已隐藏");
+    const firstLayer = page.locator('.homepage-editor__layer-item[data-layer-id="dynamic-upgrade-block"] .homepage-editor__layer-select');
+    const undo = page.getByRole("button", { name: "撤销", exact: true });
+    const redo = page.getByRole("button", { name: "重做", exact: true });
 
-    await expect(inspector).toContainText("固定版本 tpl_page_upgrade v1");
-    await expect(inspector.getByRole("textbox", { name: "标题" })).toHaveValue(headingContent);
-    await expect(visibility).not.toBeChecked();
-    await expect(headingVisibility).not.toBeChecked();
+    await expect(first).toHaveAttribute("data-dynamic-template-version", "1");
+    await expect(title).toHaveValue("页面原文：戒指 & 项链｜编号 A-01（逐字保留）");
+    await expect(visibility).toHaveAttribute("data-state", "hidden");
+    await expect(headingVisibility).toBeVisible();
+    await expect(first.getByText("当前页面中已隐藏")).toBeVisible();
     await expect(secondHeading).toContainText("第二实例保持原值");
     await expect(secondHeading).toHaveAttribute("style", /translate\(8%, -4%\)/);
     await expect(undo).toBeDisabled();
-    await expect(restoreTemplateValue).toHaveAttribute("data-workspace-field-shared", "true");
-    await expect(restoreTemplateValue).toHaveAttribute("data-workspace-field-control", "restore-default");
 
-    await restoreTemplateValue.click();
-    const cancelled = page.getByRole("dialog", { name: "恢复模板样式？" });
-    await expect(cancelled).toContainText("继续读取锁定版本 tpl_page_upgrade v1");
-    await expect(cancelled).toContainText("文字、图片、商品、链接和显隐会完整保留");
-    await cancelled.getByRole("button", { name: /取\s*消/ }).click();
-    await expect(restoreTemplateValue).toBeEnabled();
-    await expect(inspector.getByRole("textbox", { name: "标题" })).toHaveValue(headingContent);
-    await expect(visibility).not.toBeChecked();
-    await expect(headingVisibility).not.toBeChecked();
-    await expect(undo).toBeDisabled();
-    expect(pageWrites).toEqual([]);
-    expect(templateWrites).toEqual([]);
-
-    await restoreTemplateValue.click();
-    const confirm = page.getByRole("dialog", { name: "恢复模板样式？" });
-    await confirm.getByRole("button", { name: "恢复模板样式" }).click();
-    await expect(inspector).toContainText("固定版本 tpl_page_upgrade v1");
-    await expect(inspector.getByRole("textbox", { name: "标题" })).toHaveValue(headingContent);
-    await expect(visibility).not.toBeChecked();
-    await expect(headingVisibility).not.toBeChecked();
-    await expect(canvas.getByText("当前页面中已隐藏")).toBeVisible();
-    await expect(firstHeading).toHaveCount(0);
-    await expect(secondHeading).toContainText("第二实例保持原值");
-    await expect(secondHeading).toHaveAttribute("style", /translate\(8%, -4%\)/);
-    await expect(restoreTemplateValue).toBeDisabled();
+    const changedTitle = "仅编辑已隐藏实例的文字";
+    await title.fill(changedTitle);
     await expect(undo).toBeEnabled();
-
     await undo.click();
-    await expect(inspector.getByRole("textbox", { name: "标题" })).toHaveValue(headingContent);
-    await expect(visibility).not.toBeChecked();
-    await expect(headingVisibility).not.toBeChecked();
-    await expect(restoreTemplateValue).toBeEnabled();
+    await firstLayer.click({ position: { x: 12, y: 18 } });
+    await expect(title).toHaveValue("页面原文：戒指 & 项链｜编号 A-01（逐字保留）");
     await expect(redo).toBeEnabled();
+    await redo.click();
+    await firstLayer.click({ position: { x: 12, y: 18 } });
+    await expect(title).toHaveValue(changedTitle);
+    await expect(visibility).toHaveAttribute("data-state", "hidden");
+    await expect(headingVisibility).toBeVisible();
     await expect(secondHeading).toContainText("第二实例保持原值");
     await expect(secondHeading).toHaveAttribute("style", /translate\(8%, -4%\)/);
+    expect(pageWrites).toEqual([]);
 
-    await redo.click();
-    await expect(inspector.getByRole("textbox", { name: "标题" })).toHaveValue(headingContent);
-    await expect(visibility).not.toBeChecked();
-    await expect(headingVisibility).not.toBeChecked();
-    await expect(restoreTemplateValue).toBeDisabled();
-    await expect(redo).toBeDisabled();
     await page.getByRole("button", { name: "保存当前装修草稿" }).click();
-    await expect.poll(() => savedPayload()).not.toBeNull();
-    const payload = savedPayload() as { puckData: { content: Array<{ props: Record<string, any> }> } };
+    await expect.poll(savedPayload).not.toBeNull();
+    const payload = savedPayload() as { puckData: { content: Array<{ props: Record<string, unknown> }> } };
     expect(payload.puckData.content[0].props).toMatchObject({
-      templateId: "tpl_page_upgrade",
-      templateVersion: 1,
-      contentBySlotId: { slot_heading: headingContent },
-      layoutOverridesByNodeId: {},
+      templateId: original.props.templateId,
+      templateVersion: original.props.templateVersion,
+      contentBySlotId: { slot_heading: changedTitle },
+      layoutOverridesByNodeId: original.props.layoutOverridesByNodeId,
       hiddenSlotIds: ["slot_heading"],
       isVisible: false,
     });
-    expect(payload.puckData.content[1].props).toMatchObject({
-      instanceId: "dynamic-upgrade-instance-2",
-      templateId: "tpl_page_upgrade",
-      templateVersion: 1,
-      contentBySlotId: { slot_heading: "第二实例保持原值" },
-      layoutOverridesByNodeId: {
-        node_heading: {
-          desktop: {
-            offsetXPercent: 8,
-            offsetYPercent: -4,
-            widthPercent: 115,
-            zIndex: 3,
-            fontSizePx: 40,
-            textAlign: "center",
-            marginTopPx: 12,
-            marginBottomPx: 18,
-          },
-        },
-      },
-      hiddenSlotIds: [],
-      isVisible: true,
-    });
+    expect(payload.puckData.content[1].props).toEqual(otherInstance.props);
     expect(pageWrites.map(({ method }) => method)).toEqual(["PUT"]);
     expect(templateWrites).toEqual([]);
+
+    await expect(inspector.getByRole("button", { name: "恢复显示标题" })).toHaveCount(0);
+    await (await openBlockActions(page, inspector)).getByRole("button", { name: "恢复显示标题" }).click();
+    await expect(headingVisibility).toHaveCount(0);
+    await expect(title).toHaveValue(changedTitle);
   });
 
   test("同模板多实例编辑保持隔离，并在预览、保存与刷新后重放同一结果", async ({ page }) => {
@@ -4076,21 +4593,10 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect.poll(catalogReadCount).toBe(initialCatalogReadCount);
     await layerButtons.nth(0).click({ position: { x: 12, y: 18 } });
 
-    await inspector.getByRole("group", { name: "页面实例属性范围" })
-      .getByRole("button", { name: "标题", exact: true }).click();
-    const firstInstanceOffset = inspector.getByRole("spinbutton", { name: "水平偏移" });
-    await firstInstanceOffset.fill("6");
-    await firstInstanceOffset.press("Enter");
-    await expect(headings.nth(0)).toHaveAttribute("style", /translate\(6%, 0%\)/);
-    await firstInstanceOffset.fill("0");
-    await firstInstanceOffset.press("Enter");
-    await expect(headings.nth(0)).not.toHaveAttribute("style", /translate/);
-    await firstInstanceOffset.fill("6");
-    await firstInstanceOffset.press("Enter");
     await inspector.getByRole("textbox", { name: "标题" }).fill("只修改第一个页面实例");
     await expect(headings.nth(0)).toContainText("只修改第一个页面实例");
     await expect(headings.nth(1)).toContainText("第二实例保持原值");
-    await expect(headings.nth(0)).toHaveAttribute("style", /translate\(6%, 0%\)/);
+    await expect(headings.nth(0)).not.toHaveAttribute("style", /translate/);
     await expect(headings.nth(1)).not.toHaveAttribute("style", /translate/);
 
     await page.getByRole("button", { name: "预览当前画布" }).click();
@@ -4104,9 +4610,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     const payload = savedPayload() as { puckData: { content: Array<{ props: Record<string, any> }> } };
     expect(payload.puckData.content[0].props.contentBySlotId).toEqual({ slot_heading: "只修改第一个页面实例" });
     expect(payload.puckData.content[1].props.contentBySlotId).toEqual({ slot_heading: "第二实例保持原值" });
-    expect(payload.puckData.content[0].props.layoutOverridesByNodeId).toEqual({
-      node_heading: { desktop: { offsetXPercent: 6 } },
-    });
+    expect(payload.puckData.content[0].props.layoutOverridesByNodeId).toEqual({});
     expect(payload.puckData.content[1].props.layoutOverridesByNodeId).toEqual({});
     expect(payload.puckData.content[0].props.instanceId).not.toBe(payload.puckData.content[1].props.instanceId);
     expect(templateWrites).toEqual([]);
@@ -4118,7 +4622,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect(refreshedCanvas.getByText("第二实例保持原值", { exact: true })).toHaveCount(1);
   });
 
-  test("发布问题按节点、设备和属性精确定位动态实例，并保留内容槽位映射", async ({ page }) => {
+  test("发布问题按节点和设备定位内容，已退役的精确控件回落到对应字段", async ({ page }) => {
     const { inspector } = await prepareEditor(page, {
       duplicate: true,
       publishIssues: [
@@ -4150,13 +4654,13 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     });
     const layerButtons = page.locator(".homepage-editor__layer-item .homepage-editor__layer-select");
     await expect(inspector.getByRole("status", { name: "前台展示状态" }))
-      .toContainText("当前实例有 3 项发布阻断");
+      .toContainText("本节有 3 项发布阻断");
     await layerButtons.nth(1).click({ position: { x: 12, y: 18 } });
-    await expect(inspector.getByRole("status", { name: "前台展示状态" }))
-      .toContainText("页面有 3 项发布阻断");
+    await expect(inspector.getByRole("status", { name: "前台展示状态" })).toHaveCount(0);
     await expect(inspector.getByRole("textbox", { name: "标题" })).toHaveValue("第二实例保持原值");
 
-    await page.locator(".homepage-editor__toolbar-publish").click();
+    await page.getByRole("button", { name: "更多编辑操作" }).click();
+    await page.getByRole("menuitem", { name: "发布检查（3 项）" }).click();
     const review = page.getByRole("region", { name: "本次发布检查" });
     await expect(review).toBeVisible();
     const desktopLayoutIssue = review.locator('[data-page-publish-field="widthPercent"]');
@@ -4169,23 +4673,16 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect(mobileLayoutIssue).toHaveAttribute("data-page-publish-device", "mobile");
     await expect(contentIssue).toContainText("页面内容 / 标题");
 
+    const title = inspector.getByRole("textbox", { name: "标题", exact: true });
     await desktopLayoutIssue.getByRole("button", { name: "定位" }).click();
-    const desktopWidth = inspector.locator(
-      '[data-inspector-field="widthPercent"][data-inspector-device="desktop"][data-page-publish-located="true"]',
-    );
-    await expect(desktopWidth).toBeVisible();
-    await expect(desktopWidth.getByRole("spinbutton", { name: "区域宽度" })).toBeFocused();
-    await expect(inspector.getByRole("textbox", { name: "标题" })).toHaveValue("页面实例填写内容");
+    await expect(title).toHaveValue("页面实例填写内容");
+    await expect(title).toBeFocused();
     await expect(layerButtons.nth(0)).toHaveAttribute("aria-current", "location");
     await expect(layerButtons.nth(1)).not.toHaveAttribute("aria-current", "location");
 
     await mobileLayoutIssue.getByRole("button", { name: "定位" }).click();
     await expect(page.getByRole("button", { name: /移动端布局/ })).toHaveAttribute("aria-pressed", "true");
-    const mobileFontSize = inspector.locator(
-      '[data-inspector-field="fontSizePx"][data-inspector-device="mobile"][data-page-publish-located="true"]',
-    );
-    await expect(mobileFontSize).toBeVisible();
-    await expect(mobileFontSize.getByRole("spinbutton", { name: "标题字号" })).toBeFocused();
+    await expect(title).toBeFocused();
 
     await contentIssue.getByRole("button", { name: "定位" }).click();
     const titleContent = inspector.locator(
@@ -4246,6 +4743,143 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     });
   }
 
+  test("跳转在弹窗中搜索选择，取消保留原目标，确认只保存稳定引用", async ({ page }) => {
+    const desktopViewport = { width: 1920, height: 948 };
+    await page.setViewportSize(desktopViewport);
+    const { inspector, savedPayload, pageWrites } = await prepareEditor(page, { directBusiness: true, noNewVersion: true });
+    const categories = [
+      { id: 1, slug: "rings", name: "戒指", isActive: true, hasPublicProduct: true, coverImage: "/svg/product.svg" },
+      { id: 2, slug: "necklaces", name: "项链", isActive: true, hasPublicProduct: true, coverImage: "/svg/product.svg" },
+    ];
+    let categoryReads = 0;
+    await page.route("**/api/categories/admin/tree", (route) => {
+      categoryReads += 1;
+      return categoryReads === 1 ? route.fulfill(json({}, 503)) : route.fulfill(json(categories));
+    });
+    await page.route("**/api/products?*", (route) => {
+      const categoryId = new URL(route.request().url()).searchParams.get("categoryId");
+      const list = categories.map((category, index) => ({
+        id: 500 + index * 100,
+        code: `P-${500 + index * 100}`,
+        name: `业务商品 P-${500 + index * 100}`,
+        category,
+        status: "PUBLISHED",
+        visibility: "PUBLIC",
+        images: [{ url: "/images/audit/template-v1-jewelry-banner.png", type: "FRONT" }],
+      })).filter((item) => !categoryId || String(item.category.id) === categoryId);
+      return route.fulfill(json({ list, total: list.length, page: 1, pageSize: 12 }));
+    });
+    await page.route("**/api/categories/admin/resolve-references", (route) => {
+      const { slugs } = route.request().postDataJSON() as { slugs: string[] };
+      return route.fulfill(json(categories.filter((category) => slugs.includes(category.slug))
+        .map((category) => ({
+          ...category,
+          eligible: category.slug !== "necklaces",
+          reason: category.slug === "necklaces" ? "MISSING_COVER" : "AVAILABLE",
+        }))));
+    });
+    const actionField = inspector.locator('[data-slot-id="slot_action"]');
+    const product = actionField.getByRole("button", { name: "商品", exact: true });
+    const category = actionField.getByRole("button", { name: "分类", exact: true });
+    await product.click();
+    const productPicker = page.getByRole("dialog", { name: "选择商品" });
+    const pickerContent = (dialog: typeof productPicker) => dialog.locator(".ant-modal-content");
+    await expect(pickerContent(productPicker)).toHaveCSS("width", "1120px");
+    await expect(pickerContent(productPicker)).toHaveCSS("height", "740px");
+    await expect(actionField.getByRole("button", { name: "不跳转" })).toHaveAttribute("aria-pressed", "true");
+    await expect(productPicker.getByText("分类加载失败，仍可按名称或款号搜索商品。")).toBeVisible();
+    await expect(productPicker.getByRole("button", { name: /业务商品 P-600/ })).toBeVisible();
+    await productPicker.getByRole("button", { name: "重新加载分类" }).click();
+    const productCategory = productPicker.getByRole("combobox", { name: "商品分类" });
+    await productCategory.selectOption({ label: "戒指" });
+    await productPicker.getByRole("button", { name: /业务商品 P-500/ }).click();
+    await expect(productPicker.getByRole("button", { name: /业务商品 P-600/ })).toHaveCount(0);
+    await productPicker.getByRole("button", { name: "确认选择", exact: true }).click();
+    await expect(productPicker).toBeHidden();
+    await expect(product).toHaveAttribute("aria-pressed", "true");
+    const linkedProduct = actionField.getByRole("button", { name: "更换商品：业务商品 P-500" });
+    const thumbnail = actionField.locator(".homepage-editor__linked-product-image");
+    await expect(linkedProduct).toBeVisible();
+    await expect(linkedProduct.locator("small")).toHaveText("P-500");
+    await expect(thumbnail).toHaveAttribute("src", "/images/audit/template-v1-jewelry-banner.png");
+    await expect.poll(() => thumbnail.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+    const detailLink = actionField.getByRole("link", { name: "查看商品详情（新标签页）" });
+    await expect(detailLink).toHaveAttribute("href", "/products/P-500");
+    await expect(detailLink).toHaveAttribute("target", "_blank");
+    await expect(actionField.getByText(/此商品去向仅在装修预览中生效/)).toBeVisible();
+    const missingCopy = actionField.getByText("填写文字后，按钮才会显示在页面上。");
+    await expect(missingCopy).toBeVisible();
+    await actionField.getByRole("textbox", { name: "主行动文案" }).fill("查看作品");
+    await expect(missingCopy).toHaveCount(0);
+    await linkedProduct.press("Enter");
+    await expect(productCategory).toHaveValue("");
+    await productPicker.getByRole("button", { name: /业务商品 P-600/ }).click();
+    await productPicker.getByRole("button", { name: /^取\s*消$/ }).click();
+    await expect(linkedProduct).toBeFocused();
+    await expect(linkedProduct).toBeVisible();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", { name: "展开属性面板" }).click();
+    await expect(linkedProduct).toBeVisible();
+    await expect.poll(() => linkedProduct.evaluate((button) => button.scrollWidth - button.clientWidth))
+      .toBeLessThanOrEqual(1);
+    await page.setViewportSize(desktopViewport);
+
+    await category.click();
+    const categoryPicker = page.getByRole("dialog", { name: "选择分类" });
+    await expect(pickerContent(categoryPicker)).toHaveCSS("width", "1120px");
+    await expect(pickerContent(categoryPicker)).toHaveCSS("height", "740px");
+    await categoryPicker.getByRole("textbox", { name: "搜索分类" }).fill("项链");
+    await expect(categoryPicker.getByRole("button", { name: "选择分类 戒指" })).toHaveCount(0);
+    await categoryPicker.getByRole("button", { name: "选择分类 项链" }).click();
+    await categoryPicker.getByRole("button", { name: /^取\s*消$/ }).click();
+    await expect(categoryPicker).toBeHidden();
+    await expect(product).toHaveAttribute("aria-pressed", "true");
+    await expect(actionField).toContainText("业务商品 P-500");
+
+    await category.click();
+    await categoryPicker.getByRole("button", { name: "选择分类 项链" }).click();
+    await categoryPicker.getByRole("button", { name: "确认选择", exact: true }).click();
+    await expect(actionField).toContainText("缺少封面");
+    await expect(actionField.getByRole("link", { name: "预览分类结果（新标签页）" })).toHaveCount(0);
+
+    await category.click();
+    await categoryPicker.getByRole("button", { name: "选择分类 戒指" }).click();
+    await categoryPicker.getByRole("button", { name: "确认选择", exact: true }).click();
+    await expect(categoryPicker).toBeHidden();
+    await expect(category).toHaveAttribute("aria-pressed", "true");
+    await expect(actionField).toContainText("戒指");
+    const categoryTarget = actionField.getByRole("link", { name: "预览分类结果（新标签页）" });
+    await expect(categoryTarget).toHaveAttribute("href", "/catalog?category=rings");
+    await expect(categoryTarget).toHaveAttribute("target", "_blank");
+    await expect(inspector.getByRole("textbox", { name: "搜索分类" })).toHaveCount(0);
+    await actionField.getByRole("button", { name: "页面", exact: true }).click();
+    const pagePicker = page.getByRole("dialog", { name: "选择页面", exact: true });
+    await expect(pickerContent(pagePicker)).toHaveCSS("width", "1120px");
+    await expect(pickerContent(pagePicker)).toHaveCSS("height", "740px");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(pickerContent(pagePicker)).toHaveCSS("width", "390px");
+    await expect(pickerContent(pagePicker)).toHaveCSS("height", "844px");
+    await expect(pagePicker.getByRole("button", { name: "确认选择", exact: true })).toBeInViewport();
+    await page.setViewportSize(desktopViewport);
+    await pagePicker.getByRole("radio", { name: "关于海川", exact: true }).check();
+    await pagePicker.getByRole("button", { name: /^取\s*消$/ }).click();
+    await expect(pagePicker).toBeHidden();
+    await expect(category).toHaveAttribute("aria-pressed", "true");
+    expect(pageWrites).toEqual([]);
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+    await expect.poll(() => (savedPayload() as {
+      puckData: { content: Array<{ props: { contentBySlotId: Record<string, unknown> } }> };
+    } | null)?.puckData.content[0].props.contentBySlotId.slot_action).toEqual({
+      label: "查看作品",
+      targetType: "category",
+      categorySlug: "rings",
+    });
+    await page.reload();
+    await page.locator('.homepage-editor__layer-item[data-layer-id="dynamic-upgrade-block"] .homepage-editor__layer-select').click();
+    await expect(category).toHaveAttribute("aria-pressed", "true");
+    await expect(actionField).toContainText("戒指");
+  });
+
   test("直接商品、集合和行动槽位复用运营选择器并只保存稳定引用", async ({ page }) => {
     const { inspector, savedPayload, templateWrites } = await prepareEditor(page, { directBusiness: true });
     await expect(inspector.locator("fieldset:visible").first()).toHaveAttribute("data-slot-id", "slot_heading");
@@ -4274,8 +4908,12 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
 
     const actionField = inspector.locator("fieldset").filter({ hasText: "主行动" });
     await actionField.getByRole("textbox", { name: "主行动文案" }).fill("查看品牌故事");
-    await actionField.getByRole("button", { name: "页面", exact: true }).click();
-    await actionField.getByLabel("站内页面").fill("/about");
+    await selectInternalPage(page, actionField, "关于海川");
+    await expect(actionField).toContainText("跳转至「关于海川」");
+    await actionField.getByRole("button", { name: "外链", exact: true }).click();
+    await expect(actionField.getByLabel(/HTTPS 外部链接/)).toHaveValue("");
+    await selectInternalPage(page, actionField, "关于海川");
+    await expect(actionField.getByLabel(/HTTPS 外部链接/)).toHaveCount(0);
 
     await page.getByRole("button", { name: "保存当前装修草稿" }).click();
     await expect.poll(() => savedPayload()).not.toBeNull();

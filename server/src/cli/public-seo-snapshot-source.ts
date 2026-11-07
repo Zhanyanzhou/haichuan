@@ -714,6 +714,7 @@ const PRODUCT_SELECT = {
   gemInfo: true,
   craftTechnique: true,
   salesMode: true,
+  priceMin: true,
   inventoryPolicy: true,
   fulfillmentType: true,
   dispatchTime: true,
@@ -781,8 +782,10 @@ const PRODUCT_SELECT = {
     select: {
       id: true,
       isActive: true,
+      imageId: true,
       material: true,
       size: true,
+      color: true,
       price: true,
       goldWeight: true,
       inventories: { select: { quantity: true } },

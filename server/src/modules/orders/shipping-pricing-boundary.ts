@@ -24,6 +24,18 @@ function nonZeroOrInvalidMoney(value: unknown): boolean {
   return !Number.isFinite(amount) || amount !== 0;
 }
 
+/** 与在线结算同一口径：只有启用中的纯包邮模板可以冻结为 0 元运费。 */
+export function isZeroShippingCheckoutTemplate(
+  template: CheckoutShippingTemplate | null | undefined,
+): boolean {
+  return template?.isActive === true
+    && template.feeMode === "FREE"
+    && !nonZeroOrInvalidMoney(template.baseFee)
+    && !nonZeroOrInvalidMoney(template.remoteSurcharge)
+    && template.freeShippingThreshold == null
+    && !hasRegionRestrictions(template.excludedRegions);
+}
+
 /**
  * 在线结算目前只能权威冻结 0 元运费。收费、满额、偏远附加和排除区域
  * 尚未形成可执行政策时必须失败关闭，不能把已有模板静默写成 0 元运费。
@@ -46,13 +58,7 @@ export function assertZeroShippingCheckoutReady(
   }
 
   for (const template of templates.values()) {
-    const safeFreeTemplate = template.isActive === true
-      && template.feeMode === "FREE"
-      && !nonZeroOrInvalidMoney(template.baseFee)
-      && !nonZeroOrInvalidMoney(template.remoteSurcharge)
-      && template.freeShippingThreshold == null
-      && !hasRegionRestrictions(template.excludedRegions);
-    if (!safeFreeTemplate) {
+    if (!isZeroShippingCheckoutTemplate(template)) {
       throw new ConflictException(
         "当前订单的运费或配送区域尚未完成结算核算，请联系客服处理",
       );

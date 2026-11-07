@@ -126,6 +126,8 @@ const testBoundaryFiles = {
     "product-editor-contract.spec.ts",
     "product-editor-regression.spec.ts",
     "product-manage-query.spec.ts",
+    "product-trash.admin.spec.ts",
+    "product-custom-pricing.spec.ts",
     "product-media-pointer.spec.ts",
     "product-metadata-clients.spec.ts",
     "product-references-field.spec.ts",

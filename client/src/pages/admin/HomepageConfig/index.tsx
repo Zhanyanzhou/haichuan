@@ -16,6 +16,7 @@ import {
   type DragEvent,
   type ReactNode,
 } from "react";
+import { useOutletContext } from "react-router-dom";
 import { App as AntdApp, Button } from "antd";
 import {
   AppstoreOutlined,
@@ -43,6 +44,7 @@ import {
 } from "@/page-builder/config/blockContracts";
 import StorefrontNavigation from "@/components/layout/StorefrontNavigation";
 import StorefrontFooter from "@/components/layout/StorefrontFooter";
+import type { AdminLayoutOutletContext } from "@/components/layout/AdminLayout";
 import {
   PublicSiteSettingsProvider,
   usePublicSiteSettings,
@@ -59,6 +61,8 @@ import type {
 } from "@/page-builder/inspector/publishValidation";
 import {
   getPagePublishIssueKey,
+  isImageDescriptionIssue,
+  isPagePublishReviewIssue,
   resolvePagePublishIssueTarget,
 } from "@/page-builder/inspector/publishValidation";
 import { getInspectorSchema } from "@/page-builder/inspector/schema/registry";
@@ -85,6 +89,8 @@ import {
   CANVAS_VISUAL_EDIT_MESSAGE,
   type CanvasDynamicLayoutEditMessage,
   type CanvasVisualEditMessage,
+  type VisualNodeKind,
+  type VisualNodeSelection,
   useVisualEditorSession,
 } from "@/page-builder/visual-editor/visualEditorSession";
 import { UnifiedTemplateLibrary } from "@/page-builder/template-editor/TemplateEditorLibrary";
@@ -93,8 +99,10 @@ import { resolvePublishedTemplateInsertionIndex } from "@/page-builder/template-
 import {
   applyEditorCanvasMetrics,
   clearPageCanvasTemplatePreview,
+  commitPageCanvasTemplatePreview,
   PageCanvasTemplatePreview,
   setPageCanvasTemplatePreviewAddHandler,
+  setPageCanvasTemplatePreviewFocused,
   showPageCanvasTemplatePreview,
   usePageCanvasTemplatePreview,
 } from "./pageCanvasTemplatePreview";
@@ -122,6 +130,7 @@ import {
   stripNonEditableSlotContentFromPageDocument,
 } from "@/page-builder/dynamic-template-instance";
 import DynamicTemplateInstanceInspector from "@/page-builder/dynamic-template-instance/DynamicTemplateInstanceInspector";
+import { getResolvedDynamicTemplateDefinitions } from "@/page-builder/dynamic-template-instance/registry";
 import { isDynamicTemplateInstancePubliclyVisible, planHasVisibleSlot } from "@/page-builder/dynamic-template-instance/publicVisibility";
 import { isVisiblePrimaryStageBlock } from "@/page-builder/utils/primaryStagePolicy";
 import { compileDynamicTemplateRenderPlan } from "@/page-builder/template-definition/renderPlan";
@@ -129,7 +138,6 @@ import { resolveTemplateDesignFrame } from "@/page-builder/template-definition/t
 import { catalogCardName } from "@/page-builder/template-editor/catalogCardName";
 import { usePublishedTemplateSectionRoles } from "@/page-builder/template-editor/publishedTemplateSectionRoles";
 import { getModuleDisplayName, resolveTemplateSectionRole } from "./editor-utils";
-import type { PromoteDynamicTemplateInstanceRequest } from "@/page-builder/dynamic-template-instance/promoteToTemplate";
 import type { PublishedDynamicTemplateResource } from "@/services/clients/dynamicTemplateClient";
 import type { EditorWorkspaceMode } from "@/page-builder/template-editor/types";
 import WorkspacePanelHeader from "@/page-builder/workspace/WorkspacePanelHeader";
@@ -137,8 +145,8 @@ import WorkspacePanelCollapseButton from "@/page-builder/workspace/WorkspacePane
 import { copyEditorLocalConflictSnapshot } from "@/page-builder/workspace/editorLifecycleErrors";
 import { bindWheelToScroller } from "@/page-builder/workspace/iframeWheelBridge";
 import {
-  PAGE_EDITOR_STRUCTURE_DOCK_QUERY,
-  pageEditorPanelWouldFit,
+  PAGE_EDITOR_DESKTOP_LAYOUT_WIDTH,
+  readPageEditorWorkspaceScale,
 } from "@/page-builder/workspace/pageEditorWorkspaceTiers";
 import useCompactWorkspaceOverlay, {
   DOCKED_WORKSPACE_QUERY,
@@ -219,6 +227,7 @@ type CanvasComponentConfig = {
 };
 
 const CanvasPrimaryStageContext = createContext<string | undefined>(undefined);
+const CanvasOpenInspectorContext = createContext<(() => void) | undefined>(undefined);
 
 function CanvasDynamicTemplateInstance({
   props,
@@ -403,6 +412,7 @@ function EditorCanvasShell({
       definition, contentBySlotId: props.contentBySlotId, hiddenSlotIds: props.hiddenSlotIds, breakpoint: device, pageKey,
     });
   });
+  const openCanvasInspector = useContext(CanvasOpenInspectorContext);
   const businessRegionIndex = canvasData.content.findIndex(
     (block: { type?: string }) => block?.type === "业务功能区",
   );
@@ -486,10 +496,10 @@ function EditorCanvasShell({
       <BusinessRegionCanvasProvider
         hasLeadingDecoration={hasLeadingDecoration}
       >
-        {canvasData.content.length === 0 ? <PageCanvasTemplatePreview /> : null}
         <CanvasPrimaryStageContext.Provider value={primaryStage?.props.id}>
           {children}
         </CanvasPrimaryStageContext.Provider>
+        {editable ? <PageCanvasTemplatePreview onSelect={openCanvasInspector} /> : null}
       </BusinessRegionCanvasProvider>
       <EditorCanvasFooter />
     </div>
@@ -526,13 +536,16 @@ function CanvasMediaGuard({
 function CanvasBlockAnchor({
   blockId,
   blockType,
+  canLocateFields = false,
   children,
 }: {
   blockId?: string;
   blockType: string;
+  canLocateFields?: boolean;
   children: ReactNode;
 }) {
   const anchorRef = useRef<HTMLDivElement>(null);
+  const openCanvasInspector = useContext(CanvasOpenInspectorContext);
   const clearFocusTimer = useRef<number | null>(null);
   const [isFocused, setIsFocused] = useState(false);
   const currentViewport = useHomepagePuck(
@@ -634,15 +647,36 @@ function CanvasBlockAnchor({
     };
   }, []);
 
-  const requestCanvasSelection = () => {
+  const requestCanvasSelection = (target?: Element) => {
     const anchor = anchorRef.current;
     const frameWindow = anchor?.ownerDocument.defaultView;
     const puckBlock = anchor?.closest<HTMLElement>("[data-puck-component]");
-    if (!blockId || !frameWindow || !puckBlock) return;
+    if (!blockId || !anchor || !frameWindow || !puckBlock) return;
+    setPageCanvasTemplatePreviewFocused(false);
+    if (canLocateFields) openCanvasInspector?.();
 
-    // 页面装修画布只建立模块上下文；任何旧的图片、文字或业务对象选择
-    // 都必须在显示该模板完整属性面板前清除。
-    useVisualEditorSession.getState().clearNode();
+    const hit = canLocateFields ? target?.closest<HTMLElement>("[data-template-node-id][data-template-slot-id]") : undefined;
+    const nodeId = hit && anchor.contains(hit) ? hit.dataset.templateNodeId : undefined;
+    const instance = nodeId
+      ? canvasContent?.find((item) => item.props?.id === blockId)?.props as DynamicTemplateInstanceProps | undefined
+      : undefined;
+    const definition = instance ? getResolvedDynamicTemplateDefinitions()[
+      dynamicTemplateVersionKey(instance.templateId, instance.templateVersion)
+    ]?.definition : undefined;
+    const slotId = nodeId ? definition?.nodes[nodeId]?.slotId : undefined;
+    const slot = slotId ? definition?.slots[slotId] : undefined;
+    const visual = useVisualEditorSession.getState();
+    if (nodeId && slot?.editable) {
+      const kind: VisualNodeKind = slot.type === "image" ? "media"
+        : slot.type === "button" || slot.type === "link" ? "action"
+          : slot.type === "product" || slot.type === "collection" ? "product" : "text";
+      const field = { blockId, moduleType: blockType, nodeId, kind };
+      visual.setPanelMode("content");
+      visual.selectNode(field);
+      visual.requestContentAction(field);
+    } else {
+      visual.clearNode();
+    }
 
     setIsFocused(true);
     if (clearFocusTimer.current)
@@ -660,9 +694,9 @@ function CanvasBlockAnchor({
       ),
     ).indexOf(puckBlock);
     // 模块选择等当前 pointerdown 收尾后落位，避免 Puck 在缩放 iframe 中
-    // 按未缩放坐标重复滚动；内部对象上下文已在上方清除。
+    // 按未缩放坐标重复滚动。
     window.setTimeout(() => {
-      if (blockIndex < 0) return;
+      if (blockIndex < 0 || !anchor.isConnected) return;
       dispatch({
         type: "setUi",
         ui: { itemSelector: { index: blockIndex, zone: ROOT_ZONE } },
@@ -670,27 +704,19 @@ function CanvasBlockAnchor({
     }, 60);
   };
 
-  const blockIndex = blockId
-    ? (canvasContent ?? []).findIndex((block) => block.props?.id === blockId)
-    : -1;
-  const previewPlacement = canvasPreview && blockIndex === 0 ? "before" : null;
-
   return (
-    <>
-      {previewPlacement === "before" ? <PageCanvasTemplatePreview /> : null}
-      <CanvasBlockInteractionBoundary
-        ref={anchorRef}
-        blockId={blockId}
-        blockType={blockType}
-        blockLabel={BLOCK_META[blockType]?.name ?? blockType}
-        focused={isFocused}
-        selected={selectedBlockId === blockId}
-        scrollMarginTop={CANVAS_SCROLL_SPY_TOP_OFFSET * 2 + 32}
-        onSelect={requestCanvasSelection}
-      >
-        {children}
-      </CanvasBlockInteractionBoundary>
-    </>
+    <CanvasBlockInteractionBoundary
+      ref={anchorRef}
+      blockId={blockId}
+      blockType={blockType}
+      blockLabel={BLOCK_META[blockType]?.name ?? blockType}
+      focused={isFocused}
+      selected={selectedBlockId === blockId && !canvasPreview?.focused}
+      scrollMarginTop={CANVAS_SCROLL_SPY_TOP_OFFSET * 2 + 32}
+      onSelect={requestCanvasSelection}
+    >
+      {children}
+    </CanvasBlockInteractionBoundary>
   );
 }
 
@@ -828,7 +854,7 @@ function publishedTemplateDisplayName(template: PublishedDynamicTemplateResource
 function PageTemplateLibraryAdapter({
   pageKey,
   active,
-  obscuredByInspector,
+  obscuredByPanel,
   onRequestCompactOpen,
   onPageActionComplete,
   onRetainLibraryAfterSelection,
@@ -837,7 +863,7 @@ function PageTemplateLibraryAdapter({
 }: {
   pageKey: EditorPageKey;
   active: boolean;
-  obscuredByInspector: boolean;
+  obscuredByPanel: boolean;
   onRequestCompactOpen: () => void;
   onPageActionComplete: () => void;
   onRetainLibraryAfterSelection: () => void;
@@ -955,7 +981,7 @@ function PageTemplateLibraryAdapter({
       pageKey={pageKey}
       active={active}
       device={previewViewport}
-      obscuredByInspector={obscuredByInspector}
+      obscuredByPanel={obscuredByPanel}
       onRequestCompactOpen={onRequestCompactOpen}
       isPublishedTemplateAllowed={isPageEditorLibraryTemplate}
       pageHasBlocks={pageHasBlocks}
@@ -997,8 +1023,6 @@ function InspectorPanel({
   onRetryValidation,
   onOpenPublishReview,
   onOpenPageSettings,
-  canPromoteToTemplate,
-  onPromoteToTemplate,
   pageKey,
 }: {
   hasUnsavedChanges: boolean;
@@ -1010,16 +1034,30 @@ function InspectorPanel({
   onRetryValidation: () => void;
   onOpenPublishReview: () => void;
   onOpenPageSettings: (field?: string) => void;
-  canPromoteToTemplate: boolean;
-  onPromoteToTemplate: (request: PromoteDynamicTemplateInstanceRequest) => void | Promise<void>;
   pageKey?: EditorPageKey;
 }) {
+  const canvasPreview = usePageCanvasTemplatePreview();
   const selectedItem = useHomepagePuck((state) => state.selectedItem);
   const content = useHomepagePuck((state) => state.appState.data.content);
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const { modal } = AntdApp.useApp();
   const publishErrorCount = publishIssues.filter((issue) => issue.severity === "error").length;
   const publishWarningCount = publishIssues.filter((issue) => issue.severity === "warning").length;
+  if (canvasPreview?.focused) {
+    return (
+      <section className="homepage-editor__properties" aria-label="模板预览属性">
+        <div className="homepage-editor__properties-scroll">
+          <div className="homepage-editor__properties-empty-state">
+            <EyeOutlined />
+            <strong>{canvasPreview.name} · v{canvasPreview.template.version}</strong>
+            <span>{canvasPreview.hidden ? "预览已隐藏" : "正在预览"} · 尚未加入页面</span>
+            <span>添加后可在这里编辑本页内容。</span>
+            <Button type="primary" onClick={commitPageCanvasTemplatePreview}>添加并编辑</Button>
+          </div>
+        </div>
+      </section>
+    );
+  }
   if (!selectedItem) {
     return (
       <section
@@ -1082,17 +1120,9 @@ function InspectorPanel({
   if (selectedItem.type === DYNAMIC_TEMPLATE_BLOCK_TYPE) {
     return (
       <DynamicTemplateInstanceInspector
-        hasUnsavedChanges={hasUnsavedChanges}
-        hasPersistedDraft={hasPersistedDraft}
-        saving={saving}
         publishIssues={publishIssues}
-        validationStatus={validationStatus}
-        onRetryValidation={onRetryValidation}
         onOpenPublishReview={onOpenPublishReview}
-        onOpenPageSettings={onOpenPageSettings}
-        canPromoteToTemplate={canPromoteToTemplate}
         pageKey={pageKey}
-        onPromoteToTemplate={onPromoteToTemplate}
       />
     );
   }
@@ -1193,6 +1223,8 @@ function CanvasPreview({ frameRef }: { frameRef: RefObject<HTMLDivElement> }) {
 
 function EditorBody({
   workspaceActive,
+  workspaceActualSize,
+  onWorkspaceActualSizeChange,
   pageKey,
   contentReady,
   pageLabel,
@@ -1217,13 +1249,13 @@ function EditorBody({
   onSelectPublishReviewIssue,
   onExitPreview,
   onOpenPageSettings,
-  canPromoteToTemplate,
-  onPromoteToTemplate,
   canAuthorizePublicMedia,
   authorizingPublicMedia,
   onAuthorizePublicMedia,
 }: {
   workspaceActive: boolean;
+  workspaceActualSize: boolean;
+  onWorkspaceActualSizeChange: (actual: boolean) => void;
   pageKey: EditorPageKey;
   contentReady: boolean;
   pageLabel: string;
@@ -1248,11 +1280,6 @@ function EditorBody({
   onSelectPublishReviewIssue: (key: string | null) => void;
   onExitPreview: () => void;
   onOpenPageSettings: (field?: string) => void;
-  canPromoteToTemplate: boolean;
-  onPromoteToTemplate: (
-    request: PromoteDynamicTemplateInstanceRequest,
-    viewport: { width: number; height: number },
-  ) => void | Promise<void>;
   canAuthorizePublicMedia?: boolean;
   authorizingPublicMedia?: boolean;
   onAuthorizePublicMedia?: (assetIds: number[]) => void;
@@ -1279,6 +1306,7 @@ function EditorBody({
     insertAt: (insertionIndex: number) => void;
   } | null>(null);
   const [canvasZoom, setCanvasZoom] = useState(1);
+  const [workspaceScale, setWorkspaceScale] = useState(1);
   const [canvasHeight, setCanvasHeight] = useState(0);
   const [navigationPreviewOpen, setNavigationPreviewOpen] = useState(false);
   // 画布滚动时定位到的当前模块下标（scroll-spy），仅用于左侧图层栏跟随滚动，不改变选中态。
@@ -1307,7 +1335,8 @@ function EditorBody({
   }, []);
   const openInspector = useCallback(() => updateInspectorCollapsed(false), [updateInspectorCollapsed]);
   const closeInspector = useCallback(() => updateInspectorCollapsed(true), [updateInspectorCollapsed]);
-  const selectedItemLabel = selectedItem
+  const canvasTemplatePreview = usePageCanvasTemplatePreview();
+  const selectedItemLabel = canvasTemplatePreview?.focused ? canvasTemplatePreview.name : selectedItem
     ? getModuleDisplayName(
       selectedItem.type,
       selectedItem.props as Record<string, unknown>,
@@ -1328,6 +1357,12 @@ function EditorBody({
     suppressNextInspectorAutoOpenRef.current = true;
   }, []);
   const selectedItemId = selectedItem?.props?.id;
+  const canvasFieldRequest = useVisualEditorSession((state) => state.contentActionRequest);
+  useEffect(() => {
+    if (selectedItem?.type === DYNAMIC_TEMPLATE_BLOCK_TYPE && canvasFieldRequest?.blockId === selectedItemId) {
+      requestInspectorOpen();
+    }
+  }, [canvasFieldRequest, requestInspectorOpen, selectedItem?.type, selectedItemId]);
   const previousSelectedItemIdRef = useRef(selectedItemId);
   useEffect(() => {
     const previousSelectedItemId = previousSelectedItemIdRef.current;
@@ -1346,7 +1381,7 @@ function EditorBody({
   }, [requestInspectorOpen, selectedItemId]);
   const publishReviewRef = useRef<HTMLElement>(null);
   const publishReviewTargets = useMemo(() => publishReviewIssues
-    .filter((issue) => issue.severity === "error")
+    .filter(isPagePublishReviewIssue)
     .map((issue) => resolvePagePublishIssueTarget(
       issue,
       appData,
@@ -1451,26 +1486,34 @@ function EditorBody({
         : target.objectKind === "collection"
           ? "structured"
           : target.objectKind;
-      useVisualEditorSession.getState().selectNode({
+      const visual = useVisualEditorSession.getState();
+      const selectedObject: VisualNodeSelection = {
         blockId: target.blockId,
         moduleType: target.moduleType,
         nodeId: target.objectId,
         kind: visualKind,
-      });
-      useVisualEditorSession.getState().setPanelMode("content");
+      };
+      visual.selectNode(selectedObject);
+      visual.setPanelMode("content");
+      if (target.moduleType === DYNAMIC_TEMPLATE_BLOCK_TYPE && target.field === "alt" && target.access === "editable") {
+        visual.requestContentAction(selectedObject, "alt");
+      }
     }
     inspectorOverlay.requestOpen();
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
       const holder = publishReviewRef.current?.closest(".homepage-editor__inspector-holder");
+      const objectField = target.objectId
+        ? holder?.querySelector<HTMLElement>(`[data-inspector-object-id="${CSS.escape(target.objectId)}"]`)
+        : null;
       const candidates = target.field
-        ? Array.from(holder?.querySelectorAll<HTMLElement>(
+        ? Array.from((objectField ?? holder)?.querySelectorAll<HTMLElement>(
             `[data-inspector-field="${CSS.escape(target.field)}"]`,
           ) ?? [])
         : [];
       const field = candidates.find((candidate) => (
         target.device === "shared"
         || candidate.dataset.inspectorDevice === target.device
-      )) ?? candidates[0];
+      )) ?? candidates[0] ?? objectField;
       if (!field) {
         focusReviewPanel();
         return;
@@ -1515,76 +1558,49 @@ function EditorBody({
   }, [inspectorCollapsed]);
   const [structureCollapsed, setStructureCollapsed] = useState(() =>
     typeof window !== "undefined"
-      ? !window.matchMedia(PAGE_EDITOR_STRUCTURE_DOCK_QUERY).matches
+      ? !window.matchMedia(DOCKED_WORKSPACE_QUERY).matches
       : false,
   );
-  const [structureOverlay, setStructureOverlay] = useState(false);
-  const structureTierRef = useRef<string | null>(null);
   const structureManualRef = useRef<boolean | null>(null);
-  const structureCollapsedRef = useRef(structureCollapsed);
-  const structureOverlayRef = useRef(false);
-  structureCollapsedRef.current = structureCollapsed;
-  structureOverlayRef.current = structureOverlay;
-  const primaryNavigationOpenRef = useRef(false);
+  const desktopNavigationOpen = useOutletContext<AdminLayoutOutletContext | null>()?.desktopNavigationOpen;
   const applyStructureTier = useCallback(() => {
-    const tier = !window.matchMedia(DOCKED_WORKSPACE_QUERY).matches
-      ? "compact"
-      : window.matchMedia(PAGE_EDITOR_STRUCTURE_DOCK_QUERY).matches
-        ? "open"
-        : "rail";
-    if (structureTierRef.current !== tier) {
-      structureTierRef.current = tier;
-      structureManualRef.current = null;
-    }
-    const manual = structureManualRef.current;
-    let collapsedNext = structureCollapsedRef.current;
-    let overlayNext = false;
-    if (primaryNavigationOpenRef.current) {
-      collapsedNext = true;
-      overlayNext = false;
-    } else if (tier === "open") {
-      collapsedNext = manual === true;
-      overlayNext = false;
-    } else if (tier === "rail" || tier === "compact") {
-      if (manual === false && tier === "rail") {
-        collapsedNext = false;
-        overlayNext = !pageEditorPanelWouldFit("structure");
-      } else {
-        collapsedNext = manual !== false;
-        overlayNext = false;
-      }
-    }
-    if (collapsedNext !== structureCollapsedRef.current) setStructureCollapsed(collapsedNext);
-    if (overlayNext !== structureOverlayRef.current) setStructureOverlay(overlayNext);
+    const docked = window.matchMedia(DOCKED_WORKSPACE_QUERY).matches;
+    setStructureCollapsed(structureManualRef.current ?? !docked);
   }, []);
   const structureCloseRef = useRef<HTMLButtonElement>(null);
+  const structureOpenRef = useRef<HTMLButtonElement>(null);
   const openStructurePanel = useCallback(() => {
     structureManualRef.current = false;
-    const opensAsOverlay = window.matchMedia(DOCKED_WORKSPACE_QUERY).matches
-      && !pageEditorPanelWouldFit("structure");
+    const compact = !window.matchMedia(DOCKED_WORKSPACE_QUERY).matches;
+    if (compact) closeInspector();
     applyStructureTier();
-    if (opensAsOverlay) {
+    if (compact) {
       window.requestAnimationFrame(() => structureCloseRef.current?.focus());
     }
-  }, [applyStructureTier]);
+  }, [applyStructureTier, closeInspector]);
   const closeStructurePanel = useCallback(() => {
     structureManualRef.current = true;
-    setStructureOverlay(false);
     setStructureCollapsed(true);
   }, []);
+  const dismissStructurePanel = useCallback(() => {
+    closeStructurePanel();
+    window.requestAnimationFrame(() => structureOpenRef.current?.focus());
+  }, [closeStructurePanel]);
+  const clearCompactLibrarySpace = useCallback(() => {
+    closeInspector();
+    closeStructurePanel();
+  }, [closeInspector, closeStructurePanel]);
   useEffect(() => {
-    applyStructureTier();
-    const structureTier = window.matchMedia(PAGE_EDITOR_STRUCTURE_DOCK_QUERY);
+    if (inspectorOverlay.compact && !inspectorCollapsed) closeStructurePanel();
+  }, [closeStructurePanel, inspectorCollapsed, inspectorOverlay.compact]);
+  useEffect(() => {
     const docked = window.matchMedia(DOCKED_WORKSPACE_QUERY);
-    const sync = () => applyStructureTier();
-    structureTier.addEventListener("change", sync);
-    docked.addEventListener("change", sync);
-    window.addEventListener("resize", sync);
-    return () => {
-      structureTier.removeEventListener("change", sync);
-      docked.removeEventListener("change", sync);
-      window.removeEventListener("resize", sync);
+    const sync = () => {
+      structureManualRef.current = null;
+      applyStructureTier();
     };
+    docked.addEventListener("change", sync);
+    return () => docked.removeEventListener("change", sync);
   }, [applyStructureTier]);
   const autoSelectedPageRef = useRef<EditorPageKey | null>(null);
   useEffect(() => {
@@ -1603,30 +1619,10 @@ function EditorBody({
     });
   }, [appData.content.length, canvasActive, contentReady, dispatch, pageKey]);
   useEffect(() => {
-    const collapseLayersForPrimaryNavigation = (event: Event) => {
-      const detail = (event as CustomEvent<{ open?: boolean }>).detail;
-      const primaryNavigationOpen = detail?.open === true;
-      primaryNavigationOpenRef.current = primaryNavigationOpen;
-      applyStructureTier();
-    };
-
-    window.addEventListener(
-      "homepage-editor-primary-navigation-change",
-      collapseLayersForPrimaryNavigation,
-    );
-    return () => {
-      window.removeEventListener(
-        "homepage-editor-primary-navigation-change",
-        collapseLayersForPrimaryNavigation,
-      );
-    };
-  }, [applyStructureTier]);
-  useEffect(() => {
     // 窄平板从图层选择模块后立即把图层收回入口，给画布与属性面板留出
     // 可对照空间；用户仍可随时从 40px 图层入口再次展开。
     if (isInspecting && window.matchMedia("(max-width: 900px)").matches) {
       structureManualRef.current = true;
-      setStructureOverlay(false);
       setStructureCollapsed(true);
     }
   }, [isInspecting]);
@@ -1997,12 +1993,13 @@ function EditorBody({
     const stage = stageRef.current;
     const frame = previewFrameRef.current;
     if (!stage || !frame) return;
+    setWorkspaceScale(readPageEditorWorkspaceScale(stage));
 
     const contentHeight = frame.offsetHeight;
     if (contentHeight <= 0) return;
 
     // 按当前可见宽度适应，长页面纵向滚动。不设 50% 下限，否则首屏会被横向滚动裁掉。
-    // 手动缩放仍可到 16%；核对真实字号用「100%」。
+    // 手动缩放仍可到 16%；「100%」同时使用工作台原尺寸。
     const stageStyle = getComputedStyle(stage);
     const availableWidth = Math.max(
       0,
@@ -2041,9 +2038,11 @@ function EditorBody({
     const observer = new ResizeObserver(scheduleMeasurement);
     observer.observe(stage);
     observer.observe(frame);
+    window.addEventListener("resize", scheduleMeasurement);
     scheduleMeasurement();
     return () => {
       observer.disconnect();
+      window.removeEventListener("resize", scheduleMeasurement);
       if (scheduledFrame) window.cancelAnimationFrame(scheduledFrame);
     };
   }, [canvasActive, updateCanvasMetrics, appData.content.length, viewportWidth]);
@@ -2182,8 +2181,8 @@ function EditorBody({
         <PageTemplateLibraryAdapter
           pageKey={pageKey}
           active={workspaceActive}
-          obscuredByInspector={!inspectorCollapsed}
-          onRequestCompactOpen={closeInspector}
+          obscuredByPanel={!inspectorCollapsed || !structureCollapsed}
+          onRequestCompactOpen={clearCompactLibrarySpace}
           onPageActionComplete={requestInspectorOpen}
           onRetainLibraryAfterSelection={retainLibraryAfterSelection}
           onTemplateDragStart={handleTemplateDragStart}
@@ -2192,17 +2191,21 @@ function EditorBody({
       )}
 
       <aside
-        className={`homepage-editor__structure-workspace${structureCollapsed ? " is-collapsed" : ""}${structureOverlay ? " is-dock-overlay" : ""}`}
+        className={`homepage-editor__structure-workspace${structureCollapsed ? " is-collapsed" : ""}`}
         aria-label="图层面板"
-        data-page-panel-state={structureCollapsed ? "rail" : structureOverlay ? "overlay" : "dock"}
+        data-admin-nav-hover-guard=""
+        aria-hidden={desktopNavigationOpen || undefined}
+        {...(desktopNavigationOpen ? ({ inert: "" } as Record<string, string>) : {})}
+        data-page-panel-state={desktopNavigationOpen ? "hidden" : structureCollapsed ? "rail" : "dock"}
         onKeyDown={(event) => {
-          if (!structureOverlay || event.key !== "Escape") return;
+          if (!inspectorOverlay.compact || event.key !== "Escape") return;
           event.preventDefault();
-          closeStructurePanel();
+          dismissStructurePanel();
         }}
       >
         {structureCollapsed ? (
           <WorkspacePanelCollapseButton
+            ref={structureOpenRef}
             action="expand"
             panel="structure"
             panelLabel="图层面板"
@@ -2220,7 +2223,7 @@ function EditorBody({
                   action="collapse"
                   panel="structure"
                   panelLabel="图层面板"
-                  onClick={closeStructurePanel}
+                  onClick={dismissStructurePanel}
                 />
               )}
             />
@@ -2241,14 +2244,31 @@ function EditorBody({
         <WorkspaceCanvasControls
           isFitView={isFitView}
           zoom={canvasZoom}
+          displayZoom={canvasZoom * (workspaceActualSize ? 1 : workspaceScale)}
           viewportLabel={canvasViewportLabel}
           onFit={() => setIsFitView(true)}
           onActualSize={() => {
+            if (window.matchMedia(DOCKED_WORKSPACE_QUERY).matches
+              && window.innerWidth < PAGE_EDITOR_DESKTOP_LAYOUT_WIDTH) {
+              onWorkspaceActualSizeChange(true);
+            }
             setIsFitView(false);
             setCanvasZoom(1);
           }}
           onZoomOut={() => adjustCanvasZoom(-0.1)}
           onZoomIn={() => adjustCanvasZoom(0.1)}
+          workspaceSizeControl={(
+            <button
+              type="button"
+              className="homepage-editor__workspace-size-toggle"
+              onClick={() => {
+                onWorkspaceActualSizeChange(!workspaceActualSize);
+                setIsFitView(true);
+              }}
+            >
+              {workspaceActualSize ? "适应工作台" : "工作台原尺寸"}
+            </button>
+          )}
         />
         <div
           ref={stageRef}
@@ -2272,7 +2292,9 @@ function EditorBody({
               }}
             >
               <PageEditorMediaScaleContext.Provider value={canvasZoom}>
-                <CanvasPreview frameRef={previewFrameRef} />
+                <CanvasOpenInspectorContext.Provider value={inspectorCollapsed ? requestInspectorOpen : undefined}>
+                  <CanvasPreview frameRef={previewFrameRef} />
+                </CanvasOpenInspectorContext.Provider>
               </PageEditorMediaScaleContext.Provider>
             </div>
             {draggingTemplate && (
@@ -2335,7 +2357,7 @@ function EditorBody({
             />
             {publishReviewActive && publishReviewOpen ? (
               <PagePublishCheckPanel
-                issues={publishReviewIssues.filter((issue) => issue.severity === "error")}
+                issues={publishReviewIssues.filter(isPagePublishReviewIssue)}
                 targets={publishReviewTargets}
                 currentKey={publishReviewIssueKey}
                 validationStatus={validationStatus}
@@ -2425,16 +2447,7 @@ function EditorBody({
                 onRetryValidation={onRetryValidation}
                 onOpenPublishReview={onOpenPublishReview}
                 onOpenPageSettings={onOpenPageSettings}
-                canPromoteToTemplate={canPromoteToTemplate}
                 pageKey={pageKey}
-                onPromoteToTemplate={(request) => onPromoteToTemplate(request, {
-                  width: typeof currentViewport.width === "number"
-                    ? currentViewport.width
-                    : RESPONSIVE_CANVAS.desktop.width,
-                  height: typeof currentViewport.height === "number"
-                    ? currentViewport.height
-                    : RESPONSIVE_CANVAS.desktop.height,
-                })}
               />
             )}
           </div>
@@ -2457,6 +2470,8 @@ export default function StoreDecorationWorkbench({
   const canManageTemplates = adminRole === "SUPER_ADMIN";
   const contentLocale: PublicContentLocale = "zh-CN";
   const [workspaceMode, setWorkspaceMode] = useState<EditorWorkspaceMode>("page");
+  const [workspaceActualSize, setWorkspaceActualSize] = useState(false);
+  const setDesktopNavigationSuppressed = useOutletContext<AdminLayoutOutletContext | null>()?.setDesktopNavigationSuppressed;
   useEffect(() => {
     clearPageCanvasTemplatePreview();
   }, [pageKey]);
@@ -2558,6 +2573,12 @@ export default function StoreDecorationWorkbench({
     syncCanvasDataWithoutAdvancingSavedBaseline,
     saveProtectedChanges,
   } = pageWorkspaceController;
+  const suppressDesktopNavigation = workspaceMode === "page" && previewMode;
+  useLayoutEffect(() => {
+    if (!suppressDesktopNavigation || !setDesktopNavigationSuppressed) return;
+    setDesktopNavigationSuppressed(true);
+    return () => setDesktopNavigationSuppressed(false);
+  }, [setDesktopNavigationSuppressed, suppressDesktopNavigation]);
   const enterTemplateWorkspace = useCallback((
     pageViewport: { width: number; height: number },
   ) => {
@@ -2650,7 +2671,11 @@ export default function StoreDecorationWorkbench({
                   ? cloneElement(rendered, { editMode: !previewMode })
                   : rendered;
                 return (
-                  <CanvasBlockAnchor blockId={String(props.id ?? "")} blockType={type}>
+                  <CanvasBlockAnchor
+                    blockId={String(props.id ?? "")}
+                    blockType={type}
+                    canLocateFields={!previewMode && type === DYNAMIC_TEMPLATE_BLOCK_TYPE}
+                  >
                     <CanvasMediaGuard
                       blockType={type}
                       blockProps={normalizedProps}
@@ -2679,7 +2704,11 @@ export default function StoreDecorationWorkbench({
   }, [hasAnyProtectedChanges]);
 
   return (
-    <div className="homepage-editor">
+    <div
+      className="homepage-editor"
+      data-workspace-mode={workspaceMode}
+      data-workspace-size={workspaceActualSize ? "actual" : undefined}
+    >
       <RevisionDrawer
         open={revisionsOpen}
         revisions={revisions}
@@ -2811,7 +2840,13 @@ export default function StoreDecorationWorkbench({
             onHistoryCommandCommitted={commitPageHistoryCommand}
           />
           {workspaceMode === "page" ? (
-            <CanvasSelectionDock readOnly={viewingPublished} />
+            <CanvasSelectionDock
+              readOnly={viewingPublished}
+              pageKey={pageKey}
+              onSwitchPage={(targetPageKey, copyId) => {
+                void switchEditorPage(getEditorPage(targetPageKey).publicPath, { pageModuleCopyId: copyId });
+              }}
+            />
           ) : null}
           {workspaceMode === "page" ? (
             <EditorToolbar
@@ -2835,6 +2870,8 @@ export default function StoreDecorationWorkbench({
             publishValidationStatus={publishValidationStatus}
             publishAttemptFailed={Boolean(publishAttemptFailure)}
             publishReviewErrorCount={publishReviewIssues.filter((issue) => issue.severity === "error").length}
+            publishDescriptionReminderCount={publishReviewIssues.filter((issue) => issue.severity === "warning" && isImageDescriptionIssue(issue)).length}
+            publishWarnings={publishReviewIssues.filter((issue) => issue.severity === "warning" && !isImageDescriptionIssue(issue))}
             onOpenPublishReview={openPublishReview}
             onSubmitReview={() => { void submitForReview(); }}
             onApproveReview={() => { void reviewDraft("APPROVE"); }}
@@ -2872,6 +2909,8 @@ export default function StoreDecorationWorkbench({
           >
             <EditorBody
               workspaceActive={workspaceMode === "page"}
+              workspaceActualSize={workspaceActualSize}
+              onWorkspaceActualSizeChange={setWorkspaceActualSize}
               pageKey={pageKey}
               contentReady={loadedPageKey === pageKey}
               pageLabel={getEditorPage(pageKey).label}
@@ -2898,8 +2937,6 @@ export default function StoreDecorationWorkbench({
               onSelectPublishReviewIssue={setPublishReviewIssueKey}
               onExitPreview={() => setPreviewMode(false)}
               onOpenPageSettings={openPageSettingsForEditing}
-              canPromoteToTemplate={canManageTemplates && !USE_MOCK}
-              onPromoteToTemplate={templateWorkspaceController.promoteFromPage}
               canAuthorizePublicMedia={canPublishWithSelfReview}
               authorizingPublicMedia={authorizingPublicMedia}
               onAuthorizePublicMedia={authorizePublicMedia}

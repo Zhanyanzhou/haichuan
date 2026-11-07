@@ -40,6 +40,14 @@ export interface PublishValidationIssue {
   authorizationRevision?: number;
 }
 
+export function isImageDescriptionIssue(issue: PublishValidationIssue) {
+  return /\.contentBySlotId\.[^.[\]]+\.alt$/.test(issue.path ?? "");
+}
+
+export function isPagePublishReviewIssue(issue: PublishValidationIssue) {
+  return issue.severity === "error" || (issue.severity === "warning" && isImageDescriptionIssue(issue));
+}
+
 export type PagePublishIssueDevice = "desktop" | "mobile" | "shared";
 export type PagePublishIssueDestination =
   | "inspector-field"
@@ -277,13 +285,15 @@ function dynamicObjectForIssue(
       }),
     };
   }
+  const isWorkLink = slotType === "image" && issue.path?.endsWith(".workProductCode");
+  const isImageDescription = slotType === "image" && isImageDescriptionIssue(issue);
   return {
     objectId: node.nodeId,
     objectKind,
     objectLabel: slot?.label ?? node.name ?? node.nodeId ?? "模板实例对象",
     device: undefined,
-    field: slot?.slotId ?? rawField,
-    fieldLabel: slot?.label ?? node.name ?? rawField ?? "实例设置",
+    field: isImageDescription ? "alt" : isWorkLink ? "workProductCode" : slot?.slotId ?? rawField,
+    fieldLabel: isImageDescription ? "图片说明" : isWorkLink ? "作品跳转" : slot?.label ?? node.name ?? rawField ?? "实例设置",
     group: `slot-${slotType ?? "content"}`,
     groupLabel: "页面内容",
     access: slot && slot.editable === false ? "read-only" as const : "editable" as const,

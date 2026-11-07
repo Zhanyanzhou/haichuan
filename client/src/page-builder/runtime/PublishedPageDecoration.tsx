@@ -6,8 +6,15 @@ import {
   useMemo,
   type ReactNode,
 } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import StaleDocumentNotice from "./StaleDocumentNotice";
+import { isContentTemplateBlockPublicRenderable } from "@/page-builder/config/editorPages";
+import { isContactRequestOnly } from "@/pages/public/Contact/contactRouteMode";
+import {
+  DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY,
+  readResolvedDynamicTemplateDefinitions,
+} from "@/page-builder/dynamic-template-instance/types";
+import { createPageBlockRenderSemantics, usePublicRendererViewportWidth } from "./pageBlockRenderSemantics";
 import {
   getPublishedPageReadiness,
   isRenderablePublishedBrandBlock,
@@ -50,12 +57,14 @@ type PublishedPageDecorationProps = {
 
 type PageDecorationState = {
   active: boolean;
+  ownsPrimaryHeading: boolean;
   pageKey?: string;
   status: PublishedPageDocumentStatus;
 };
 
 const PageDecorationContext = createContext<PageDecorationState>({
   active: false,
+  ownsPrimaryHeading: false,
   status: "idle",
 });
 
@@ -206,8 +215,12 @@ export default function PublishedPageDecoration({
   publicFallback,
 }: PublishedPageDecorationProps) {
   const english = locale === "en";
+  const { search } = useLocation();
   const { pageDocument, status, stale, refresh } = documentResource;
   const imageFacts = useMemo(() => readPublicImageFacts(pageDocument), [pageDocument]);
+  const businessPage = pageKey === "catalog" || pageKey === "contact";
+  const contactRequestOnly = pageKey === "contact" && isContactRequestOnly(new URLSearchParams(search));
+  const viewportWidth = usePublicRendererViewportWidth(businessPage);
 
   const hasPublishedDocument = Boolean(
     status === "published" && pageDocument?.puckData,
@@ -240,18 +253,40 @@ export default function PublishedPageDecoration({
     ? hasRenderablePublishedContent
     : hasRenderablePublishedContent || businessRegionIndex >= 0);
   const beforeContent = businessRegionIndex >= 0
-    ? content.slice(0, businessRegionIndex)
+    ? content.slice(0, businessRegionIndex).filter(isRenderablePublishedBrandBlock)
     : content;
   const afterContent = businessRegionIndex >= 0
-    ? content.slice(businessRegionIndex + 1)
+    ? content.slice(businessRegionIndex + 1).filter(isRenderablePublishedBrandBlock)
     : [];
-  const hasLeadingDecoration = hasPublishedDocument && beforeContent.length > 0;
+  const renderSemantics = businessPage && hasRenderablePageContent
+    ? createPageBlockRenderSemantics({
+        resolvedDynamicTemplates: readResolvedDynamicTemplateDefinitions(
+          effectiveData?.[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY],
+        ),
+        viewportWidth,
+        pageKey,
+      })
+    : undefined;
+  const hasLeadingDecoration = hasPublishedDocument && beforeContent.some((block) => (
+    renderSemantics
+      ? renderSemantics.publiclyRenderable(block)
+      : isContentTemplateBlockPublicRenderable(block, readiness?.data)
+  ));
+  // 普通业务页按整页顺序选择一处主标题。聚焦联系表单保留它自己的任务标题。
+  const primaryHeroBlock = renderSemantics && !contactRequestOnly
+    ? content.find(renderSemantics.primaryStageHasHeading)
+    : undefined;
 
   if (!pageKey) return <>{children}</>;
 
   const withDecorationState = (node: ReactNode) => (
     <PublicImageFactsProvider facts={imageFacts}>
-      <PageDecorationContext.Provider value={{ active: hasLeadingDecoration && effectiveStatus === "published", pageKey, status: effectiveStatus }}>
+      <PageDecorationContext.Provider value={{
+        active: hasLeadingDecoration && effectiveStatus === "published",
+        ownsPrimaryHeading: Boolean(primaryHeroBlock),
+        pageKey,
+        status: effectiveStatus,
+      }}>
         {node}
       </PageDecorationContext.Provider>
     </PublicImageFactsProvider>
@@ -308,6 +343,7 @@ export default function PublishedPageDecoration({
   const renderDecoration = (sectionContent: PuckBlock[], position: "before" | "after") => {
     if (!sectionContent.length || !effectiveData) return null;
     const data = { ...effectiveData, content: sectionContent };
+    const sectionOwnsHeading = Boolean(primaryHeroBlock && sectionContent.includes(primaryHeroBlock));
     return (
       <section aria-label={english
         ? `${pageLabel || "Page"} ${position === "after" ? "additional " : ""}content`
@@ -319,6 +355,7 @@ export default function PublishedPageDecoration({
               aria-live="polite"
               style={{ minHeight: replaceChildren ? "100svh" : 120, display: "grid", placeItems: "center", color: "#5F6568", fontSize: 12 }}
             >
+              {sectionOwnsHeading && pageLabel ? <h1 className="sr-only">{pageLabel}</h1> : null}
               {english ? "Rendering page content" : "正在渲染页面内容"}
             </div>
           }
@@ -326,7 +363,10 @@ export default function PublishedPageDecoration({
           <PuckDocumentRenderer
             data={data}
             pageKey={pageKey}
+            heroHeadingLevel={businessPage && !sectionOwnsHeading ? 2 : 1}
             primaryHeading={replaceChildren ? pageLabel : undefined}
+            primaryHeroBlock={sectionOwnsHeading ? primaryHeroBlock : undefined}
+            viewportWidthOverride={viewportWidth}
           />
         </Suspense>
       </section>

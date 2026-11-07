@@ -1,0 +1,35 @@
+.cat-batch-dialog,
+.cat-batch-dialog__field {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.cat-batch-dialog {
+  padding-block: 8px;
+}
+
+.cat-batch-dialog p,
+.cat-batch-dialog ul {
+  margin: 0;
+}
+
+.cat-batch-dialog__items {
+  max-height: 240px;
+  overflow-y: auto;
+  list-style: none;
+  padding: 0;
+}
+
+.cat-batch-dialog__items li {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border-block-start: 1px solid var(--adm-line);
+  overflow-wrap: anywhere;
+}
+
+.cat-batch-dialog__items li span {
+  color: var(--adm-text);
+  font: var(--adm-type-secondary);
+}

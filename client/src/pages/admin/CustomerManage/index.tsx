@@ -123,7 +123,8 @@ export default function CustomerManage() {
   const [inputKeyword, setInputKeyword] = useState("");
   const [keyword, setKeyword] = useState("");
   const [status, setStatus] = useState<string>("ALL");
-  const [loading, setLoading] = useState(true);
+  const [listLoadState, setListLoadState] =
+    useState<"initial" | "refreshing" | "settled">("initial");
   const [error, setError] = useState<string | null>(null);
 
   const [detailOpen, setDetailOpen] = useState(false);
@@ -136,7 +137,7 @@ export default function CustomerManage() {
   const detailRequestIdRef = useRef(0);
   const fetchList = useCallback(async () => {
     const requestId = ++listRequestIdRef.current;
-    setLoading(true);
+    setListLoadState((state) => state === "initial" ? state : "refreshing");
     setError(null);
     try {
       const res = await customerAdminApi.list({
@@ -158,7 +159,7 @@ export default function CustomerManage() {
         ),
       );
     } finally {
-      if (requestId === listRequestIdRef.current) setLoading(false);
+      if (requestId === listRequestIdRef.current) setListLoadState("settled");
     }
   }, [page, pageSize, keyword, status]);
 
@@ -277,6 +278,8 @@ export default function CustomerManage() {
     },
   ];
 
+  const initialLoading = listLoadState === "initial";
+  const loading = listLoadState !== "settled";
   return (
     <div className="space-y-4">
       <AdminPageHeader
@@ -333,7 +336,11 @@ export default function CustomerManage() {
               onRetry={() => void fetchList()}
             />
           ) : loading && rows.length === 0 ? (
-            <AdminLoadingState subject="客户档案" compact />
+            <AdminLoadingState
+              subject="客户档案"
+              compact={!initialLoading}
+              allowInteraction={initialLoading}
+            />
           ) : (
             <Table
               rowKey="id"

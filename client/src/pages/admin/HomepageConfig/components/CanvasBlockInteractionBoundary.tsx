@@ -17,10 +17,10 @@ type CanvasBlockInteractionBoundaryProps = {
   children: ReactNode;
   focused?: boolean;
   selected?: boolean;
-  /** 仅供独立模板/视觉编辑夹具使用；正式页面装修始终保持模块级选择。 */
+  /** 独立设计画布由节点处理交互；页面装修把命中元素交给模块边界处理。 */
   allowNodeSelection?: boolean;
   scrollMarginTop?: number;
-  onSelect: () => void;
+  onSelect: (target?: Element) => void;
 };
 
 /**
@@ -121,11 +121,11 @@ const CanvasBlockInteractionBoundary = forwardRef<
       onSelect();
       return;
     }
-    // 页面装修只选择整块模板。必须在捕获阶段截断，避免事件继续进入
-    // Renderer 的图片、文字或业务对象选择器并改变右侧属性上下文。
+    if (event.button !== 0) return;
+    // 在捕获阶段处理，避免 Puck 和内部控件重复选中或执行公开交互。
     event.preventDefault();
     event.stopPropagation();
-    onSelect();
+    onSelect(target && typeof (target as Element).closest === "function" ? target as Element : undefined);
   };
 
   const handleCanvasKeyDownCapture = (

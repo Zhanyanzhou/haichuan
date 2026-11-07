@@ -9,7 +9,7 @@ import {
 } from "antd";
 import { DownOutlined } from "@ant-design/icons";
 import { SecureImage } from "@/components/common/SecureImage";
-import { getAdminEmptyText } from "@/constants/adminCopy";
+import { ADMIN_COPY, getAdminEmptyText } from "@/constants/adminCopy";
 import type { Product, ProductStatus } from "@/types";
 import { formatPrice } from "@/utils/format";
 import { getMaterialLabel } from "@/utils/material";
@@ -55,7 +55,7 @@ type ProductManageTableProps = {
   pendingProductId: number | null;
   hasFilters: boolean;
   canGovernPublic: boolean;
-  onSelectionChange: (keys: Key[]) => void;
+  onSelectionChange?: (keys: Key[]) => void;
   onOpenEdit: (product: Product) => void;
   onClone: (product: Product) => void | Promise<void>;
   onRequestStatusChange: (
@@ -64,6 +64,7 @@ type ProductManageTableProps = {
   ) => void;
   onConfirmArchive: (product: Product) => void;
   onConfirmRestore: (product: Product) => void;
+  onConfirmPermanentDelete?: (product: Product) => void;
   onSubmitForReview: (product: Product) => void;
 };
 
@@ -81,6 +82,7 @@ export default function ProductManageTable({
   onRequestStatusChange,
   onConfirmArchive,
   onConfirmRestore,
+  onConfirmPermanentDelete,
   onSubmitForReview,
 }: ProductManageTableProps) {
   const columns: TableColumnsType<ProductListItem> = [
@@ -108,7 +110,7 @@ export default function ProductManageTable({
                   {product.name}
                 </button>
                 <div className="product-manage__product-meta">
-                  货号：{product.code}
+                  款号：{product.code}
                 </div>
                 <div className="product-manage__product-meta">
                   {product.category?.name || "未分类"} ·{" "}
@@ -120,12 +122,14 @@ export default function ProductManageTable({
         },
       },
       {
-        title: "SKU 最低价",
+        title: "价格 / 起价",
         key: "price",
         width: 100,
         render: (_: unknown, product: ProductListItem) => (
           <span className="product-manage__price">
-            {Number(product.price) > 0 ? formatPrice(product.price) : "—"}
+            {product.salesMode === "CUSTOM_INQUIRY"
+              ? (Number(product.priceMin) > 0 ? `${formatPrice(product.priceMin)} 起` : "—")
+              : (product.salesMode === "DIRECT_PURCHASE" && Number(product.price) > 0 ? formatPrice(product.price) : "—")}
           </span>
         ),
       },
@@ -205,7 +209,6 @@ export default function ProductManageTable({
           return (
           <Space className="product-manage__row-actions" size={10} wrap>
             {product.status === "ARCHIVED" ? (
-              /* 回收站商品只读：仅提供查看与恢复为草稿，不提供编辑/发布/下架/软删除等操作 */
               <>
                 <Button
                   type="link"
@@ -222,10 +225,21 @@ export default function ProductManageTable({
                   className="product-manage__action-link"
                   onClick={() => onConfirmRestore(product)}
                   loading={rowPending}
-                  disabled={pendingProductId !== null && !rowPending}
+                  disabled={batchProcessing || (pendingProductId !== null && !rowPending)}
                 >
                   恢复草稿
                 </Button>
+                {onConfirmPermanentDelete && (
+                  <Button
+                    type="link"
+                    danger
+                    aria-label={`${ADMIN_COPY.actions.permanentlyDelete}「${product.name}」`}
+                    onClick={() => onConfirmPermanentDelete(product)}
+                    disabled={loading || batchProcessing || pendingProductId !== null}
+                  >
+                    {ADMIN_COPY.actions.permanentlyDelete}
+                  </Button>
+                )}
               </>
             ) : (
               /* 正常商品：编辑/复制 + 上架下架 + 移入回收站（去掉了原来和移入回收站语义重复的「删除」） */
@@ -340,13 +354,14 @@ export default function ProductManageTable({
       pagination={false}
       className="product-manage__table"
       scroll={{ x: 1520 }}
-      rowSelection={{
+      rowSelection={onSelectionChange ? {
         selectedRowKeys: selectedIds,
         onChange: onSelectionChange,
         getCheckboxProps: (product) => ({
-          disabled: batchProcessing || pendingProductId !== null || (!canGovernPublic && product.reviewStatus === "IN_REVIEW"),
+          disabled: loading || batchProcessing || pendingProductId !== null ||
+            (!canGovernPublic && product.reviewStatus === "IN_REVIEW"),
         }),
-      }}
+      } : undefined}
       locale={{
         emptyText: hasFilters
           ? getAdminEmptyText("商品", true)

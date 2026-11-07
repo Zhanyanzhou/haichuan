@@ -37,7 +37,7 @@ for (const viewport of [
     await page.goto("/catalog");
 
     await expectCatalogTitleForAssistiveTech(page);
-    await expect(page.getByPlaceholder("搜索作品名称或编号")).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "关键词或款号" })).toBeVisible();
     await expect(page.locator(".catalog-matrix")).toBeVisible();
     await expectNoHorizontalOverflow(page);
     expect(pageErrors).toEqual([]);
@@ -63,7 +63,7 @@ test("Catalog 观察器构造异常时不升级为整页错误", async ({ page }
   await page.goto("/catalog");
 
   await expectCatalogTitleForAssistiveTech(page);
-  await expect(page.getByPlaceholder("搜索作品名称或编号")).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "关键词或款号" })).toBeVisible();
   await expect(page.locator(".catalog-matrix")).toBeVisible();
   expect(pageErrors).toEqual([]);
   await expectWriteContract(writes);
@@ -75,6 +75,7 @@ test("Catalog 慢鉴权期间先显示公开目录，恢复会员后只刷新一
   const memberItem = { ...publicItem, name: "会员目录投影作品" };
   let profileReads = 0;
   let publicReads = 0;
+  const publicQueries: string[] = [];
   let memberReads = 0;
 
   const respond = (route: import("@playwright/test").Route, data: unknown, status = 200) => route.fulfill({
@@ -114,6 +115,7 @@ test("Catalog 慢鉴权期间先显示公开目录，恢复会员后只刷新一
     }
     if (path === "/api/products/public") {
       publicReads += 1;
+      publicQueries.push(url.search);
       return respond(route, {
         list: [publicItem], total: 1, page: 1, pageSize: 32, facets: { sizes: [] },
       });
@@ -145,13 +147,15 @@ test("Catalog 慢鉴权期间先显示公开目录，恢复会员后只刷新一
   await page.goto("/catalog");
   await profileBarrier.reached;
   await expectCatalogTitleForAssistiveTech(page);
-  await expect(page.getByText(publicItem.name, { exact: true })).toBeVisible();
-  expect(publicReads).toBe(1);
+  await expect(page.getByRole("heading", { level: 3, name: "构图验证作品", exact: true })).toBeVisible();
+  await expect(page.getByText(`款号 ${publicItem.code}`, { exact: true })).toBeVisible();
+  expect(publicReads, JSON.stringify(publicQueries)).toBe(1);
   expect(memberReads).toBe(0);
 
   profileBarrier.release();
   await expect(page.getByText(memberItem.name, { exact: true })).toBeVisible();
-  await expect(page.getByText(publicItem.name, { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { level: 3, name: "构图验证作品", exact: true })).toHaveCount(0);
+  await expect(page.getByText(`款号 ${memberItem.code}`, { exact: true })).toBeVisible();
   expect(profileReads).toBe(2);
   expect(memberReads).toBe(1);
 });
@@ -287,6 +291,7 @@ async function scanSeriousAccessibility(
       id,
       impact,
       targets: nodes.map(({ target }) => target),
+      details: nodes.map(({ html, failureSummary }) => ({ html, failureSummary })),
     }));
   expect(blocking, `${state} 不应有 serious/critical axe 违规`).toEqual([]);
   expect(
@@ -391,6 +396,41 @@ for (const viewport of [
   { name: "desktop", width: 1440, height: 900, columns: 3 },
   { name: "mobile", width: 390, height: 844, columns: 2 },
 ]) {
+  test(`Catalog ${viewport.name} 吸顶工具条在回滚边界收起且不残留在搜索区`, async ({ page }) => {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await mockCatalogDetail(page, { products: fiveModes });
+    await page.goto("/catalog");
+    const toolbar = page.locator(".catalog-filter-tools");
+    const stickyBar = page.locator(".catalog-sticky-bar");
+    await expect(toolbar).toBeVisible();
+    await expect(stickyBar).toHaveCount(0);
+
+    const toolbarBottom = await toolbar.evaluate((node) =>
+      window.scrollY + node.getBoundingClientRect().bottom,
+    );
+    const headerHeight = await page.getByRole("banner").evaluate((node) =>
+      Math.round(node.getBoundingClientRect().height),
+    );
+    await page.evaluate((top) => window.scrollTo({ top, behavior: "instant" }), toolbarBottom + 128);
+    await expect(stickyBar).toBeVisible();
+    await expect(page.getByRole("banner")).toHaveClass(/is-concealed/);
+
+    // 先回到页头下方之外，再精确碰到观察器边界，复现缓慢回滚。
+    await page.evaluate((top) => window.scrollTo({ top, behavior: "instant" }), toolbarBottom - headerHeight + 12);
+    await expect(page.getByRole("banner")).not.toHaveClass(/is-concealed/);
+    await expect(stickyBar).toBeVisible();
+    // scrollY 会取整；向下取整确保含小数高度的手机工具栏确实进入可见区。
+    await page.evaluate((top) => window.scrollTo({ top, behavior: "instant" }), Math.floor(toolbarBottom - headerHeight));
+    await expect(stickyBar).toHaveCount(0);
+
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+    await expect(stickyBar).toHaveCount(0);
+    await expect(page.getByRole("combobox", { name: "关键词或款号" })).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "作品排序", exact: true })).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+  });
+
   test(`Catalog ${viewport.name} 完整层级、作品页、托盘与媒体稳定`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     const writes = await mockCatalogDetail(page, { products: fiveModes });
@@ -398,8 +438,8 @@ for (const viewport of [
 
     await expectCatalogTitleForAssistiveTech(page);
     await expect(page.getByRole("navigation", { name: "作品品类" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "全部" })).toBeVisible();
-    await expect(page.getByPlaceholder("搜索作品名称或编号")).toBeVisible();
+    await expect(page.getByRole("button", { name: "全部", exact: true })).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "关键词或款号" })).toBeVisible();
 
     const grid = page.locator(".catalog-matrix");
     await expect(grid).toBeVisible();
@@ -407,7 +447,7 @@ for (const viewport of [
       getComputedStyle(node).gridTemplateColumns.split(" ").filter(Boolean).length,
     )).toBe(viewport.columns);
     await page.evaluate(() => {
-      const toolbar = document.querySelector<HTMLElement>(".catalog-toolbar__inner");
+      const toolbar = document.querySelector<HTMLElement>(".catalog-filter-tools");
       const edge = toolbar ?? document.querySelector<HTMLElement>(".catalog-matrix");
       if (!edge) return;
       const top = window.scrollY + edge.getBoundingClientRect().bottom + 2;
@@ -430,8 +470,8 @@ for (const viewport of [
     await expect(page).toHaveURL(/\/products\/HC-TEST-001\?from=%2Fcatalog$/);
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.locator(".catalog-matrix")).toHaveCount(0);
-    await expect(page.getByRole("heading", { level: 1, name: "构图验证作品 1" })).toBeVisible();
-    await expect(page.getByText("HC-TEST-001", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "构图验证作品" })).toBeVisible();
+    await expect(page.getByText("款号 HC-TEST-001", { exact: true })).toBeVisible();
     const galleryBox = await page.locator(".product-detail-page__gallery").boundingBox();
     const summaryBox = await page.locator(".product-detail-page__summary").boundingBox();
     const actionBox = await page.locator(".product-detail-page__primary-action").boundingBox();
@@ -441,7 +481,11 @@ for (const viewport of [
       expect(actionBox!.y + actionBox!.height).toBeLessThanOrEqual(viewport.height);
     } else {
       expect(summaryBox!.y).toBeGreaterThan(galleryBox!.y);
-      expect(actionBox!.width).toBeGreaterThanOrEqual(summaryBox!.width - 1);
+      const summaryPadding = await page.locator(".product-detail-page__summary").evaluate((node) => {
+        const style = getComputedStyle(node);
+        return parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+      });
+      expect(actionBox!.width + summaryPadding).toBeGreaterThanOrEqual(summaryBox!.width - 1);
     }
     await page.getByRole("navigation", { name: "面包屑" }).getByRole("link", { name: "选款中心" }).click();
     await expect(page).toHaveURL(/\/catalog$/);
@@ -461,7 +505,7 @@ for (const viewport of [
       name: "提交选款咨询（1 款）",
     });
     const backgroundLink = page.locator(".catalog-cell:not(.catalog-cell--empty)").last()
-      .getByRole("link", { name: "查看作品" });
+      .locator("[data-catalog-detail-entry]");
     await expect(closeInquiry).toBeFocused();
     await page.keyboard.press("Shift+Tab");
     await expect(submitInquiry).toBeFocused();
@@ -508,12 +552,12 @@ for (const viewport of [
 
     await backgroundLink.click();
     await expect(page).toHaveURL(/\/products\/HC-TEST-006\?from=/);
-    await expect(page.getByRole("heading", { level: 1, name: "构图验证作品 6" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "构图验证作品" })).toBeVisible();
     await expectNoHorizontalOverflow(page);
     await expectWriteContract(writes);
   });
 
-  test(`ProductDetail ${viewport.name} 7/5 或单列顺序、唯一行动与空事实省略`, async ({ page, baseURL }) => {
+  test(`ProductDetail ${viewport.name} 影像优先或单列顺序、唯一行动与空事实省略`, async ({ page, baseURL }) => {
     const product = publicProduct(11, "DIRECT_PURCHASE", {
       available: true,
       goldWeight: 0,
@@ -536,7 +580,8 @@ for (const viewport of [
     }));
     await page.goto("/products/11");
 
-    await expect(page.getByRole("heading", { level: 1, name: "构图验证作品 11" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "构图验证作品" })).toBeVisible();
+    await expect(page.getByText(`款号 ${product.code}`, { exact: true })).toBeVisible();
     await expect(page.getByText("来自公开商品接口的作品简介。", { exact: true })).toBeVisible();
     await expect(page.getByRole("navigation", { name: "面包屑" }).getByRole("link", { name: "选款中心" }))
       .toHaveAttribute("href", "/catalog");
@@ -544,27 +589,28 @@ for (const viewport of [
     await expect(action).toHaveCount(1);
     await expect(action).toHaveText("请先选择规格");
     await expect(page.locator(".product-detail-page__commerce-facts dd.is-price")).toContainText("起");
-    await page.locator(".product-detail-page__sku-option").click();
+    await page.getByRole("combobox", { name: "选择作品规格" }).selectOption({ index: 1 });
     await expect(action).toHaveText("登录后购买");
     await expect(page.getByText("0g", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("tab", { name: "证书" })).toHaveCount(0);
     await expect(page.getByRole("tab", { name: "评价" })).toHaveCount(0);
-    const sizeGuidanceLink = page.getByRole("link", { name: "联系珠宝顾问确认尺寸" });
-    await expect(page.locator(".product-detail-page__fit"))
-      .toContainText("暂无已核实的作品或规格尺寸");
+    await expect(page.locator(".product-detail-page__fit")).toHaveCount(0);
+    await expect(page.getByText("可向顾问了解材质与尺寸。", { exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "登录后加入心愿单" })).toBeVisible();
-    await sizeGuidanceLink.scrollIntoViewIfNeeded();
-    const sizeGuidanceLinkBox = await sizeGuidanceLink.boundingBox();
-    expect(sizeGuidanceLinkBox).not.toBeNull();
-    expect(sizeGuidanceLinkBox!.height).toBeGreaterThanOrEqual(44);
+    await expect(action).toHaveAttribute("href", "/customer");
 
-    const media = page.locator(".product-detail-page__main-media img");
+    const mediaFrame = page.locator(".product-detail-page__main-media");
+    const mediaBox = await mediaFrame.boundingBox();
+    expect(mediaBox).toBeTruthy();
+    expect(Math.abs(mediaBox!.width - mediaBox!.height)).toBeLessThanOrEqual(1);
+
+    const media = mediaFrame.locator("img");
     await expect(media).toHaveAttribute("width", "1200");
     await expect(media).toHaveAttribute("height", "1500");
     await expect(media).toHaveAttribute("srcset", /width=480 480w.*width=800 800w.*width=1200 1200w/);
     await expect(media).toHaveAttribute(
       "sizes",
-      "(max-width: 900px) calc(100vw - 40px), (max-width: 1440px) 55vw, 700px",
+      "(max-width: 900px) calc(100vw - 40px), (max-width: 1200px) 50vw, 544px",
     );
     await expect.poll(() => media.evaluate((image: HTMLImageElement) =>
       image.complete && image.naturalWidth > 0,
@@ -575,7 +621,11 @@ for (const viewport of [
       const actionBox = await action.boundingBox();
       expect(galleryBox && summaryBox && actionBox).toBeTruthy();
       expect(summaryBox!.y).toBeGreaterThan(galleryBox!.y + galleryBox!.height - 1);
-      expect(actionBox!.width).toBeGreaterThanOrEqual(summaryBox!.width - 1);
+      const summaryPadding = await page.locator(".product-detail-page__summary").evaluate((node) => {
+        const style = getComputedStyle(node);
+        return parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+      });
+      expect(actionBox!.width + summaryPadding).toBeGreaterThanOrEqual(summaryBox!.width - 1);
     } else {
       await expect.poll(() => page.locator(".product-detail-page__layout").evaluate((node) =>
         getComputedStyle(node).gridTemplateColumns.split(" ").filter(Boolean).length,
@@ -583,8 +633,8 @@ for (const viewport of [
       const galleryBox = await page.locator(".product-detail-page__gallery").boundingBox();
       const summaryBox = await page.locator(".product-detail-page__summary").boundingBox();
       expect(galleryBox && summaryBox).toBeTruthy();
-      expect(galleryBox!.width / summaryBox!.width).toBeGreaterThan(1.32);
-      expect(galleryBox!.width / summaryBox!.width).toBeLessThan(1.5);
+      expect(galleryBox!.width / summaryBox!.width).toBeGreaterThan(1.4);
+      expect(galleryBox!.width / summaryBox!.width).toBeLessThan(1.6);
     }
     await expectNoHorizontalOverflow(page);
     await expectWriteContract(writes);
@@ -604,7 +654,7 @@ test("Catalog 进入详情后恢复完整来源 URL、滚动位置与原作品�
   await expect(page.locator(".catalog-matrix")).toBeVisible();
 
   const displayCard = page.locator('[data-catalog-product-id="6"]');
-  const displayDetail = displayCard.getByRole("link", { name: "查看作品" });
+  const displayDetail = displayCard.locator("[data-catalog-detail-entry]");
   await displayCard.scrollIntoViewIfNeeded();
   await page.evaluate(() => window.scrollBy(0, 80));
   await displayDetail.click();
@@ -680,7 +730,7 @@ for (const viewport of [
 
     const sourceCard = page.locator('[data-catalog-product-id="6"]');
     await sourceCard.scrollIntoViewIfNeeded();
-    await sourceCard.getByRole("link", { name: "查看作品" }).click();
+    await sourceCard.locator("[data-catalog-detail-entry]").click();
     await expect(page).toHaveURL(/\/products\/HC-TEST-006\?from=/);
 
     const sourceIndex = catalogProducts.findIndex((product) => product.id === 6);
@@ -696,7 +746,7 @@ for (const viewport of [
     const results = page.getByRole("region", { name: "作品结果" });
     await expect(results).toBeFocused();
     const replacementCard = page.locator(`[data-catalog-product-id="${replacement.id}"]`);
-    await expect(replacementCard.getByRole("link", { name: "查看作品" })).not.toBeFocused();
+    await expect(replacementCard.locator("[data-catalog-detail-entry]")).not.toBeFocused();
     await expect(replacementCard.locator("[data-catalog-product-focus]")).not.toBeFocused();
     await expectNoHorizontalOverflow(page);
     await expectWriteContract(writes);
@@ -716,7 +766,7 @@ for (const viewport of [
     const sourceUrl = "/catalog";
     await page.goto(sourceUrl);
     const displayCard = page.locator('[data-catalog-product-id="6"]');
-    const displayDetail = displayCard.getByRole("link", { name: "查看作品" });
+    const displayDetail = displayCard.locator("[data-catalog-detail-entry]");
     await displayCard.scrollIntoViewIfNeeded();
     await page.evaluate(() => window.scrollBy(0, 80));
     expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
@@ -758,7 +808,7 @@ test("ProductDetail 评价接口失败时仅局部降级且不显示全局错误
   await page.goto("/products/28");
   await reviewResponse;
 
-  await expect(page.getByRole("heading", { level: 1, name: product.name })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "构图验证作品" })).toBeVisible();
   await expect(page.locator(".product-detail-page__primary-action"))
     .toHaveText("咨询此款作品");
   await expect(page.getByRole("tab", { name: "评价" })).toHaveCount(0);
@@ -774,7 +824,7 @@ for (const width of [375, 390]) {
     const writes = await mockCatalogDetail(page, { products: [product] });
 
     await page.goto("/products/29");
-    await expect(page.getByRole("heading", { level: 1, name: product.name })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "构图验证作品" })).toBeVisible();
     const breadcrumbLinks = page.getByRole("navigation", { name: "面包屑" }).getByRole("link");
     await expect(breadcrumbLinks).toHaveCount(2);
     const linkSizes = await breadcrumbLinks.evaluateAll((links) =>
@@ -912,8 +962,8 @@ test("ProductDetail 金重与总重相同时省略重复事实，不同时继续
 });
 
 test("ProductDetail 快速切换作品时不会被较早请求的迟到响应覆盖", async ({ page }) => {
-  const first = publicProduct(23, "DISPLAY_ONLY");
-  const second = publicProduct(24, "DISPLAY_ONLY");
+  const first = { ...publicProduct(23, "DISPLAY_ONLY"), name: "先前作品" };
+  const second = { ...publicProduct(24, "DISPLAY_ONLY"), name: "当前作品" };
   const firstBarrier = createRouteBarrier();
   const writes = await mockCatalogDetail(page, {
     products: [first, second],
@@ -936,8 +986,8 @@ test("ProductDetail 快速切换作品时不会被较早请求的迟到响应覆
 
 test("ProductDetail 手机慢网快速返回同一作品时重读，并可从失败恢复", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  const first = publicProduct(67, "DISPLAY_ONLY");
-  const second = publicProduct(68, "DISPLAY_ONLY");
+  const first = { ...publicProduct(67, "DISPLAY_ONLY"), name: "先前作品" };
+  const second = { ...publicProduct(68, "DISPLAY_ONLY"), name: "当前作品" };
   const firstRead = createRouteBarrier();
   const secondRead = createRouteBarrier();
   const writes = await mockCatalogDetail(page, { products: [first, second] });
@@ -985,8 +1035,88 @@ test("ProductDetail 手机慢网快速返回同一作品时重读，并可从失
   }
 });
 
+test("ProductDetail 参数快览、大图与缩略图共享浏览位置", async ({ page }) => {
+  const product = publicProduct(70, "DISPLAY_ONLY", { size: "13 号" });
+  product.images.push({ ...product.images[0], id: 2070, sortOrder: 1 });
+  const writes = await mockCatalogDetail(page, { products: [product] });
+  await page.goto("/products/70");
+
+  const media = page.locator(".product-detail-page__main-media");
+  const next = media.getByRole("button", { name: "下一张作品图" });
+  await next.click();
+  await expect(media).toHaveAttribute("data-product-main-media-id", "2070");
+  const imageFrame = await media.boundingBox();
+
+  const parameters = page.getByRole("button", { name: "参数", exact: true });
+  await parameters.click();
+  const preview = page.getByRole("region", { name: "参数快览" });
+  await expect(preview).toContainText("13 号");
+  await expect(preview.getByRole("heading")).toBeFocused();
+  expect(await media.boundingBox()).toMatchObject({ width: imageFrame?.width, height: imageFrame?.height });
+  await preview.getByRole("button", { name: "查看完整参数" }).click();
+  await expect(page.getByRole("heading", { name: "参数", exact: true })).toBeFocused();
+
+  await page.getByRole("button", { name: "返回图集" }).click();
+  await expect(media).toHaveAttribute("data-product-main-media-id", "2070");
+  const openImage = page.getByRole("button", { name: "查看大图" });
+  await openImage.click();
+  const dialog = page.getByRole("dialog", { name: "作品大图" });
+  await expect(dialog.getByRole("img", { name: /第 2 张作品图/ })).toBeVisible();
+  const previous = dialog.getByRole("button", { name: "上一张作品图" });
+  await previous.click();
+  await expect(dialog.getByRole("img", { name: /第 1 张作品图/ })).toBeVisible();
+  await expect(previous).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(openImage).toBeFocused();
+  await expect(page.getByRole("button", { name: "查看第 1 张作品图" })).toHaveAttribute("aria-pressed", "true");
+  await expectWriteContract(writes);
+});
+
 test.describe("ProductDetail 手机图集", () => {
   test.use({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
+
+  test("横滑循环切图，纵向手势保留页面滚动", async ({ page }) => {
+    const product = publicProduct(70, "DISPLAY_ONLY");
+    product.images.push(
+      { ...product.images[0], id: 2070, sortOrder: 1 },
+      { ...product.images[0], id: 3070, sortOrder: 2 },
+    );
+    const writes = await mockCatalogDetail(page, { products: [product] });
+    await page.goto("/products/70");
+    const media = page.locator(".product-detail-page__main-media");
+    await expect(media).toHaveAttribute("data-product-main-media-id", "1070");
+    const session = await page.context().newCDPSession(page);
+    const swipe = async (dx: number, dy: number) => {
+      const box = (await media.boundingBox())!;
+      const startX = box.x + box.width / 2;
+      const startY = box.y + box.height / 2;
+      await session.send("Input.dispatchTouchEvent", {
+        type: "touchStart", touchPoints: [{ x: startX, y: startY }],
+      });
+      for (let step = 1; step <= 4; step += 1) {
+        await session.send("Input.dispatchTouchEvent", {
+          type: "touchMove", touchPoints: [{ x: startX + dx * step / 4, y: startY + dy * step / 4 }],
+        });
+      }
+      await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    };
+    try {
+      await swipe(-120, 0);
+      await expect(media).toHaveAttribute("data-product-main-media-id", "2070");
+      await swipe(120, 0);
+      await expect(media).toHaveAttribute("data-product-main-media-id", "1070");
+      await swipe(120, 0);
+      await expect(media).toHaveAttribute("data-product-main-media-id", "3070");
+      await expect(page.getByRole("button", { name: "查看第 3 张作品图" })).toHaveAttribute("aria-pressed", "true");
+      await swipe(0, -120);
+      await expect(media).toHaveAttribute("data-product-main-media-id", "3070");
+      await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(0);
+      await expectNoHorizontalOverflow(page);
+      await expectWriteContract(writes);
+    } finally {
+      await session.detach();
+    }
+  });
 
   test("旧主图慢到达时保留当前选图，当前主图失败后原地重试", async ({ page }) => {
     const product = publicProduct(69, "DISPLAY_ONLY", { image: "/products/public/69/media/1069" });
@@ -1023,6 +1153,18 @@ test.describe("ProductDetail 手机图集", () => {
       )).toBe(true);
       expect(secondImageAttempts).toBe(2);
       await expect(page.getByRole("button", { name: "查看第 2 张作品图" })).toHaveAttribute("aria-pressed", "true");
+      const openImage = page.getByRole("button", { name: "查看大图" });
+      await openImage.tap();
+      const imageDialog = page.getByRole("dialog", { name: "作品大图" });
+      await expect(imageDialog.getByRole("img", { name: /第 2 张作品图/ })).toBeVisible();
+      await expect(imageDialog.getByRole("img")).toHaveAttribute("src", /\/media\/2069\?/);
+      await imageDialog.getByRole("button", { name: "放大细节" }).tap();
+      const imageViewport = imageDialog.getByRole("region", { name: "作品图片" });
+      await expect(imageViewport).toHaveAttribute("tabindex", "0");
+      expect(await imageViewport.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+      await page.keyboard.press("Escape");
+      await expect(imageDialog).toBeHidden();
+      await expect(openImage).toBeFocused();
       await expectNoHorizontalOverflow(page);
       await expectWriteContract(writes);
     } finally {
@@ -1032,8 +1174,8 @@ test.describe("ProductDetail 手机图集", () => {
 });
 
 test("ProductDetail 切换作品与客户身份后忽略旧收藏和评价响应并重载会员投影", async ({ page }) => {
-  const first = publicProduct(63, "DISPLAY_ONLY");
-  const second = publicProduct(64, "DISPLAY_ONLY");
+  const first = { ...publicProduct(63, "DISPLAY_ONLY"), name: "先前作品" };
+  const second = { ...publicProduct(64, "DISPLAY_ONLY"), name: "当前作品" };
   const favoriteBarrier = createRouteBarrier();
   const firstReviewsBarrier = createRouteBarrier();
   let secondDetailReads = 0;
@@ -1130,8 +1272,8 @@ test("ProductDetail 切换作品与客户身份后忽略旧收藏和评价响应
 });
 
 test("ProductDetail 切换作品后旧加购失败不占用或污染当前作品", async ({ page }) => {
-  const first = publicProduct(65, "DIRECT_PURCHASE", { available: true });
-  const second = publicProduct(66, "DIRECT_PURCHASE", { available: true });
+  const first = { ...publicProduct(65, "DIRECT_PURCHASE", { available: true }), name: "先前作品" };
+  const second = { ...publicProduct(66, "DIRECT_PURCHASE", { available: true }), name: "当前作品" };
   const firstCartBarrier = createRouteBarrier();
   let firstCartWrites = 0;
   let secondCartWrites = 0;
@@ -1164,7 +1306,7 @@ test("ProductDetail 切换作品后旧加购失败不占用或污染当前作品
 
   await page.goto(`/products/${first.id}`);
   await expect(page.getByRole("heading", { level: 1, name: first.name })).toBeVisible();
-  await page.locator(".product-detail-page__sku-option").click();
+  await page.getByRole("combobox", { name: "选择作品规格" }).selectOption({ index: 1 });
   await page.locator(".product-detail-page__primary-action").click();
   await firstCartBarrier.reached;
   await expect(page.locator(".product-detail-page__primary-action")).toHaveText("加入中...");
@@ -1174,7 +1316,7 @@ test("ProductDetail 切换作品后旧加购失败不占用或污染当前作品
     window.dispatchEvent(new PopStateEvent("popstate"));
   }, `/products/${second.id}`);
   await expect(page.getByRole("heading", { level: 1, name: second.name })).toBeVisible();
-  await page.locator(".product-detail-page__sku-option").click();
+  await page.getByRole("combobox", { name: "选择作品规格" }).selectOption({ index: 1 });
   await expect(page.locator(".product-detail-page__primary-action")).toHaveText("加入购物车");
   await page.locator(".product-detail-page__primary-action").click();
   await expect.poll(() => secondCartWrites).toBe(1);
@@ -1252,7 +1394,7 @@ test("Catalog 分类资源失败时保留已成功加载的作品并提供局部
   expect(desktopRetryCategoriesBox).not.toBeNull();
   expect(desktopRetryCategoriesBox!.height).toBeLessThanOrEqual(44);
   await expect(page.locator(".catalog-matrix")).toBeVisible();
-  await expect(page.getByText("构图验证作品 1", { exact: true })).toBeVisible();
+  await expect(page.getByText("款号 HC-TEST-001", { exact: true })).toBeVisible();
   await expect(page.getByText("作品目录暂时无法加载")).toHaveCount(0);
   await expectWriteContract(writes);
 });
@@ -1286,7 +1428,7 @@ test("Catalog empty 与 no-results 分离", async ({ page }) => {
   await expectWriteContract(writes);
 });
 
-test("正式目录有作品时演示货号不再覆盖正式作品", async ({ page }) => {
+test("正式目录有作品时演示款号不再覆盖正式作品", async ({ page }) => {
   const published = {
     ...publicProduct(42, "DISPLAY_ONLY"),
     code: "HC-DEMO-001",
@@ -1339,7 +1481,7 @@ test("Catalog 清除筛选会原子移除全部 URL 条件并恢复作品", asyn
     .getByRole("button", { name: "查看全部作品", exact: true })
     .click();
   await expect(page).toHaveURL(/\/catalog$/);
-  await expect(page.getByText("构图验证作品 1", { exact: true })).toBeVisible();
+  await expect(page.getByText("款号 HC-TEST-001", { exact: true })).toBeVisible();
   await expectWriteContract(writes);
 });
 
@@ -1349,7 +1491,7 @@ test("五种 SalesMode 各自只呈现一个 ProductPrimaryAction", async ({ pag
     DISPLAY_ONLY: "咨询此款作品",
     SELECTION: "加入选款",
     APPOINTMENT: "预约鉴赏此款",
-    CUSTOM_INQUIRY: "咨询此款定制",
+    CUSTOM_INQUIRY: "联系顾问确认购买",
     DIRECT_PURCHASE: "加入购物车",
   };
   for (const product of fiveModes.slice(0, 5)) {
@@ -1358,7 +1500,7 @@ test("五种 SalesMode 各自只呈现一个 ProductPrimaryAction", async ({ pag
     await expect(action).toHaveCount(1);
     if (product.salesMode === "DIRECT_PURCHASE") {
       await expect(action).toHaveText("请先选择规格");
-      await page.locator(".product-detail-page__sku-option").click();
+      await page.getByRole("combobox", { name: "选择作品规格" }).selectOption({ index: 1 });
     }
     await expect(action).toHaveText(expected[product.salesMode]);
     if (product.salesMode === "SELECTION") {
@@ -1369,14 +1511,46 @@ test("五种 SalesMode 各自只呈现一个 ProductPrimaryAction", async ({ pag
   await expectWriteContract(writes);
 });
 
-test("详情咨询行动携带稳定货号和明确来源类型", async ({ page }) => {
+test("CUSTOM_INQUIRY 不再把商品详情渲染成定制服务页", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const product = { ...fiveModes[3], shortDescription: "3D 设计效果图" };
+  const writes = await mockCatalogDetail(page, { products: [product] });
+
+  await page.goto(`/products/${product.code}`);
+
+  const mainMedia = page.locator(".product-detail-page__main-media");
+  await expect(mainMedia).toHaveAttribute("data-design-preview", "true");
+  await expect(mainMedia).toHaveCSS("background-color", "rgb(255, 255, 255)");
+  await expect(mainMedia.locator("img")).toHaveCSS("mix-blend-mode", "normal");
+
+  const mediaSwitcher = page.getByRole("group", { name: "切换作品内容" });
+  const galleryButton = mediaSwitcher.getByRole("button", { name: "作品图集", exact: true });
+  await expect(galleryButton).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("img", { name: /构图验证作品/ })).toBeVisible();
+  await expect(mediaSwitcher.getByRole("button", { name: "定制说明", exact: true })).toHaveCount(0);
+
+  const contentNav = page.getByRole("navigation", { name: "作品详情内容" });
+  await expect(contentNav.getByRole("link", { name: "作品图集", exact: true })).toHaveAttribute("href", "#product-media");
+  await expect(contentNav.getByRole("link", { name: "定制流程", exact: true })).toHaveCount(0);
+  await expect(page.getByText("定制参考起价", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "定制如何开始" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "预约定制", exact: true })).toHaveCount(0);
+  await expect(page.locator(".product-detail-page__primary-action"))
+    .toHaveText("联系顾问确认购买");
+  await expect(page.locator(".product-detail-page__action-zone")).not.toHaveCSS("position", "fixed");
+  await expect(page.locator(".product-detail-page__primary-action")).toHaveCount(1);
+  await expectNoHorizontalOverflow(page);
+  await expectWriteContract(writes);
+});
+
+test("详情咨询行动携带稳定款号和明确来源类型", async ({ page }) => {
   const writes = await mockCatalogDetail(page, {
     products: fiveModes,
     flags: { commerceEnabled: false, cartEnabled: false, paymentEnabled: false },
   });
   const expectations = [
     { product: fiveModes[2], href: "/contact?type=appointment&productRef=HC-TEST-003" },
-    { product: fiveModes[3], href: "/custom?type=custom&productRef=HC-TEST-004" },
+    { product: fiveModes[3], href: "/contact?type=purchase-support&productRef=HC-TEST-004" },
     { product: fiveModes[4], href: "/contact?type=product&productRef=HC-TEST-005" },
     { product: fiveModes[0], href: "/contact?type=purchase-support&productRef=HC-TEST-001" },
   ];
@@ -1391,21 +1565,24 @@ test("详情咨询行动携带稳定货号和明确来源类型", async ({ page 
   await expectWriteContract(writes);
 });
 
-test("Catalog 卡片咨询行动携带稳定货号和明确来源类型", async ({ page }) => {
-  const writes = await mockCatalogDetail(page, { products: fiveModes });
+test("Catalog 保留预约到店入口，定制款卡片通过图片和标题进入详情", async ({ page }) => {
+  const appointment = fiveModes[2];
+  const custom = { ...fiveModes[3], priceMin: 1600 };
+  const writes = await mockCatalogDetail(page, { products: [appointment, custom] });
   await page.goto("/catalog");
 
-  const expectations = [
-    { name: "预约到店", href: "/contact?type=appointment&productRef=HC-TEST-003", product: fiveModes[2] },
-    { name: "定制咨询", href: "/custom?type=custom&productRef=HC-TEST-004", product: fiveModes[3] },
-  ];
+  const appointmentCard = page.locator(`[data-catalog-product-id="${appointment.id}"]`);
+  await expect(appointmentCard.getByRole("link", { name: "预约到店", exact: true }))
+    .toHaveAttribute("href", `/contact?type=appointment&productRef=${appointment.code}`);
+  await expect(appointmentCard.locator("[data-catalog-product-focus]"))
+    .toHaveAttribute("href", `/products/${appointment.code}?from=%2Fcatalog`);
 
-  for (const { name, href, product } of expectations) {
-    const card = page.locator(".catalog-cell").filter({ hasText: product.name });
-    await expect(card.getByRole("link", { name, exact: true })).toHaveAttribute("href", href);
-    await expect(card.locator("[data-catalog-product-focus]"))
-      .toHaveAttribute("href", new RegExp(`/products/${product.code}\\?from=`));
-  }
+  const customCard = page.locator(`[data-catalog-product-id="${custom.id}"]`);
+  const detailHref = `/products/${custom.code}?from=%2Fcatalog`;
+  await expect(customCard.getByText("¥ 1,600 起", { exact: true })).toBeVisible();
+  await expect(customCard.locator("[data-catalog-product-focus]")).toHaveAttribute("href", detailHref);
+  await expect(customCard.getByRole("heading").getByRole("link")).toHaveAttribute("href", detailHref);
+  await expect(customCard.locator(".catalog-product-card__action")).toHaveCount(0);
 
   await expectWriteContract(writes);
 });
@@ -1467,7 +1644,7 @@ for (const viewport of [
     await page.goto(`/contact?view=request&type=appointment&productRef=${product.code}`);
     const context = page.locator(".contact-product-context");
     await expect(context.getByText(product.name, { exact: true })).toBeVisible();
-    await expect(context.getByText(`货号：${product.code}`, { exact: true })).toBeVisible();
+    await expect(context.getByText(`款号：${product.code}`, { exact: true })).toBeVisible();
     await expect(page.locator("#cf-type")).toHaveValue("到店咨询");
     await expect.poll(() => page.locator(".contact-grid").evaluate((node) =>
       getComputedStyle(node).gridTemplateColumns.split(" ").filter(Boolean).length,
@@ -1796,7 +1973,7 @@ test("非直购 SalesMode 不把遗留 SKU 误呈现为价格或售罄规格", a
     { mode: "DISPLAY_ONLY", label: "咨询此款作品" },
     { mode: "SELECTION", label: "加入选款" },
     { mode: "APPOINTMENT", label: "预约鉴赏此款" },
-    { mode: "CUSTOM_INQUIRY", label: "咨询此款定制" },
+    { mode: "CUSTOM_INQUIRY", label: "联系顾问确认购买" },
   ];
   const products = modes.map(({ mode }, index) => {
     const product = publicProduct(41 + index, mode);
@@ -1816,7 +1993,7 @@ test("非直购 SalesMode 不把遗留 SKU 误呈现为价格或售罄规格", a
   for (const [index, { label }] of modes.entries()) {
     await page.goto(`/products/${41 + index}`);
     await expect(page.locator(".product-detail-page__primary-action")).toHaveText(label);
-    await expect(page.locator(".product-detail-page__sku-option")).toHaveCount(0);
+    await expect(page.getByRole("combobox", { name: "选择作品规格" })).toHaveCount(0);
     await expect(page.getByText("价格待确认", { exact: true })).toHaveCount(0);
     await expect(page.getByText("已售罄", { exact: true })).toHaveCount(0);
     await expect(page.getByText("下单前", { exact: false })).toHaveCount(0);
@@ -1841,16 +2018,15 @@ test("ProductDetail 遇到历史异常 JSON 形状时保留核心作品与行动
 
   await page.goto("/products/45");
 
-  await expect(page.getByRole("heading", { level: 1, name: product.name })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "构图验证作品" })).toBeVisible();
   await expect(page.locator(".product-detail-page__primary-action"))
     .toHaveText("咨询此款作品");
   const decision = page.locator(".product-detail-page__decision-panel");
-  await expect(page.locator(".product-detail-page__fit")).toContainText("尺寸");
-  await expect(page.locator(".product-detail-page__fit")).toContainText("暂无已核实的作品或规格尺寸");
-  await expect(decision).not.toContainText("公开尺寸事实");
-  await expect(decision).not.toContainText("尺寸辅助状态");
-  await expect(page.getByRole("link", { name: "联系珠宝顾问确认尺寸" }))
-    .toHaveAttribute("href", "/contact?type=purchase-support&productRef=HC-TEST-045");
+  await expect(page.locator(".product-detail-page__fit")).toHaveCount(0);
+  await expect(page.getByText("可向顾问了解材质与尺寸。", { exact: true })).toBeVisible();
+  await expect(decision).toHaveCount(0);
+  await expect(page.locator(".product-detail-page__primary-action"))
+    .toHaveAttribute("href", "/contact?type=product&productRef=HC-TEST-045");
   expect(pageErrors).toEqual([]);
   await expectWriteContract(writes);
 });
@@ -1863,18 +2039,45 @@ test("DIRECT_PURCHASE commerce off 与售罄各保持单一准确行动", async 
   await page.goto("/products/21");
   await expect(page.locator(".product-detail-page__primary-action"))
     .toHaveText("购买暂未开放，联系顾问");
+  const saveSelection = page.getByRole("button", { name: "保存到购物袋", exact: true });
+  await expect(saveSelection).toHaveAccessibleDescription("保存的款式可稍后与珠宝顾问沟通。");
+  await saveSelection.click();
+  await expect(page.getByRole("button", { name: "已保存到购物袋" })).toHaveAttribute("aria-pressed", "true");
   await expectWriteContract(writes);
 });
 
-test("DIRECT_PURCHASE 登录且开放时写请求仅由函数桩接收一次", async ({ page }) => {
+test("DIRECT_PURCHASE 真实颜色、购买数量与下单提示进入购物车请求", async ({ page }) => {
+  const product = publicProduct(22, "DIRECT_PURCHASE", { available: true, size: "43cm" });
+  product.skus[0].color = "黄金色";
+  let cartPayload: { productId?: number; skuId?: number; quantity?: number } | null = null;
+  page.on("request", (request) => {
+    if (request.method() === "POST" && new URL(request.url()).pathname.endsWith("/cart")) {
+      cartPayload = request.postDataJSON() as typeof cartPayload;
+    }
+  });
   const writes = await mockCatalogDetail(page, {
-    products: [publicProduct(22, "DIRECT_PURCHASE", { available: true })],
+    products: [product],
     signedIn: true,
     allowCartWrite: true,
   });
   await page.goto("/products/22");
-  await page.locator(".product-detail-page__sku-option").click();
+  await expect(page.getByText("下单提示", { exact: true })).toBeVisible();
+  await expect(page.getByText("请先选择规格与颜色", { exact: false })).toBeVisible();
+  await expect(page.getByText("规格与颜色", { exact: true })).toBeVisible();
+  await expect(page.getByRole("option", { name: /黄金色.*43cm/ })).toHaveText(/黄金色.*43cm/);
+  await page.getByRole("combobox", { name: "选择作品规格" }).selectOption({ index: 1 });
+  await expect(page.getByText("所选规格可以加入购物车", { exact: false })).toBeVisible();
+  const quantity = page.getByLabel("购买数量");
+  await expect(quantity).toBeVisible();
+  await quantity.getByRole("button", { name: "增加数量" }).click();
+  await quantity.getByRole("button", { name: "增加数量" }).click();
+  await expect(quantity).toContainText("3");
   await page.locator(".product-detail-page__primary-action").click();
+  await expect.poll(() => cartPayload).toEqual({
+    productId: 22,
+    skuId: product.skus[0].id,
+    quantity: 3,
+  });
   await expectWriteContract(writes, 1);
 });
 
@@ -1902,19 +2105,59 @@ test("DIRECT_PURCHASE 多尺寸规格保持起价，部分售罄与未知库存 
   await expect(decision).toContainText("购买前请核对所选规格与尺寸");
   await expect(fit).toContainText("选择规格后查看对应尺寸");
 
-  const available = page.getByRole("button", { name: /12 号.*可选择/ });
-  const soldOut = page.getByRole("button", { name: /14 号.*已售罄/ });
-  const unknown = page.getByRole("button", { name: /16 号.*库存待确认/ });
+  const available = page.getByRole("option", { name: /12 号.*可选择/ });
+  const soldOut = page.getByRole("option", { name: /14 号.*已售罄/ });
+  const unknown = page.getByRole("option", { name: /16 号.*库存待确认/ });
   await expect(available).toBeEnabled();
   await expect(soldOut).toBeDisabled();
   await expect(unknown).toBeDisabled();
 
-  await available.click();
+  await page.getByRole("combobox", { name: "选择作品规格" }).selectOption("301");
   await expect(price).toContainText("¥12,800");
   await expect(price).not.toContainText("起");
   await expect(fit.getByText("12 号", { exact: true })).toBeVisible();
   await expect(page.locator(".product-detail-page__primary-action")).toHaveText("加入购物车");
   await expect(page.locator(".product-detail-page__quantity")).toBeVisible();
+  await expectWriteContract(writes);
+});
+
+test("DIRECT_PURCHASE 点击规格卡片联动主图、价格与库存", async ({ page }) => {
+  const product = publicProduct(30, "DIRECT_PURCHASE", { available: true });
+  const firstImage = product.images[0];
+  const secondImage = { ...firstImage, id: 2030, sortOrder: 1, url: "/images/system/product-placeholder.svg?fixture=sku-14" };
+  product.images.push(secondImage);
+  const baseSku = product.skus[0];
+  product.skus = [
+    { ...baseSku, id: 301, color: "黄金色", size: "12 号", imageId: firstImage.id, price: 12800, isAvailableForPurchase: true },
+    { ...baseSku, id: 302, color: "玫瑰金色", size: "14 号", imageId: secondImage.id, price: 13800, isAvailableForPurchase: true },
+    { ...baseSku, id: 303, color: "白金色", size: "16 号", price: 14800, isAvailableForPurchase: false },
+  ];
+  const writes = await mockCatalogDetail(page, { products: [product], signedIn: true });
+  await page.goto("/products/30");
+  const options = page.getByRole("group", { name: "选择规格与颜色" });
+  const first = options.locator("label").filter({ hasText: "12 号" });
+  const second = options.locator("label").filter({ hasText: "14 号" });
+  const price = page.locator(".product-detail-page__commerce-facts dd.is-price");
+  const media = page.locator(".product-detail-page__main-media");
+  await expect(first).toContainText("黄金色");
+  await expect(second).toContainText("玫瑰金色");
+  await expect(options.getByRole("radio", { name: /16 号.*已售罄/ })).toBeDisabled();
+  await second.click();
+  await expect(second.getByRole("radio")).toBeChecked();
+  await expect(media).toHaveAttribute("data-product-main-media-id", String(secondImage.id));
+  await expect(media.getByRole("img")).toHaveAttribute("src", secondImage.url);
+  await expect(price).toHaveText("¥13,800");
+  await expect(options.getByRole("status")).toHaveText("所选规格：可选择");
+  await first.click();
+  await expect(first.getByRole("radio")).toBeChecked();
+  await expect(media).toHaveAttribute("data-product-main-media-id", String(firstImage.id));
+  await expect(media.getByRole("img")).toHaveAttribute("src", firstImage.url);
+  await expect(price).toHaveText("¥12,800");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectNoHorizontalOverflow(page);
+  await second.click();
+  await expect(media).toHaveAttribute("data-product-main-media-id", String(secondImage.id));
+  await expect(price).toHaveText("¥13,800");
   await expectWriteContract(writes);
 });
 
@@ -1940,16 +2183,16 @@ test("DIRECT_PURCHASE 无规格、全售罄、未知库存与无价格均给出�
 
   await page.goto("/products/32");
   await expect(page.locator(".product-detail-page__primary-action")).toHaveText("当前规格已售罄");
-  await expect(page.locator(".product-detail-page__sku-option")).toBeDisabled();
+  await expect(page.getByRole("option", { name: /已售罄/ })).toBeDisabled();
   await expect(page.getByText("当前公开规格均已售罄。")).toBeVisible();
 
   await page.goto("/products/33");
   await expect(page.locator(".product-detail-page__primary-action")).toHaveText("规格库存待确认");
-  await expect(page.locator(".product-detail-page__sku-option")).toBeDisabled();
+  await expect(page.getByRole("option", { name: /库存待确认/ })).toBeDisabled();
   await expect(page.getByText("当前规格的库存状态暂时无法确认。")).toBeVisible();
 
   await page.goto("/products/34");
-  await page.locator(".product-detail-page__sku-option").click();
+  await page.getByRole("combobox", { name: "选择作品规格" }).selectOption({ index: 1 });
   await expect(page.locator(".product-detail-page__primary-action")).toHaveText("价格暂不可用");
   await expect(page.getByText("所选规格暂时没有有效公开价格。")).toBeVisible();
   await expect(page.locator(".product-detail-page__quantity")).toHaveCount(0);
@@ -2020,7 +2263,7 @@ test("ProductDetail 仅展示获准的尺寸、价格与履约事实且不读取
   await expectWriteContract(writes);
 });
 
-test("货号详情的收藏写入使用真实商品 ID 而不是路由字符串", async ({ page }) => {
+test("款号详情的收藏写入使用真实商品 ID 而不是路由字符串", async ({ page }) => {
   const product = publicProduct(27, "DISPLAY_ONLY");
   const writes = await mockCatalogDetail(page, {
     products: [product],
@@ -2028,7 +2271,7 @@ test("货号详情的收藏写入使用真实商品 ID 而不是路由字符串"
     allowFavoriteWrite: true,
   });
   await page.goto(`/products/${product.code}`);
-  await expect(page.getByRole("heading", { level: 1, name: product.name })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "构图验证作品" })).toBeVisible();
 
   const favoriteRequest = page.waitForRequest((request) =>
     request.method() === "PUT" &&
@@ -2062,9 +2305,14 @@ test("ProductDetail 请求等待与失败分别显示 loading 和不可浏览", 
   });
   await page.goto("/products/24");
   await barrier.reached;
-  await expect(page.getByText("正在加载作品")).toBeVisible();
+  const loading = page.getByRole("status", { name: "正在加载作品", exact: true });
+  await expect(loading).toBeVisible();
+  const indicator = (await loading.locator(".site-route-loading__indicator").boundingBox())!;
+  const viewport = page.viewportSize()!;
+  expect.soft(indicator.x + indicator.width / 2).toBeCloseTo(viewport.width / 2, 0);
+  expect.soft(indicator.y + indicator.height / 2).toBeCloseTo(viewport.height / 2, 0);
   barrier.release();
-  await expect(page.getByRole("heading", { name: "构图验证作品 24" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "构图验证作品" })).toBeVisible();
   await expectWriteContract(writes);
 });
 
@@ -2121,7 +2369,7 @@ test("Catalog 搜索建议与历史记录支持完整键盘和焦点路径", asy
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/catalog");
 
-  const input = page.getByPlaceholder("搜索作品名称或编号");
+  const input = page.getByRole("combobox", { name: "关键词或款号" });
   await input.fill("构图验证作品");
   const broadSuggestions = page.getByRole("listbox", { name: "搜索建议" }).getByRole("option");
   await expect(broadSuggestions).toHaveCount(6);
@@ -2189,7 +2437,7 @@ test("Catalog 搜索建议与历史记录支持完整键盘和焦点路径", asy
   await expect(input).toBeFocused();
   await expect(history).toHaveCount(0);
 
-  await page.locator(".catalog-toolbar__spacer").click();
+  await page.locator(".catalog-sort-bar__summary").click();
   await input.focus();
   await expect(history).toBeVisible();
   await deleteHistory.focus();
@@ -2211,7 +2459,12 @@ for (const viewport of [
   test(`${viewport.width}px Catalog、Contact 与 ProductDetail 通过重点 Axe、触控和 CLS 门禁`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await installLayoutShiftProbe(page);
-    const detail = publicProduct(41, "DIRECT_PURCHASE", { available: true });
+    const detail = publicProduct(41, "DIRECT_PURCHASE", {
+      available: true,
+      certificates: [
+        { id: 411, productId: 41, certType: "NATIONAL", certNumber: "QA-CERTIFICATE", expireDate: "2099-12-31T00:00:00.000Z" },
+      ],
+    });
     const detailBarrier = createRouteBarrier();
     const writes = await mockCatalogDetail(page, {
       products: [detail, ...fiveModes],
@@ -2220,19 +2473,19 @@ for (const viewport of [
 
     await page.goto("/catalog");
     await expect(page.locator(".catalog-matrix")).toBeVisible();
-    await expect(
-      page.locator(".catalog-toolbar__inner").getByRole("combobox", { name: "作品排序方式" }),
-    ).toBeVisible();
+    const catalogSort = page.getByRole("combobox", { name: "作品排序", exact: true });
+    await expect(catalogSort).toBeVisible();
+    await expect(catalogSort.locator('option[value="price_asc"]')).toHaveCount(1);
     await scanSeriousAccessibility(page, testInfo, `${viewport.name}-catalog-default`);
 
-    const input = page.getByPlaceholder("搜索作品名称或编号");
+    const input = page.getByRole("combobox", { name: "关键词或款号" });
     await input.fill("构图验证作品");
     await expect(page.getByRole("listbox", { name: "搜索建议" })).toBeVisible();
     await scanSeriousAccessibility(page, testInfo, `${viewport.name}-catalog-search`);
     await input.press("Escape");
 
     await page.evaluate(() => {
-      const toolbar = document.querySelector<HTMLElement>(".catalog-toolbar__inner");
+      const toolbar = document.querySelector<HTMLElement>(".catalog-filter-tools");
       if (!toolbar) return;
       const top = window.scrollY + toolbar.getBoundingClientRect().bottom + 2;
       window.scrollTo({ top, behavior: "instant" });
@@ -2290,7 +2543,7 @@ for (const viewport of [
     });
 
     detailBarrier.release();
-    await expect(page.getByRole("heading", { level: 1, name: detail.name })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "构图验证作品" })).toBeVisible();
     const mainImage = page.locator(".product-detail-page__main-media img");
     await expect.poll(() => mainImage.evaluate((image: HTMLImageElement) =>
       image.complete && image.naturalWidth > 0,
@@ -2301,7 +2554,7 @@ for (const viewport of [
     await expect(commerceFacts.locator(":scope > dt")).toHaveCount(2);
     await expect(commerceFacts.locator(":scope > dd")).toHaveCount(2);
     await expect(commerceFacts.locator(":scope > :not(dt):not(dd)")).toHaveCount(0);
-    const skuSizes = await page.locator(".product-detail-page__sku-option").evaluateAll((nodes) =>
+    const skuSizes = await page.locator(".product-detail-page__sku-select").evaluateAll((nodes) =>
       nodes.map((node) => {
         const box = node.getBoundingClientRect();
         return { width: box.width, height: box.height };

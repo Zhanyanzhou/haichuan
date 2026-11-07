@@ -66,7 +66,8 @@ for (const viewport of [{ width: 1440, height: 900, device: "desktop" }, { width
       await page.goto("/", { waitUntil: "domcontentloaded" });
       await expect.poll(() => rendererRequested).toBe(true);
       await expect.poll(() => requestedMedia.includes(`/uploads/loading-hero-${viewport.device}.svg`)).toBe(true);
-      await expect(page.locator('section[aria-label="首页首屏"] img').first()).toBeVisible();
+      await expect(page.locator('[data-home-loading-status]')).toBeVisible();
+      await expect(page.locator('section[aria-label="首页首屏"] picture img')).toBeHidden();
       expect(requestedMedia.every((path) => path === `/uploads/loading-hero-${viewport.device}.svg`)).toBe(true);
       await page.screenshot({ path: testInfo.outputPath(`${viewport.device}-before-renderer.png`) });
       renderer.release();
@@ -77,19 +78,21 @@ for (const viewport of [{ width: 1440, height: 900, device: "desktop" }, { width
   });
 }
 
-test("兼容首页首图在两个 Renderer 分块先后到达时持续可见", async ({ page }) => {
+test("兼容首页先取图，首屏专用 Renderer 未到达时不阻塞已就绪区块", async ({ page }) => {
   test.skip(process.env.PLAYWRIGHT_APP_MODE === "mock", "HTTP 夹具覆盖真实客户端模块链路");
   await page.setViewportSize({ width: 390, height: 844 });
   const published = await installPublicFixture(page);
   await page.route(/\/api\/page-modules\/document\/published\?/, (route) => route.fulfill({
     json: { code: 200, data: { ...published, puckData: {
-      root: { props: {} },
+      ...published.puckData,
       content: [{ type: "首屏主视觉", props: {
         id: "compatible-hero", title: "兼容首屏", altText: "兼容首屏测试图",
+        subtitle: "旧版首屏文案仍按原画幅和文字行数占位。",
+        actionText: "查看作品", targetType: "page", linkUrl: "/products",
         desktopImage: "/uploads/loading-hero-mobile.svg",
         mobileImage: "/uploads/loading-hero-mobile.svg",
         __contentTemplate: createContentTemplateMarker("首屏主视觉"),
-      } }],
+      } }, ...published.puckData.content],
     } } },
   }));
 
@@ -106,30 +109,25 @@ test("兼容首页首图在两个 Renderer 分块先后到达时持续可见", a
   try {
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await renderer.reached;
-    const firstImage = page.locator('section[aria-label="首页首屏"] img');
-    await expect(firstImage).toBeVisible();
+    const firstImage = page.locator('section[aria-label="首页首屏"] picture img');
+    await expect(firstImage).toBeAttached();
     await expect.poll(() => firstImage.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
 
     renderer.release();
     await compatibleRenderer.reached;
-    // React 会节流 Suspense 的后续提交。跨过 500ms 提交窗口采样，检查期间首图未被空白占位替换。
-    const stayedVisible = await page.evaluate(() => new Promise<boolean>((resolve) => {
-      const end = performance.now() + 700;
-      const sample = () => {
-        const image = document.querySelector('section[aria-label="首页首屏"] img');
-        if (!image || image.getBoundingClientRect().height === 0) resolve(false);
-        else if (performance.now() >= end) resolve(true);
-        else requestAnimationFrame(sample);
-      };
-      sample();
-    }));
-    expect(stayedVisible).toBe(true);
-    await expect(firstImage).toBeVisible();
-    await expect(page.locator('.hc-public-document > [aria-busy="true"]')).toHaveCount(0);
+    await expect(page.locator('[data-home-loading-status]')).toBeVisible();
+    await expect(firstImage).toBeHidden();
+    await expect(page.getByRole("heading", { name: "兼容首屏" })).toHaveCount(0);
+    await expect(page.locator('.hc-public-document > .home-primary-stage-loading')).toBeVisible();
+    const following = page.getByText("加载边界测试", { exact: true }).first();
+    await expect(following).toBeVisible();
+    const followingTop = () => following.evaluate((element) => element.getBoundingClientRect().top + scrollY);
+    const before = await followingTop();
 
     compatibleRenderer.release();
     await expect(page.locator('[data-content-template-renderer="real"]').getByAltText("兼容首屏测试图")).toBeVisible();
     await expect(firstImage).toHaveCount(0);
+    expect(Math.abs(await followingTop() - before)).toBeLessThanOrEqual(1);
   } finally {
     renderer.release();
     compatibleRenderer.release();

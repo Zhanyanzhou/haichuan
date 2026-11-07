@@ -17,7 +17,7 @@ import {
   type RealCategory,
 } from "@/hooks/useProductData";
 import { useAttributeDictionary } from "@/hooks/useAttributeDictionary";
-import { getMaterialCode, materialLabels } from "@/utils/material";
+import { getMaterialCode } from "@/utils/material";
 import {
   trackPageView,
   trackFilter,
@@ -28,13 +28,16 @@ import {
   useCommerceCapabilities,
 } from "@/store/featureFlags";
 import CatalogSearch from "./CatalogSearch";
+import "./catalogLayout.css";
 import {
   ActiveFilters,
   FilterDrawer,
   PrimaryNav,
   SecondaryNav,
   Toolbar,
+  type CatalogFilterValues,
 } from "./CatalogFilters";
+import { getCatalogPriceError } from "./CatalogFilterDrawer";
 import { CatalogPathways, ProductGrid } from "./CatalogProductSurface";
 import SelectionTray, { type SelectionLookupState } from "./SelectionTray";
 import { catNameById, getPrimaryCats } from "./catalogCategories";
@@ -47,9 +50,9 @@ import {
 } from "./CatalogCanvasCategories";
 import {
   catalogSort,
+  getCatalogSearchQuery,
   serializeWeightRanges,
   useURLParams,
-  type URLParamKey,
 } from "./catalogQuery";
 import { catalogTokens as T } from "./catalogTokens";
 import RouteLoading from "@/components/common/RouteLoading";
@@ -59,11 +62,19 @@ import {
 } from "./catalogReturnContext";
 
 const PAGE_SIZE = 32;
-// 兼容实际紧凑货号（ATP375、AA11412）和既有横杠编码；材质代码仍作为关键词。
-const SKU_RE = /^(?:[A-Z]{2,8}\d{2,12}(?:-[A-Z0-9]{1,12})?|[A-Z]{2,8}-[A-Z]{2,8}-\d{3,12}(?:-[A-Z0-9]{1,12})?)$/i;
-const MATERIAL_SEARCH_TERMS = new Set(
-  [...Object.keys(materialLabels), ...Object.values(materialLabels)].map((value) => value.toUpperCase()),
-);
+
+function filterQuery(values: CatalogFilterValues): Partial<ProductQuery> {
+  const minPrice = values.minPrice.trim();
+  const maxPrice = values.maxPrice.trim();
+  return {
+    materialTypes: values.materials.map(getMaterialCode).filter(Boolean).join(",") || undefined,
+    craftTechniques: values.crafts.join(",") || undefined,
+    sizes: values.sizes.join(",") || undefined,
+    weightRanges: serializeWeightRanges(values.weights),
+    minPrice: minPrice === "" ? undefined : Number(minPrice),
+    maxPrice: maxPrice === "" ? undefined : Number(maxPrice),
+  };
+}
 
 function namesForCategoryIds(categories: RealCategory[], ids: string): string[] {
   if (!ids) return [];
@@ -256,9 +267,11 @@ function StickyBar({
             appearance: "none",
           }}
         >
-          <option value="recommended">推荐</option>
-          <option value="newest">最新</option>
-          <option value="sku">货号</option>
+          <option value="recommended">综合</option>
+          <option value="newest">新品</option>
+          <option value="price_asc">价格从低到高</option>
+          <option value="price_desc">价格从高到低</option>
+          <option value="sku">款号升序</option>
         </select>
         {selCount > 0 && (
           <span style={{ fontSize: 11, color: T.sec }}>已选 {selCount}</span>
@@ -283,15 +296,9 @@ export default function Catalog({
   const { message } = AntdApp.useApp();
   const location = useLocation();
   const {
-    flags: commerceFlags,
-    loading: commerceFlagsLoading,
     error: commerceFlagsError,
     reload: reloadCommerceFlags,
   } = useCommerceCapabilities();
-  const commerceAllowed =
-    !commerceFlagsLoading &&
-    commerceFlags?.commerceEnabled === true &&
-    commerceFlags.cartEnabled === true;
   const decorationState = usePageDecorationState();
   const editorPreview = mode === "editor-preview";
   const hasLeadingDecoration =
@@ -302,18 +309,32 @@ export default function Catalog({
     if (editorPreview) return;
     setPageMeta({
       title: "选款中心 | 海川珠宝",
-      description: "按品类、材质与货号选款，加入心仪作品并提交选款咨询。",
+      description: "按品类、材质与款号选款，加入心仪作品并提交选款咨询。",
     });
     return () => clearPageMeta();
   }, [clearPageMeta, editorPreview, setPageMeta]);
 
   const { params, update, updateMany } = useURLParams(!editorPreview);
+  const filterValues = useMemo<CatalogFilterValues>(() => ({
+    materials: params.materials,
+    crafts: params.crafts,
+    weights: params.weights,
+    sizes: params.sizes,
+    minPrice: params.minPrice,
+    maxPrice: params.maxPrice,
+  }), [params]);
+  const priceOnly = params.minPrice !== "" || params.maxPrice !== ""
+    || params.sort === "price_asc" || params.sort === "price_desc";
   const [filterOpen, setFilterOpen] = useState(false);
+  const [filterDraft, setFilterDraft] = useState<CatalogFilterValues | null>(null);
   const filterTriggerRef = useRef<HTMLElement | null>(null);
   const resultsRef = useRef<HTMLElement | null>(null);
   const pendingPageFocusRef = useRef<number | null>(null);
   const pendingCatalogReturnRef = useRef<ReturnType<typeof readCatalogReturnContext>>(null);
-  const closeFilter = useCallback(() => setFilterOpen(false), []);
+  const closeFilter = useCallback(() => {
+    setFilterOpen(false);
+    setFilterDraft(null);
+  }, []);
 
   useEffect(() => {
     if (editorPreview || location.hash !== "#catalog-search-input") return;
@@ -400,44 +421,26 @@ export default function Catalog({
         : "",
     [categories, categoryTarget],
   );
-  const materialTypes = useMemo(
-    () =>
-      params.materials
-        .map(getMaterialCode)
-        .filter((code): code is string => Boolean(code))
-        .join(","),
-    [params.materials],
-  );
   const catalogQuery = useMemo<ProductQuery | null>(() => {
     if (categoryTarget && categoriesLoading) return null;
-    const keyword = params.query.trim();
-    const exactCode = keyword && SKU_RE.test(keyword) && !MATERIAL_SEARCH_TERMS.has(keyword.toUpperCase())
-      ? keyword
-      : undefined;
+    const { keyword, exactCode } = getCatalogSearchQuery(params.query);
     return {
       page: params.page,
       pageSize: PAGE_SIZE,
-      sortBy: catalogSort(params.sort),
+      sortBy: catalogSort(params.sort, Boolean(keyword)),
       includeFacets: "true",
-      exactCode,
-      keyword: keyword || undefined,
+      exactCode: priceOnly || params.materials.length || params.crafts.length
+        || params.weights.length || params.sizes.length ? undefined : exactCode,
+      keyword,
       categoryIds: categoryIds || undefined,
-      materialTypes: materialTypes || undefined,
-      craftTechniques:
-        params.crafts.length > 0
-          ? params.crafts.join(",")
-          : undefined,
-      sizes:
-        params.sizes.length > 0
-          ? params.sizes.join(",")
-          : undefined,
-      weightRanges: serializeWeightRanges(params.weights),
+      ...filterQuery(filterValues),
     };
   }, [
     categoriesLoading,
     categoryIds,
     categoryTarget,
-    materialTypes,
+    filterValues,
+    priceOnly,
     params,
   ]);
 
@@ -462,7 +465,41 @@ export default function Catalog({
   const apiError = productsError || (categoryTarget ? categoriesError : null);
   const catalogResponseCurrent = catalogDataQueryKey === catalogQueryKey;
   const tp = Math.ceil(total / PAGE_SIZE);
-  const sizeOptions = facets.sizes;
+  const sizeOptions = catalogResponseCurrent ? facets.sizes : [];
+  const draftQuery = useMemo<ProductQuery | null>(() => {
+    if (!filterOpen || !filterDraft || !catalogQuery
+      || getCatalogPriceError(filterDraft.minPrice, filterDraft.maxPrice)) return null;
+    const draftHasPrice = Boolean(filterDraft.minPrice.trim() || filterDraft.maxPrice.trim())
+      || params.sort === "price_asc" || params.sort === "price_desc";
+    const { exactCode } = getCatalogSearchQuery(params.query);
+    return {
+      ...catalogQuery,
+      ...filterQuery(filterDraft),
+      exactCode: draftHasPrice || filterDraft.materials.length || filterDraft.crafts.length
+        || filterDraft.weights.length || filterDraft.sizes.length ? undefined : exactCode,
+      page: 1,
+      pageSize: 1,
+      includeFacets: undefined,
+    };
+  }, [catalogQuery, filterDraft, filterOpen, params.query, params.sort]);
+  const draftResults = useProductData(draftQuery, {
+    loadCategories: false,
+    subscribe: false,
+    refreshKey: `${catalogAudience}:${catalogRevision}`,
+  });
+
+  // 翻页时单独读取同条件第一页供联想使用，其余情况复用主目录响应。
+  const firstPageSuggestionQuery = useMemo<ProductQuery | null>(
+    () => catalogQuery && params.page > 1 && params.query.trim()
+      ? { ...catalogQuery, page: 1, pageSize: 8, includeFacets: undefined }
+      : null,
+    [catalogQuery, params.page, params.query],
+  );
+  const firstPageSuggestions = useProductData(firstPageSuggestionQuery, {
+    loadCategories: false,
+    subscribe: false,
+    refreshKey: `${catalogAudience}:${catalogRevision}`,
+  });
 
   const selectedIdsKey = useMemo(
     () => Array.from(selectedIds).sort((a, b) => a - b).join(","),
@@ -543,7 +580,7 @@ export default function Catalog({
       params.materials.length ||
       params.crafts.length ||
       params.weights.length ||
-      params.sizes.length,
+      params.sizes.length || priceOnly,
   );
   const hasActiveFilters = Boolean(activeKeyword || hasStructuralFilters);
   const selectedCategoryNames = useMemo(
@@ -609,10 +646,35 @@ export default function Catalog({
       serverCatalogEmpty,
     ],
   );
-  const displayProducts = virtualCatalog?.pageItems ?? mergedProducts;
-  const displayTotal = virtualCatalog?.total ?? total;
+  const displayProducts = virtualCatalog ? (priceOnly ? [] : virtualCatalog.pageItems) : mergedProducts;
+  const displayTotal = virtualCatalog ? (priceOnly ? 0 : virtualCatalog.total) : total;
   const visibleResultTotal = virtualCatalog || catalogResponseCurrent ? displayTotal : 0;
-  const suggestionProducts = virtualCatalog?.matches ?? mergedProducts;
+  const draftPreviewLoading = draftQuery !== null && (
+    draftResults.loading || draftResults.refreshing || draftResults.dataQueryKey !== draftResults.queryKey
+  );
+  const draftPreviewReady = draftQuery !== null && !draftPreviewLoading
+    && !draftResults.error && !draftResults.refreshError;
+  const draftVirtualCatalog = filterDraft && serverCatalogEmpty ? selectVirtualCatalog({
+    keyword: params.query,
+    categoryNames: selectedCategoryNames,
+    categorySelected: Boolean(categoryTarget),
+    ...filterDraft,
+    sort: params.sort === "newest" || params.sort === "sku" ? params.sort : "recommended",
+    page: 1,
+    pageSize: 1,
+  }) : null;
+  const draftPreviewTotal = draftVirtualCatalog && filterDraft
+    ? (params.sort === "price_asc" || params.sort === "price_desc"
+      || filterDraft.minPrice.trim() || filterDraft.maxPrice.trim() ? 0 : draftVirtualCatalog.total)
+    : draftPreviewReady ? draftResults.total : null;
+  const suggestionsReady = virtualCatalog
+    ? true
+    : firstPageSuggestionQuery
+      ? firstPageSuggestions.dataQueryKey === firstPageSuggestions.queryKey
+        && !firstPageSuggestions.loading && !firstPageSuggestions.refreshing && !firstPageSuggestions.error
+      : catalogResponseCurrent && !apiLoading && !productsRefreshing && !apiError;
+  const suggestionProducts = virtualCatalog?.matches
+    ?? (firstPageSuggestionQuery ? firstPageSuggestions.products : mergedProducts);
   const showingVirtualWorks = virtualCatalog !== null && displayTotal > 0;
   const showCatalogLoading = !virtualCatalog
     && (apiLoading || productsRefreshing)
@@ -790,9 +852,11 @@ export default function Catalog({
         observer = new Observer(
           ([entry]) => {
             if (current !== generation) return;
-            // 底边越过当前可见页头下沿就换上吸顶条。只看 isIntersecting 时，
-            // 工具条底边贴齐视口仍算相交，页头收起后吸顶条会空缺。
-            setStickyVisible(entry.boundingClientRect.bottom <= offset + 1);
+            // 正常工具栏完全越过页头后才显示吸顶条；回滚碰到边界时即收起。
+            // 相交判定负责退出边界，位置判定排除工具栏还在视口下方的情况。
+            setStickyVisible(
+              !entry.isIntersecting && entry.boundingClientRect.bottom <= offset + 1,
+            );
           },
           { rootMargin: `-${offset}px 0px 0px 0px`, threshold: 0 },
         );
@@ -826,14 +890,40 @@ export default function Catalog({
       craft: [],
       weight: [],
       size: [],
+      minPrice: "",
+      maxPrice: "",
+      sort: "recommended",
     });
   };
-  const toggleArray = (key: URLParamKey, arr: string[], val: string) => {
-    const newArr = arr.includes(val)
-      ? arr.filter((x) => x !== val)
-      : [...arr, val];
-    update(key, newArr);
-    trackFilter(key, val);
+  const changeFilters = (changes: Partial<CatalogFilterValues>) => {
+    const next = { ...filterValues, ...changes };
+    updateMany({
+      material: next.materials,
+      craft: next.crafts,
+      weight: next.weights,
+      size: next.sizes,
+      minPrice: next.minPrice.trim(),
+      maxPrice: next.maxPrice.trim(),
+    });
+    trackFilter("catalog", Object.keys(changes).join(","));
+  };
+  const openFilter = (trigger: HTMLButtonElement) => {
+    filterTriggerRef.current = trigger;
+    setFilterDraft(filterValues);
+    setFilterOpen(true);
+  };
+  const clearPriceScope = () => {
+    updateMany({
+      minPrice: "",
+      maxPrice: "",
+      sort: params.sort === "price_asc" || params.sort === "price_desc" ? "recommended" : params.sort,
+    });
+  };
+  const clearAttributeFilters = () => {
+    updateMany({
+      material: [], craft: [], weight: [], size: [], minPrice: "", maxPrice: "",
+      sort: params.sort === "price_asc" || params.sort === "price_desc" ? "recommended" : params.sort,
+    });
   };
 
   useEffect(() => {
@@ -1119,13 +1209,14 @@ export default function Catalog({
       `}</style>
       <section
         className={`catalog-page__discovery${hasLeadingDecoration ? " is-compact" : ""}`}
-        aria-label={hasLeadingDecoration ? "选款中心检索" : undefined}
-        aria-labelledby={hasLeadingDecoration ? undefined : "catalog-page-title"}
+        aria-label={hasLeadingDecoration || decorationState.ownsPrimaryHeading ? "选款中心检索" : undefined}
+        aria-labelledby={hasLeadingDecoration || decorationState.ownsPrimaryHeading ? undefined : "catalog-page-title"}
       >
         <div className="catalog-page__discovery-main">
-          <h1 id="catalog-page-title" className="sr-only">选款中心</h1>
+          {decorationState.ownsPrimaryHeading ? null : <h1 id="catalog-page-title" className="sr-only">选款中心</h1>}
           <CatalogSearch
             query={params.query}
+            resolvedQuery={suggestionsReady ? params.query : null}
             products={suggestionProducts}
             categories={displayCategories}
             materials={materialOptions}
@@ -1176,19 +1267,17 @@ export default function Catalog({
           ) : null}
           <div ref={sentinelRef}>
             <Toolbar
+              values={filterValues}
               total={visibleResultTotal}
-              materials={params.materials}
               materialOptions={materialOptions}
+              craftOptions={craftOptions}
+              sizeOptions={sizeOptions}
               sort={params.sort}
               selCount={selCount}
-              onToggleMaterial={(m) =>
-                toggleArray("material", params.materials, m)
-              }
+              loading={apiLoading || productsRefreshing || !catalogResponseCurrent}
+              onChange={changeFilters}
               onSort={(s) => update("sort", s)}
-              onOpenFilter={(trigger) => {
-                filterTriggerRef.current = trigger;
-                setFilterOpen(true);
-              }}
+              onOpenFilter={openFilter}
             />
           </div>
           {stickyVisible ? (
@@ -1202,45 +1291,19 @@ export default function Catalog({
                 + params.crafts.length
                 + params.weights.length
                 + params.sizes.length
+                + Number(Boolean(params.minPrice || params.maxPrice))
               }
               onSort={(s) => update("sort", s)}
-              onOpenFilter={(trigger) => {
-                filterTriggerRef.current = trigger;
-                setFilterOpen(true);
-              }}
+              onOpenFilter={openFilter}
               categories={categories}
             />
           ) : null}
           <ActiveFilters
-            materials={params.materials}
-            crafts={params.crafts}
-            weights={params.weights}
-            sizes={params.sizes}
-            onClearMat={(m) =>
-              update(
-                "material",
-                params.materials.filter((x) => x !== m),
-              )
-            }
-            onClearCraft={(c) =>
-              update(
-                "craft",
-                params.crafts.filter((x) => x !== c),
-              )
-            }
-            onClearWeight={(w) =>
-              update(
-                "weight",
-                params.weights.filter((x) => x !== w),
-              )
-            }
-            onClearSize={(s) =>
-              update(
-                "size",
-                params.sizes.filter((x) => x !== s),
-              )
-            }
-            onClearAll={clearAll}
+            values={filterValues}
+            priceOnly={priceOnly}
+            onChange={changeFilters}
+            onClearAll={clearAttributeFilters}
+            onClearPriceScope={clearPriceScope}
           />
         </>
       ) : null}
@@ -1491,7 +1554,6 @@ export default function Catalog({
         ) : null}
         <ProductGrid
           products={displayProducts}
-          commerceAllowed={commerceAllowed}
           catalogUrl={catalogUrlForDetail}
           startIndex={(params.page - 1) * PAGE_SIZE}
         />
@@ -1513,27 +1575,20 @@ export default function Catalog({
         page={params.page}
         onPage={goToPage}
       />
-      {filterOpen && (
+      {filterOpen && filterDraft && (
         <FilterDrawer
-          materials={params.materials}
-          crafts={params.crafts}
+          values={filterDraft}
           materialOptions={materialOptions}
           craftOptions={craftOptions}
-          weights={params.weights}
-          sizes={params.sizes}
           sizeOptions={sizeOptions}
-          onMaterials={(m) => update("material", m)}
-          onCrafts={(c) => update("craft", c)}
-          onWeights={(w) => update("weight", w)}
-          onSizes={(s) => update("size", s)}
-          onClear={() => updateMany({
-            material: [],
-            craft: [],
-            weight: [],
-            size: [],
-          })}
+          onChange={setFilterDraft}
+          onApply={() => {
+            changeFilters(filterDraft);
+            closeFilter();
+          }}
           onClose={closeFilter}
-          total={visibleResultTotal}
+          total={draftPreviewTotal}
+          loading={draftPreviewLoading}
           returnFocusRef={filterTriggerRef}
         />
       )}

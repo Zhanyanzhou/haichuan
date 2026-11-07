@@ -35,6 +35,26 @@ import {
 
 const HISTORY_LIMIT = 50;
 
+export const TEMPLATE_CANVAS_SPACING_REQUEST = "template-editor:request-canvas-spacing";
+
+export type TemplateCanvasSpacingRequest = {
+  sessionId: string;
+  nodeId: string;
+  breakpoint: TemplateBreakpoint;
+};
+
+/** 只有接收请求的主编辑画布能确认其当前选区拥有留白手柄。 */
+export function requestTemplateCanvasSpacingEditing(nodeId: string, breakpoint: TemplateBreakpoint): boolean {
+  if (typeof window === "undefined") return false;
+  const state = useTemplateEditorSession.getState();
+  if (!state.sessionId || state.selectedObjectId !== nodeId || state.breakpoint !== breakpoint
+    || state.previewMode || state.selectedContractRole || state.activeInteraction) return false;
+  return !window.dispatchEvent(new CustomEvent<TemplateCanvasSpacingRequest>(TEMPLATE_CANVAS_SPACING_REQUEST, {
+    detail: { sessionId: state.sessionId, nodeId, breakpoint },
+    cancelable: true,
+  }));
+}
+
 export interface TemplateProductionReviewFacts {
   desktop: boolean;
   mobile: boolean;

@@ -73,6 +73,31 @@ function addComplexSlot(
   };
 }
 
+function workGridDefinition() {
+  const definition = definitionFixture();
+  definition.metadata.sectionRole = "creation-grid";
+  const workNodes = ["workA", "workB", "workC"].map((key) => {
+    addComplexSlot(definition, key, "ImageSlot", "image");
+    return `node_${key}`;
+  });
+  addComplexSlot(definition, "otherImage", "ImageSlot", "image");
+  const container = definition.nodes.node_container;
+  container.childIds = container.childIds.filter((id) => !workNodes.includes(id));
+  const grid = {
+    ...container,
+    nodeId: "node_work_grid",
+    type: "Grid" as const,
+    childIds: workNodes,
+    responsive: {
+      desktop: { ...container.responsive.desktop, display: "grid" as const, columns: [1, 1, 1] },
+      mobile: { ...container.responsive.mobile, display: "grid" as const, columns: [1, 1] },
+    },
+  };
+  definition.nodes[grid.nodeId] = grid;
+  definition.nodes.node_root.childIds.push(grid.nodeId);
+  return definition;
+}
+
 function dynamicTemplatePage(props: unknown) {
   return {
     content: [{ type: DYNAMIC_TEMPLATE_BLOCK_TYPE, props }],
@@ -271,6 +296,61 @@ test("完成稿的手机图和桌面图都进入素材校验", () => {
   ]);
 });
 
+test("作品网格的页面图片可以关联公开作品，草稿保留引用且发布校验定位图片槽位", async () => {
+  const definition = workGridDefinition();
+  const contentBySlotId = {
+    slot_workA: { src: "https://example.com/work-a.jpg", alt: "圆形宝石戒面", workProductCode: " WORK-123 " },
+    slot_workB: { src: "https://example.com/work-b.jpg", alt: "镶嵌耳饰", workProductCode: "" },
+    slot_workC: "https://example.com/work-c.jpg",
+  };
+  const props = instanceProps({ contentBySlotId });
+  const validation = validateDynamicTemplateInstance(props, definition);
+  assert.deepEqual(validation.actions, [{
+    slotId: "slot_workA", targetType: "product", value: "WORK-123", sourceField: "workProductCode",
+  }]);
+  const astralCode = "WORK-\u{20BB7}";
+  const withAstralCode = validateDynamicTemplateInstance(instanceProps({
+    contentBySlotId: { ...contentBySlotId, slot_workA: { ...contentBySlotId.slot_workA, workProductCode: astralCode } },
+  }), definition);
+  assert.equal(withAstralCode.actions[0]?.value, astralCode);
+  assert.deepEqual(validation.assets.map((asset) => asset.url), [
+    contentBySlotId.slot_workA.src, contentBySlotId.slot_workB.src, contentBySlotId.slot_workC,
+  ]);
+  assert.equal(validateDynamicTemplateInstance({ ...props, hiddenSlotIds: ["slot_workA"] }, definition).actions.length, 0);
+
+  const { service: draftService, writes } = createDraftSaveHarness(definition);
+  const draft = await draftService.savePageDocument("home", dynamicTemplatePage(props), {});
+  assert.ok(draft);
+  assert.deepEqual(draft.puckData, dynamicTemplatePage(props));
+  assert.equal(writes.create, 1);
+
+  let isPublic = false;
+  const db = {
+    dynamicTemplateVersion: { findMany: async () => [{
+      version: 3,
+      schemaVersion: definition.schemaVersion,
+      definition,
+      definitionChecksum: calculateDynamicTemplateDefinitionChecksum(definition),
+      template: { templateId: definition.templateId },
+    }] },
+    product: { findMany: async () => isPublic ? [{ code: "WORK-123", listingImageId: 1, images: [] }] : [] },
+    category: { findMany: async () => [] },
+    siteSetting: { findUnique: async () => null },
+  };
+  const service = new PageModulesService(db as unknown as PrismaService);
+  const collect = (service as unknown as {
+    collectPuckDataErrors(database: unknown, value: unknown, pageKey: string): Promise<Array<{ message: string; field?: string; path: string }>>;
+  }).collectPuckDataErrors.bind(service);
+  const document = { ...dynamicTemplatePage(props), root: { props: {} } };
+  const isUnpublishedWorkIssue = (issue: { message: string }) => issue.message.includes("WORK-123 未满足公开发布条件");
+  const unpublishedWorkIssue = (await collect(db, document, "home")).find(isUnpublishedWorkIssue);
+  assert.ok(unpublishedWorkIssue);
+  assert.equal(unpublishedWorkIssue.field, "slot_workA");
+  assert.match(unpublishedWorkIssue.path, /\.contentBySlotId\.slot_workA\.workProductCode$/);
+  isPublic = true;
+  assert.equal((await collect(db, document, "home")).some(isUnpublishedWorkIssue), false);
+});
+
 test("页面实例稳定身份与整体显隐状态遵循 V2 合同", () => {
   const result = validateDynamicTemplateInstance(instanceProps({
     instanceId: "包含空格的实例",
@@ -465,6 +545,23 @@ test("页面草稿实例授权问题全部在任何数据库写入前失败关�
       instanceProps(),
       /页面草稿实例授权无效.*不允许在页面中修改/,
     );
+  });
+
+  await t.test("拒绝非作品网格图片上的作品编号和错误编号类型", async () => {
+    const definition = workGridDefinition();
+    await assertDraftRejected(
+      definition,
+      instanceProps({ contentBySlotId: { slot_otherImage: { src: "", workProductCode: "WORK-123" } } }),
+      /页面草稿实例授权无效.*不是可关联作品的网格图片/,
+    );
+    const invalidWorkCodes = [123, "A".repeat(51), "A\u0000B", "A\u007fB", "A\uD800B", "A\uDC00B", " . ", " .. "];
+    for (const workProductCode of invalidWorkCodes) {
+      await assertDraftRejected(
+        definition,
+        instanceProps({ contentBySlotId: { slot_workA: { src: "", workProductCode } } }),
+        /页面草稿实例授权无效.*作品编号无效/,
+      );
+    }
   });
 
   await t.test("拒绝非法隐藏槽位", async () => {

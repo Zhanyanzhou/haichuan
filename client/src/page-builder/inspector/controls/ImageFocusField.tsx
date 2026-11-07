@@ -1,6 +1,6 @@
 import NumberField from "./NumberField";
 import ImageFocusPad, { type ImageFocusValue } from "./ImageFocusPad";
-import InspectorDisclosure from "../InspectorDisclosure";
+import InspectorFieldGroup from "../InspectorFieldGroup";
 
 export type { ImageFocusValue };
 
@@ -84,12 +84,12 @@ export default function ImageFocusField({
     </div>
   );
   const precise = allowPreciseInput ? (
-    <InspectorDisclosure label="精确百分比">
+    <InspectorFieldGroup label="精确百分比">
       <div className="template-editor__geometry-grid">
         <NumberField inspectorField={inspectorFieldKeys?.x} inspectorDevice={inspectorDevice} label="水平焦点" unit="%" min={0} max={100} value={normalized.x} disabled={disabled} onChange={(x) => onChange({ ...normalized, x })} />
         <NumberField inspectorField={inspectorFieldKeys?.y} inspectorDevice={inspectorDevice} label="垂直焦点" unit="%" min={0} max={100} value={normalized.y} disabled={disabled} onChange={(y) => onChange({ ...normalized, y })} />
       </div>
-    </InspectorDisclosure>
+    </InspectorFieldGroup>
   ) : null;
 
   return (

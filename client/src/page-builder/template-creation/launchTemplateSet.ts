@@ -720,10 +720,10 @@ const CREATION_GRID: MasterSpec = {
       "作品卡组",
       [
         // 四格是并列关系，没有主副之分，因此不声明语义角色。
-        imageSlot({ id: "workA", name: "作品图 1", key: "workA", label: "作品图 1", ratio: "4:5", desktop: { width: "fill" } }),
-        imageSlot({ id: "workB", name: "作品图 2", key: "workB", label: "作品图 2", ratio: "4:5", desktop: { width: "fill" } }),
-        imageSlot({ id: "workC", name: "作品图 3", key: "workC", label: "作品图 3", ratio: "4:5", desktop: { width: "fill" } }),
-        imageSlot({ id: "workD", name: "作品图 4", key: "workD", label: "作品图 4", ratio: "4:5", desktop: { width: "fill" } }),
+        imageSlot({ id: "workA", name: "作品图 1", key: "workA", label: "作品图 1", ratio: "4:5", fit: "contain", desktop: { width: "fill" } }),
+        imageSlot({ id: "workB", name: "作品图 2", key: "workB", label: "作品图 2", ratio: "4:5", fit: "contain", desktop: { width: "fill" } }),
+        imageSlot({ id: "workC", name: "作品图 3", key: "workC", label: "作品图 3", ratio: "4:5", fit: "contain", desktop: { width: "fill" } }),
+        imageSlot({ id: "workD", name: "作品图 4", key: "workD", label: "作品图 4", ratio: "4:5", fit: "contain", desktop: { width: "fill" } }),
       ],
       { columns: [1, 1, 1, 1], gap: px(TIGHT_GAP) },
       // 手机只记录两列。四张正好两行；奇数张的首张跨列仍由渲染器完成，不写进定义。
@@ -1031,6 +1031,9 @@ function buildMaster(spec: MasterSpec, templateId: string = masterTemplateId(spe
     previewMobileWidth: RESPONSIVE_CANVAS.mobile.width,
     visualRole: spec.visualRole,
     tags: [LAUNCH_CATEGORY, spec.title],
+    ...(spec.role === "page-hero"
+      ? { headerCompatibility: ["solid", "overlay-light"] }
+      : {}),
     ...(spec.mediaSideNodeId
       ? { pageSettings: { mediaSide: { targetNodeId: `${templateId}_node_${spec.mediaSideNodeId}`, authoredSide: "start" as const } } }
       : {}),

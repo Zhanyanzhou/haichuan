@@ -1,60 +1,23 @@
-import assert from "node:assert/strict";
-import { test } from "@playwright/test";
-import { pageEditorDockFits } from "../src/page-builder/workspace/pageEditorWorkspaceTiers";
+import { expect, test } from "@playwright/test";
+import { PAGE_EDITOR_DESKTOP_LAYOUT_WIDTH } from "../src/page-builder/workspace/pageEditorWorkspaceTiers";
+import { installAdminSession } from "./fixtures/session-auth";
 
-const dock = "dock" as const;
-const rail = "rail" as const;
+test("工作台首轮布局使用当前视口宽度", async ({ page }) => {
+  test.skip(process.env.PLAYWRIGHT_APP_MODE !== "mock", "使用隔离的 Mock 店铺装修验证布局");
+  await installAdminSession(page);
+  await page.setViewportSize({ width: 1920, height: 900 });
+  await page.goto("/admin/editor/home");
+  await expect(page.getByRole("toolbar", { name: "编辑器主要操作" })).toBeVisible();
 
-test("1440 起四区停靠后画布仍不低于 640", () => {
-  assert.equal(pageEditorDockFits(1440, {
-    library: dock,
-    structure: dock,
-    inspector: dock,
-  }), true);
-  assert.equal(pageEditorDockFits(1920, {
-    library: dock,
-    structure: dock,
-    inspector: dock,
-  }), true);
-});
-
-test("1200 到 1439 默认收起组件库；靠近 1440 时手动展开可以停靠", () => {
-  assert.equal(pageEditorDockFits(1280, {
-    library: rail,
-    structure: dock,
-    inspector: dock,
-  }), true);
-  assert.equal(pageEditorDockFits(1280, {
-    library: dock,
-    structure: dock,
-    inspector: dock,
-  }), false);
-  assert.equal(pageEditorDockFits(1400, {
-    library: dock,
-    structure: dock,
-    inspector: dock,
-  }), true);
-});
-
-test("1025 到 1199 只停靠属性面板，再打开图层面板会压到画布底线", () => {
-  assert.equal(pageEditorDockFits(1100, {
-    library: rail,
-    structure: rail,
-    inspector: dock,
-  }), true);
-  assert.equal(pageEditorDockFits(1100, {
-    library: rail,
-    structure: dock,
-    inspector: dock,
-  }), false);
-  assert.equal(pageEditorDockFits(1025, {
-    library: rail,
-    structure: rail,
-    inspector: dock,
-  }), true);
-  assert.equal(pageEditorDockFits(1200, {
-    library: rail,
-    structure: dock,
-    inspector: dock,
-  }), true);
+  const shell = page.locator(".admin-shell-v7");
+  for (const width of [1920, 1080, 1024, 1025, 1440, 1200]) {
+    await page.setViewportSize({ width, height: 900 });
+    const measured = await shell.evaluate((element) => ({
+      scale: Number(getComputedStyle(element).zoom),
+      pageWidth: document.documentElement.scrollWidth,
+    }));
+    const expected = width <= 1024 ? 1 : Math.min(1, width / PAGE_EDITOR_DESKTOP_LAYOUT_WIDTH);
+    expect(measured.scale).toBeCloseTo(expected, 5);
+    expect(measured.pageWidth).toBeLessThanOrEqual(width + 1);
+  }
 });

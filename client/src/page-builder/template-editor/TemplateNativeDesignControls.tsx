@@ -19,13 +19,13 @@ import {
   type TemplateBreakpoint,
 } from "../template-definition/responsive";
 import { objectPositionToPercent, percentToExactObjectPosition } from "../template-definition/imagePosition";
-import { useTemplateEditorSession } from "./templateEditorSession";
+import { resolveTemplateImageSource } from "../template-definition/imageContent";
+import { requestTemplateCanvasSpacingEditing, useTemplateEditorSession } from "./templateEditorSession";
 import TemplateAnchorControls from "./TemplateAnchorControls";
 import TemplateNativeResponsiveControls from "./TemplateNativeResponsiveControls";
 import TemplateDefaultContentControls from "./TemplateDefaultContentControls";
 import ImageFocusField from "../inspector/controls/ImageFocusField";
 import { setTemplateLogicalDesignWidth } from "./templateDesignWidth";
-import { getTemplateLayoutPresentation } from "./templateLayoutPresentation";
 import { isRenderedTypographyProperty, useTemplateRenderedPropertyValues } from "./useTemplateRenderedPropertyValues";
 import {
   describeTemplateEffectiveValue, getTemplateAlignmentRules, getTemplateDesignRange,
@@ -49,7 +49,6 @@ export type NativeDesignProperty = {
   units?: readonly string[];
   /** 由专用布局控件编辑，仍参与同源分组复制与恢复。 */
   descriptorOnly?: boolean;
-  ratio?: boolean;
   read: (context: Context) => unknown;
   encode: (value: unknown, context: Context) => unknown;
 };
@@ -82,9 +81,10 @@ const ROOT_RATIO_PRESETS = {
   desktop: STANDARD_TEMPLATE_CANVAS_PAIRS.map(({ desktop }) => [desktop.width, desktop.height] as const),
   mobile: STANDARD_TEMPLATE_CANVAS_PAIRS.map(({ mobile }) => [mobile.width, mobile.height] as const),
 } as const;
+const HERO_FRAME_PRESETS = new Set(["2:1", "16:9", "3:2"]);
 const OBJECT_RATIO_PRESETS = [[1, 1], [4, 5], [16, 9]] as const;
 const CONTAINER_RATIO_PRESETS = [[2, 1], [16, 9], [4, 5], [1, 1]] as const;
-const canResetSystemValue = (property: Property) => (property.slot ? RESETTABLE_TEXT_PROPERTIES : RESETTABLE_NODE_PROPERTIES).has(property.path);
+const canResetSystemValue = (property: Pick<Property, "slot" | "path">) => (property.slot ? RESETTABLE_TEXT_PROPERTIES : RESETTABLE_NODE_PROPERTIES).has(property.path);
 
 function hexLuminance(color: string): number | undefined {
   const match = /^#([0-9a-f]{6})$/i.exec(color.trim());
@@ -189,9 +189,8 @@ export function getNativeDesignProperties(definition: TemplateDefinitionV2, node
   });
   if (rules.height.mode === "fixed" || rules.height.mode === "min-height") fields.push(length("height.value", "高度"));
   if (rules.height.mode === "viewport") fields.push({ ...length("height.value", "视口相对高度"), units: ["vh", "vw"] });
-  if (rules.height.mode === "aspect-ratio") {
-    if (nodeId === definition.rootNodeId) fields.push({ ...scalar("height.ratio", "整体比例", "尺寸与位置", 1, 1000), ratio: true });
-    else fields.push(scalar("height.ratio.width", "比例宽", "尺寸与位置", 1, 1000), scalar("height.ratio.height", "比例高", "尺寸与位置", 1, 1000));
+  if (rules.height.mode === "aspect-ratio" && nodeId !== definition.rootNodeId) {
+    fields.push(scalar("height.ratio.width", "比例宽", "尺寸与位置", 1, 1000), scalar("height.ratio.height", "比例高", "尺寸与位置", 1, 1000));
   }
   }
   fields.push(length("minWidth", "最小宽度", "尺寸限制"), length("maxWidth", "最大宽度", "尺寸限制"), length("minHeight", "最小高度", "尺寸限制"), length("maxHeight", "最大高度", "尺寸限制"));
@@ -253,22 +252,47 @@ export function getNativeDesignProperties(definition: TemplateDefinitionV2, node
   return fields;
 }
 
-function PropertyInput({ property, value, mixed, disabled, preview, commit, cancel, unit, optionDisabledReason, interactionStartValue }: {
+const WEIGHT_LABELS: Record<string, string> = { "300": "细", "400": "常规", "500": "中等" };
+
+function PropertyInput({ property, value, mixed, disabled, preview, commit, cancel, unit, optionDisabledReason, interactionStartValue, compact = false, visual = false, titleWeight = false }: {
   property: Property; value: unknown; mixed: boolean; disabled: boolean;
   preview: (value: unknown) => unknown; commit: (value: unknown) => unknown; cancel: () => void;
   unit?: string;
   optionDisabledReason: (value: string) => string | undefined;
   interactionStartValue: number;
+  compact?: boolean;
+  visual?: boolean;
+  titleWeight?: boolean;
 }) {
-  if (property.ratio) {
-    const ratio = value as { width: number; height: number };
-    return <fieldset className="template-native__ratio-input" aria-label={property.label}>
-      <legend>{property.label} · 宽 : 高</legend>
-      {(["width", "height"] as const).map((axis) => <NumberField key={axis} label={axis === "width" ? "比例宽" : "比例高"}
-        value={mixed ? undefined : ratio?.[axis]} min={1} max={1000} disabled={disabled} step={1}
-        onPreview={(next) => preview({ ...ratio, [axis]: next })} onCancel={cancel}
-        onChange={(next) => commit({ ...ratio, [axis]: next })} commitUnchanged displayPrecision={2} />)}
-    </fieldset>;
+  if (visual && property.options) {
+    const fit = property.path === "objectFit";
+    const weight = property.path === "fontWeight";
+    const current = value === undefined ? (fit ? "cover" : undefined) : String(value);
+    const choices = titleWeight && weight ? property.options.filter(([key]) => Number(key) <= 400) : property.options;
+    const historical = current !== undefined && !choices.some(([key]) => key === current);
+    return <div className="template-native__visual-property" role="group" aria-label={property.label}>
+      <span>{property.label}</span>
+      <div className="template-native__visual-options">
+        {choices.map(([key, label]) => {
+          const reason = optionDisabledReason(key);
+          return <button key={key} type="button" aria-pressed={key === current} disabled={disabled || Boolean(reason)}
+            title={reason} onClick={() => {
+              if (key !== current && !focusFirstInvalidNumberField()) commit(key);
+            }}>
+            {fit ? <svg aria-hidden="true" viewBox="0 0 48 30" width="48" height="30">
+              <rect x="8" y="3" width="32" height="24" rx="2" />
+              {key === "cover" ? <path d="M8 23l10-10 7 7 5-4 10 9M30 9h3" /> : <path d="M12 9h24v12H12zM12 20l7-6 5 4 3-3 9 5" />}
+            </svg> : weight ? <span aria-hidden="true" className="template-native__weight-sample" style={{ fontWeight: Number(key) }}>字</span> : (
+              <svg aria-hidden="true" viewBox="0 0 28 22" width="28" height="22">
+                <path d={key === "left" ? "M4 5h20M4 11h13M4 17h17" : key === "right" ? "M4 5h20M11 11h13M7 17h17" : "M4 5h20M8 11h12M6 17h16"} />
+              </svg>
+            )}
+            {weight ? WEIGHT_LABELS[key] : label}
+          </button>;
+        })}
+      </div>
+      {historical ? <small>当前为{fit && current === "fill" ? "拉伸填满" : `已有值 ${current}`}</small> : current === undefined ? <small>沿用页面样式</small> : null}
+    </div>;
   }
   if (property.options) return <label className="template-editor__simple-select">{property.label}
     <select aria-label={property.label} disabled={disabled} value={mixed ? "mixed" : value === undefined ? "" : String(value)} onChange={(event) => commit(event.target.value)}>
@@ -277,7 +301,7 @@ function PropertyInput({ property, value, mixed, disabled, preview, commit, canc
       {!mixed && value !== undefined && !property.options.some(([key]) => key === String(value)) ? <option value={String(value)} disabled>{property.path === "height" && value === "viewport" ? "随视口高度（已有值）" : property.path === "objectFit" && value === "fill" ? "拉伸填满（已有值）" : `当前值：${String(value)}（保留）`}</option> : null}
       {property.options.map(([key, label]) => <option value={key} key={key} disabled={Boolean(optionDisabledReason(key))}>{label}{optionDisabledReason(key) ? `（${optionDisabledReason(key)}）` : ""}</option>)}
     </select>
-    {property.options.some(([key]) => optionDisabledReason(key)) ? <details className="template-native__unavailable-options"><summary>查看尺寸方式限制</summary>{property.options.flatMap(([key, label]) => optionDisabledReason(key) ? [<small key={key}>{label}不可用：{optionDisabledReason(key)}</small>] : [])}</details> : null}
+    {!compact && property.options.some(([key]) => optionDisabledReason(key)) ? <details className="template-native__unavailable-options"><summary>查看尺寸方式限制</summary>{property.options.flatMap(([key, label]) => optionDisabledReason(key) ? [<small key={key}>{label}不可用：{optionDisabledReason(key)}</small>] : [])}</details> : null}
   </label>;
   return <NumberField label={property.label} value={mixed ? undefined : value as number | undefined}
     placeholder={mixed ? "混合值" : "未显式设置"} disabled={disabled} min={property.min} max={property.max}
@@ -287,27 +311,24 @@ function PropertyInput({ property, value, mixed, disabled, preview, commit, canc
     onUnitChange={property.unit === "px" && !mixed ? (nextUnit, nextValue) => commit({ value: nextValue, unit: nextUnit }) : undefined} />;
 }
 
-function PropertyMetadata({ label, children }: { label: string; children: ReactNode }) {
-  return <details className="template-native__property-metadata"><summary title="来源与跨设备操作">{label}</summary>{children}</details>;
-}
-
-function PropertyGroup({ name, title, summary, secondary, children }: {
-  name: string; title: string; summary: string; secondary: boolean; children: ReactNode;
+function PropertyGroup({ name, title, summary, children }: {
+  name: string; title: string; summary: string; children: ReactNode;
 }) {
   const className = `template-editor__settings-section template-native__section ${name === "尺寸与位置" ? "template-native__dimensions" : ""}`;
-  return secondary ? <details className="template-native__secondary-group" data-template-property-group={name}
-    onToggle={(event) => {
-      if (!event.currentTarget.open && event.currentTarget.querySelector('[aria-invalid="true"]')) {
-        event.currentTarget.open = true;
-        focusFirstInvalidNumberField();
-      }
-    }}>
-    <summary><span>{title}</span>{summary ? <small>{summary}</small> : null}</summary>
-    <section className={className}>{children}</section>
-  </details> : <section className={className} data-template-property-group={name}><h3>{title}</h3>{children}</section>;
+  return <section className={className} data-template-property-group={name}>
+    <h3 aria-label={title}>{title}{summary ? <small>{summary}</small> : null}</h3>
+    {children}
+  </section>;
 }
 
-export default function TemplateNativeDesignControls({ nodeIds, layoutControls, onOpenPageScope }: { nodeIds: string[]; layoutControls?: (context: { disabled: boolean }) => ReactNode; onOpenPageScope?: () => void }) {
+export default function TemplateNativeDesignControls({ nodeIds, layoutControls, onOpenPageScope, onStartCanvasEdit, showIssueControls = false, showDefaultContent = false }: {
+  nodeIds: string[];
+  layoutControls?: (context: { disabled: boolean; presetsOnly?: boolean }) => ReactNode;
+  onOpenPageScope?: () => void;
+  onStartCanvasEdit?: () => void;
+  showIssueControls?: boolean;
+  showDefaultContent?: boolean;
+}) {
   const draft = useTemplateEditorSession((state) => state.draft);
   const baseline = useTemplateEditorSession((state) => state.baseline);
   const previewDocument = useTemplateEditorSession((state) => state.previewDocument);
@@ -345,7 +366,9 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
   const ids = nodeIds.filter((id) => original.nodes[id] && !protectedIds.has(id));
   const firstId = ids[0] ?? nodeIds[0];
   if (!firstId || !original.nodes[firstId]) return null;
-  const targetBreakpoint = scope === "base" ? "desktop" : breakpoint;
+  const sectionRole = original.metadata.sectionRole ?? original.templateRecipe?.sectionRole;
+  const heroPresetView = sectionRole === "page-hero" && !showIssueControls;
+  const targetBreakpoint = !heroPresetView && scope === "base" ? "desktop" : breakpoint;
   const positionedIds = ids.filter((id) => getNativeDesignProperties(original, id, targetBreakpoint).some((property) => property.path.startsWith("placement.")));
   const ratioMeasurementMissing = positionedIds.some((id) => renderedValues[id]?.breakpoint !== targetBreakpoint || !(Number(renderedValues[id]?.borderWidth) > 0 && Number(renderedValues[id]?.borderHeight) > 0));
   const foreignInteraction = Boolean(activeInteraction && activeInteraction.token !== token.current);
@@ -422,7 +445,7 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
       return result.ok ? state.commitInteraction(current) : result;
     } else return state.executeCommand(command(property, value));
   };
-  const reset = (property: Property) => {
+  const reset = (property: Pick<Property, "label" | "path" | "slot">) => {
     cancel();
     const isSystemReset = targetBreakpoint === "desktop";
     if (isSystemReset && !canResetSystemValue(property)) return;
@@ -486,7 +509,6 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
   const isRootSelection = nodeIds.length === 1 && firstId === original.rootNodeId;
   const overallFrame = isRootSelection ? resolveTemplateDesignFrame(effective, targetBreakpoint) : undefined;
   const previewFrame = isRootSelection ? resolveTemplatePreviewViewport(effective, device === "mobile" ? "mobile" : "desktop") : undefined;
-  const sectionRole = original.metadata.sectionRole ?? original.templateRecipe?.sectionRole;
   const sectionCopyNodeIds = isRootSelection && Number(original.schemaVersion) >= 2
     ? Object.values(original.nodes).flatMap((node) => {
       const slot = node.slotId ? original.slots[node.slotId] : undefined;
@@ -528,6 +550,10 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
     : allContainers ? ["布局", "尺寸与位置", "间距与对齐", "文字或媒体", "尺寸限制", "外观"]
       : ["尺寸与位置", "文字或媒体", "间距与对齐", "布局", "尺寸限制", "外观"];
   const propertiesForGroup = (group: string) => {
+    if (isRootSelection && group === "间距与对齐") return descriptors.filter((property) => property.path.startsWith("padding."));
+    if (isRootSelection && group === "布局") return descriptors.filter((property) =>
+      property.group === "布局" || (property.group === "间距与对齐" && !property.path.startsWith("padding."))
+    );
     if (group === "文字细节") return allText ? descriptors.filter((property) => property.group === "文字或媒体" && TEXT_DETAIL_PATHS.has(property.path)) : [];
     if (group === "文字或媒体" && allText) return descriptors.filter((property) => property.group === "文字或媒体" && TEXT_PRIMARY_PATHS.has(property.path));
     // 单选图片：焦点改由拖点控件承担，不再并排两行百分比。
@@ -544,12 +570,7 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
     if (!imageFocusEnabled) return undefined;
     const slotId = original.nodes[firstId]?.slotId;
     if (!slotId) return undefined;
-    const content = original.defaultContent[slotId];
-    if (typeof content === "string") return content;
-    if (content && typeof content === "object" && typeof (content as { src?: unknown }).src === "string") {
-      return (content as { src: string }).src;
-    }
-    return undefined;
+    return resolveTemplateImageSource(original.defaultContent[slotId], targetBreakpoint) || undefined;
   })();
   const imagePreviewFit = imageFocusEnabled
     ? ((context(effective, firstId).slot.objectFit ?? "cover") as "cover" | "contain" | "fill")
@@ -562,35 +583,9 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
   };
   const changedSinceSave = (property: Property) => Boolean(baseline && ids.some((id) => JSON.stringify(storedValue(original, id, property)) !== JSON.stringify(storedValue(baseline.definition, id, property))));
   const groupSummary = (group: string) => {
-    const properties = propertiesForGroup(group);
-    const configured = properties.filter((property) => ids.some((id) => storedValue(original, id, property) !== undefined)).length;
-    const changed = properties.filter(changedSinceSave).length;
-    return [configured ? `${configured} 项已设置` : "未单独设置", changed ? `${changed} 项未保存` : !baseline ? "新草稿" : ""].filter(Boolean).join(" · ");
+    const changed = propertiesForGroup(group).filter(changedSinceSave).length;
+    return changed ? `${changed} 项未保存` : "";
   };
-  // 布局组先处理排列和间距；外框尺寸收进折叠标题，标题上保留当前比例。
-  const containerFrameSummary = allContainers && !isRootSelection && nodeIds.length === 1
-    ? (() => {
-      const rules = context(effective, firstId).rules;
-      const width = Number(renderedValues[firstId]?.borderWidth);
-      const height = Number(renderedValues[firstId]?.borderHeight);
-      const proportion = rules.height.mode === "aspect-ratio"
-        ? describeTemplateFrameProportion(
-          rules.height.mode,
-          width,
-          height,
-          rules.height.ratio ? `${rules.height.ratio.width}:${rules.height.ratio.height}` : undefined,
-        )
-        : rules.height.mode === "fixed" ? "固定高度"
-          : rules.height.mode === "min-height" ? "最小高度"
-            : rules.height.mode === "fill" ? "填满可用空间"
-              : rules.height.mode === "fit" ? "适应内容"
-                : "随内容";
-      const pixels = Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0
-        ? `${Math.round(width)}×${Math.round(height)}`
-        : "";
-      return [proportion, pixels].filter(Boolean).join(" · ");
-    })()
-    : "";
   const frameRules = context(effective, firstId).rules;
   const lockedFrameRatio = nodeIds.length === 1 && (overallFrame?.pairedCanvas || frameRules.height.mode === "aspect-ratio")
     ? overallFrame?.ratioLabel && overallFrame.ratioLabel !== "auto"
@@ -607,12 +602,94 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
     )
     : "";
   const controlsDisabled = !ids.length || Boolean(pendingRatio || pendingLayout) || foreignInteraction;
+  const canDragPadding = allContainers && nodeIds.length === 1 && descriptors.some((property) => {
+    if (!property.path.startsWith("padding.")) return false;
+    const edge = readPath(context(original, firstId).rules, property.path) as { unit: string } | undefined;
+    return !edge || edge.unit === "px";
+  });
   const layoutScopeMismatch = allContainers && nodeIds.length === 1 && targetBreakpoint !== breakpoint;
   const layoutDisabled = !ids.length || Boolean(pendingRatio || pendingLayout) || layoutScopeMismatch;
   const layoutScopeNotice = layoutScopeMismatch ? <p className="template-native__scope-notice" role="status">
     当前查看{DEVICE_NAMES[breakpoint]}画布，但修改范围是桌面基础。排列转换需要在目标画布预览。
     <button type="button" onClick={() => { if (!focusFirstInvalidNumberField()) useTemplateEditorSession.getState().setBreakpoint("desktop"); }}>切换到桌面画布</button>
   </p> : null;
+  const ratioPresets = <div className="template-native__ratio" role="group" aria-label={isRootSelection ? "模板整体比例预设" : "对象外框比例预设"} data-template-shared-scope={isRootSelection ? "frame" : undefined} data-template-design-property={isRootSelection ? "node.height.ratio" : undefined}>
+    <span title="调整对象高度与宽度的关系，不修改图片内容焦点">{isRootSelection ? "标准双端画幅" : "外框比例"}</span>
+    {isRootSelection && !heroPresetView ? <small>先在画布预览。确认后，桌面和手机一起应用所选画幅。</small> : null}
+    {ratioMeasurementMissing ? <small>请先聚焦修改范围对应的设备并显示对象，才能按实际尺寸调整比例。</small> : null}
+    {(isRootSelection ? ROOT_RATIO_PRESETS[targetBreakpoint === "mobile" ? "mobile" : "desktop"] : allContainers ? CONTAINER_RATIO_PRESETS : OBJECT_RATIO_PRESETS)
+      .filter(([width, height]) => !heroPresetView || HERO_FRAME_PRESETS.has(targetBreakpoint === "mobile" ? `${height}:${width}` : `${width}:${height}`))
+      .map(([width, height]) => <button type="button" key={`${width}:${height}`} aria-label={`${width}:${height}`} aria-pressed={ids.length > 0 && ids.every((id) => {
+      if (isRootSelection) {
+        if (effective.metadata.geometryPolicy !== "paired-canvas") return false;
+        const desktopFrame = resolveTemplateDesignFrame(effective, "desktop");
+        const mobileFrame = resolveTemplateDesignFrame(effective, "mobile");
+        return Boolean(mobileFrame.pairedCanvas && desktopFrame.heightMode === "aspect-ratio"
+          && desktopFrame.ratioLabel === (targetBreakpoint === "mobile" ? `${height}:${width}` : `${width}:${height}`)
+          && mobileFrame.ratioLabel === (targetBreakpoint === "mobile" ? `${width}:${height}` : `${height}:${width}`));
+      }
+      if (positionedIds.includes(id)) return renderedValues[id]?.breakpoint === targetBreakpoint && Math.abs(Number(renderedValues[id]?.borderWidth) / Number(renderedValues[id]?.borderHeight) - width / height) < .001;
+      const rule = context(effective, id).rules.height; return rule.mode === "aspect-ratio" && Boolean(rule.ratio && rule.ratio.width * height === rule.ratio.height * width);
+    })} disabled={!ids.length || Boolean(pendingLayout) || foreignInteraction || ratioMeasurementMissing} onClick={() => {
+      if (focusFirstInvalidNumberField()) return;
+      if (!pendingRatio) for (const id of positionedIds) {
+        const placement = context(original, id).rules.placement!;
+        ratioParentSizes.current[id] = { width: Number(renderedValues[id].borderWidth) / placement.width, height: Number(renderedValues[id].borderHeight) / placement.height };
+      }
+      const value = { width, height };
+      const result = edit(OBJECT_RATIO_PROPERTY, value, true);
+      setPendingAll(null); setOperationError(result && !result.ok ? result.message : null);
+      setPendingRatio(result?.ok ? value : null);
+    }}><svg aria-hidden="true" data-template-ratio-shape={`${width}:${height}`} viewBox="0 0 48 42" focusable="false"><rect x={(48 - 34 * width / Math.max(width, height)) / 2} y={(42 - 34 * height / Math.max(width, height)) / 2} width={34 * width / Math.max(width, height)} height={34 * height / Math.max(width, height)} /></svg><span>{width}:{height}</span>{isRootSelection ? <small>{targetBreakpoint === "mobile" ? "桌面" : "手机"} {height}:{width}</small> : null}</button>)}
+    {pendingRatio ? <div role="group" aria-label="确认对象比例"><p>{heroPresetView
+      ? "确认后应用到桌面和手机，手机恢复跟随画幅。可撤销。"
+      : isRootSelection
+      ? `正在预览标准双端画幅：桌面 ${targetBreakpoint === "mobile" ? `${pendingRatio.height}:${pendingRatio.width}` : `${pendingRatio.width}:${pendingRatio.height}`}，手机 ${targetBreakpoint === "mobile" ? `${pendingRatio.width}:${pendingRatio.height}` : `${pendingRatio.height}:${pendingRatio.width}`}。确认会替换两端整体高度/比例，并让原先跟随整节的舞台和图片槽位改到新画幅。手机恢复自动跟随。文字、链接和独立比例（作品卡 4:5、Logo）保留，可一次撤销。`
+      : `画布正在预览 ${pendingRatio.width}:${pendingRatio.height}；确认后写入${targetBreakpoint === "desktop" ? "桌面基础" : "手机覆盖"}，可一次撤销。`}</p>
+      <button type="button" onClick={() => {
+        const result = edit(OBJECT_RATIO_PROPERTY, pendingRatio, false);
+        ratioParentSizes.current = {};
+        setOperationError(result && !result.ok ? result.message : null); setPendingRatio(null);
+      }}>确认对象比例</button>
+      <button type="button" onClick={() => { cancel(); setPendingRatio(null); }}>取消比例预览</button>
+    </div> : null}
+  </div>;
+  if (heroPresetView) {
+    const children = allContainers && nodeIds.length === 1 ? getTemplateVisibleLayoutChildIds(original, firstId, breakpoint) : [];
+    const layoutChildId = isRootSelection && children.length === 1
+      && getTemplateVisibleLayoutChildIds(original, children[0], breakpoint).length >= 2
+      ? children[0] : null;
+    const hiddenOnDevice = frameRules.display === "none" || frameRules.hidden;
+    return <section className="template-editor__native-design template-native__hero-presets" data-template-overall-design={isRootSelection || undefined} aria-label="首屏常用属性">
+      {operationError ? <p role="alert">{operationError}</p> : null}
+      {isRootSelection ? <section className="template-editor__settings-section template-native__section">
+        <h3>首屏画幅</h3>
+        <div className="template-native__hero-frames" role="group" aria-label="当前双端画幅">
+          {(["desktop", "mobile"] as const).map((screen) => {
+            const frame = resolveTemplateDesignFrame(effective, screen);
+            return <span key={screen}>{DEVICE_NAMES[screen]} <strong>{frame.ratioLabel === "auto" ? "随内容" : frame.ratioLabel}</strong></span>;
+          })}
+        </div>
+        {ratioPresets}
+      </section> : null}
+      {layoutChildId ? <button type="button" disabled={controlsDisabled} onClick={() => {
+        if (!focusFirstInvalidNumberField()) useTemplateEditorSession.getState().selectObject(layoutChildId);
+      }}>查看图文排列</button> : null}
+      {children.length >= 2 ? layoutControls?.({ disabled: layoutDisabled, presetsOnly: true }) : null}
+      {nodeIds.length === 1 && !isRootSelection && showDefaultContent ? (
+        <TemplateDefaultContentControls key={`${firstId}:${breakpoint}`} section="content" nodeId={firstId} breakpoint={breakpoint} disabled={controlsDisabled} onOpenPageScope={onOpenPageScope} />
+      ) : null}
+      {sectionCopyState ? <div className="template-native__copy-visibility" data-template-section-copy={sectionCopyState} data-template-shared-scope="copy">
+        <strong>双端标题与说明</strong>
+        <div role="group" aria-label="标题与说明">
+          <button type="button" aria-pressed={sectionCopyState === "hidden"} disabled={controlsDisabled} onClick={() => setSectionCopyVisibility(false)}>不显示</button>
+          <button type="button" aria-pressed={sectionCopyState === "shown"} disabled={controlsDisabled} onClick={() => setSectionCopyVisibility(true)}>显示</button>
+        </div>
+        {sectionCopyState === "mixed" ? <small>当前部分显示</small> : null}
+      </div> : null}
+      {nodeIds.length === 1 && hiddenOnDevice ? <button type="button" data-template-inspector-field="responsive.*.display" disabled={controlsDisabled || selectedNodes.some((node) => node.hidden)} onClick={() => changeVisibility(false)}>在当前设备显示</button> : null}
+    </section>;
+  }
   return <section className="template-editor__native-design" data-template-overall-design={isRootSelection || undefined} aria-label={nodeIds.length > 1 ? "多选设计属性" : "对象设计属性"}>
     {operationError ? <p role="alert">{operationError}</p> : null}
     <div className="template-native__editing-context" aria-label="当前编辑范围">
@@ -628,80 +705,42 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
       cancel(); const result = useTemplateEditorSession.getState().executeCommand({ type: "update-definition", label: "取消所选对象结构隐藏", update: (next) => { for (const id of ids) next.nodes[id].hidden = false; } });
       setOperationError(result.ok ? null : result.message);
     }}>取消结构隐藏（所有设备）</button></p> : null}
-    {(resolveTemplateNodeRules(original, firstId, breakpoint).display === "none" || resolveTemplateNodeRules(original, firstId, breakpoint).hidden) ? <p role="status">此对象在当前断点隐藏，可恢复显示或选择父级。<button type="button" disabled={controlsDisabled || selectedNodes.some((node) => node.hidden)} onClick={() => changeVisibility(false)}>在当前设备显示</button></p> : null}
+    {(resolveTemplateNodeRules(original, firstId, breakpoint).display === "none" || resolveTemplateNodeRules(original, firstId, breakpoint).hidden) ? <p role="status">此对象在当前断点隐藏，可恢复显示或选择父级。<button type="button" data-template-inspector-field="responsive.*.display" disabled={controlsDisabled || selectedNodes.some((node) => node.hidden)} onClick={() => changeVisibility(false)}>在当前设备显示</button></p> : null}
     {allContainers && nodeIds.length === 1 && !isRootSelection ? <>{layoutScopeNotice}{layoutControls?.({ disabled: layoutDisabled })}</> : null}
     {groupOrder.filter((group) => propertiesForGroup(group).length > 0 || (group === "布局" && isRootSelection && layoutControls)).map((group) => <PropertyGroup key={`${selectionKey}:${group}`} name={isRootSelection && group === "布局" ? "排列与分栏" : group}
-      title={isRootSelection && group === "尺寸与位置" ? "模板整体尺寸与比例" : group === "文字或媒体" ? allImages ? "图片适配与焦点" : allText ? "文字排版" : "文字或媒体" : group === "文字细节" ? "字体与换行" : group === "外观" ? "背景与边框" : group === "布局" && allContainers ? "排列与分栏" : group}
-      summary={isRootSelection && group === "布局" ? getTemplateLayoutPresentation(context(effective, firstId).rules).label : group === "尺寸与位置" && containerFrameSummary
-        ? [containerFrameSummary, groupSummary(group).match(/\d+ 项未保存/)?.[0]].filter(Boolean).join(" · ")
-        : groupSummary(group)}
-      secondary={(isRootSelection && group === "布局") || group === "尺寸限制" || (group === "外观" && !isRootSelection) || group === "文字细节" || (group === "间距与对齐" && !allContainers) || (group === "尺寸与位置" && allContainers && !isRootSelection && nodeIds.length === 1)}>
+      title={isRootSelection && group === "尺寸与位置" ? "模板整体尺寸与比例" : isRootSelection && group === "间距与对齐" ? "整体留白" : group === "文字或媒体" ? allImages ? "图片适配与焦点" : allText ? "文字排版" : "文字或媒体" : group === "文字细节" ? "字体与换行" : group === "外观" ? "背景与边框" : group === "布局" && allContainers ? "排列与分栏" : group}
+      summary={groupSummary(group)}>
       {isRootSelection && group === "布局" ? <>{layoutScopeNotice}{layoutControls?.({ disabled: layoutDisabled })}</> : null}
-      {group === "文字或媒体" && allText ? <p>展示标题和区块标题字重不超过 400。已超出范围的字重会保留，不会悄悄改掉。</p> : null}
       {group === "文字细节" && nodeIds.length === 1 ? <TemplateDefaultContentControls section="text-font" embedded key={`font:${firstId}:${targetBreakpoint}`} nodeId={firstId} breakpoint={targetBreakpoint} disabled={controlsDisabled} /> : null}
       {group === "外观" && nodeIds.length === 1 ? <TemplateDefaultContentControls section="background" embedded key={`${firstId}:${targetBreakpoint}`} nodeId={firstId} breakpoint={targetBreakpoint} disabled={controlsDisabled} /> : null}
-      {group === "文字或媒体" && allImages && imageFocusValue ? <>
-        <ImageFocusField
-          key={`focus:${selectionKey}:${targetBreakpoint}`}
-          label="画面焦点"
-          value={imageFocusValue}
-          disabled={controlsDisabled}
-          previewSrc={imagePreviewSrc}
-          previewFit={imagePreviewFit}
-          onRequestCanvasAdjust={() => {
-            if (focusFirstInvalidNumberField()) return;
-            useTemplateEditorSession.getState().setImageFocusEditing(firstId);
-          }}
-          onChange={(focus) => {
-            cancel();
-            const result = useTemplateEditorSession.getState().executeCommand({
-              type: "update-definition",
-              label: "调整图片焦点",
-              update: (next) => {
-                const slotId = next.nodes[firstId]?.slotId;
-                if (!slotId) return;
-                setTemplateSlotRule(next, slotId, targetBreakpoint, "objectPosition", percentToExactObjectPosition(focus));
-              },
-            });
-            setOperationError(result.ok ? null : result.message);
-          }}
-        />
-        {(() => {
-          const focusProperty = descriptors.find((property) => property.key === "focus.x");
-          if (!focusProperty) return null;
-          const hasOwnValue = ids.some((id) => source(focusProperty, id) === targetBreakpoint);
-          if (!hasOwnValue || (targetBreakpoint === "desktop" && !canResetSystemValue(focusProperty))) return null;
-          return <button type="button" aria-label={targetBreakpoint === "desktop" ? "图片焦点恢复系统默认" : "恢复继承"} disabled={controlsDisabled} onClick={() => reset(focusProperty)}>
-            {targetBreakpoint === "desktop" ? "恢复系统默认" : "恢复继承"}
-          </button>;
-        })()}
-      </> : null}
       {group === "尺寸与位置" ? <div className="template-native__measured" aria-label="当前画布对象外框尺寸"><small className="template-native__measurement-label">{isRootSelection ? "本节当前尺寸 · 只读" : "当前预览尺寸 · 只读"}</small><span>{isRootSelection ? "本节宽度" : "实际宽"} <strong>{sizeLabel("borderWidth")}</strong></span><span>{emptyContainerSelection ? "画布占位高" : isRootSelection ? "本节高度" : "实际高"} <strong>{sizeLabel("borderHeight")}</strong>{emptyContainerSelection ? <small>（非输出高度）</small> : null}</span>{nodeIds.length === 1 ? <span className="template-native__proportion">有效外框 <strong>{previewFrame?.frameNote
         ? previewFrame.ratioLabel
         : isRootSelection
           ? standardRatioLabel
-          : formatMeasuredTemplateRatio(Number(renderedValues[firstId]?.borderWidth), Number(renderedValues[firstId]?.borderHeight))}</strong>{previewFrame?.frameNote ? <small>{previewFrame.frameNote}</small> : null}</span> : null}{nodeIds.length === 1 ? <details className="template-native__proportion-source"><summary>比例来源</summary>
-        <span className="template-native__proportion">高度规则 <strong>{previewFrame?.frameNote ? "沿用桌面横图（本次未对换）" : overallFrame?.pairedCanvas ? "跟随桌面比例（自动对换）" : describeTemplateFrameProportion(
-          context(effective, firstId).rules.height.mode,
+          : formatMeasuredTemplateRatio(Number(renderedValues[firstId]?.borderWidth), Number(renderedValues[firstId]?.borderHeight))}</strong>{previewFrame?.frameNote ? <small>{previewFrame.frameNote}</small> : null}</span> : null}
+        {isRootSelection && !previewFrame?.frameNote && overallFrame?.pairedCanvas ? <small data-template-mobile-frame-source="adapted">手机画幅跟随桌面比例对换</small> : null}
+        {isRootSelection && !overallFrame?.pairedCanvas && frameRules.height.mode === "aspect-ratio" && frameRules.height.ratio && lockedFrameRatio !== standardRatioLabel
+          ? <small>设定比例 {frameRules.height.ratio.width}:{frameRules.height.ratio.height}</small> : null}
+        {nodeIds.length === 1 && !allContainers ? <details className="template-native__proportion-source"><summary>比例来源</summary>
+        <span className="template-native__proportion">高度规则 <strong>{describeTemplateFrameProportion(
+          frameRules.height.mode,
           Number(renderedValues[firstId]?.borderWidth),
           Number(renderedValues[firstId]?.borderHeight),
-          context(effective, firstId).rules.height.ratio
-            ? `${context(effective, firstId).rules.height.ratio!.width}:${context(effective, firstId).rules.height.ratio!.height}`
-            : undefined,
+          lockedFrameRatio,
         )}</strong></span>
-        <span className="template-native__proportion" title={isRootSelection ? "读数写出最近的标准比例，不会改写高度规则。" : "实际宽度与高度收成最近的标准比例，不会自动改写图片。"}>{isRootSelection ? "标准比例" : allImages ? "图片框实测比例" : "外框实测比例"} <strong>{isRootSelection
-          ? standardRatioLabel
-          : formatMeasuredTemplateRatio(Number(renderedValues[firstId]?.borderWidth), Number(renderedValues[firstId]?.borderHeight))}</strong></span>
-        <span className="template-native__proportion">设定比例 <strong>{previewFrame?.frameNote
-          ? `${context(effective, firstId).rules.height.ratio ? `${context(effective, firstId).rules.height.ratio!.width}:${context(effective, firstId).rules.height.ratio!.height}` : "未固定"}（本次未用）`
-          : overallFrame?.pairedCanvas ? `${standardRatioLabel}（跟随桌面）` : context(effective, firstId).rules.height.mode === "aspect-ratio" && context(effective, firstId).rules.height.ratio
-          ? standardRatioLabel
-          : "未固定"}</strong></span>
-        {overallFrame?.pairedCanvas || previewFrame?.frameNote ? <span className="template-native__proportion" data-template-mobile-frame-source="adapted">系统画幅 <strong>{previewFrame?.frameNote ? previewFrame.ratioLabel : standardRatioLabel}</strong><small>{previewFrame?.frameNote ?? (effective.metadata.geometryPolicy === "paired-canvas" ? "按桌面标准画幅自动对换；手机未单独覆盖" : "旧定义按桌面画幅对换；未写入手机独立设置")}</small></span> : null}
+        <span className="template-native__proportion" title="实际宽度与高度收成最近的标准比例，不会自动改写图片。">{allImages ? "图片框实测比例" : "外框实测比例"} <strong>{formatMeasuredTemplateRatio(Number(renderedValues[firstId]?.borderWidth), Number(renderedValues[firstId]?.borderHeight))}</strong></span>
+        <span className="template-native__proportion">设定比例 <strong>{lockedFrameRatio ? standardRatioLabel : "未固定"}</strong></span>
       </details> : null}</div> : null}
+      {group === "尺寸与位置" && isRootSelection ? ratioPresets : null}
       {group === "尺寸与位置" && descriptors.some((property) => property.path.startsWith("placement.")) ? <p>位置与尺寸按父区域可用宽高的百分比设置；上方显示画布实际像素尺寸。</p> : null}
       {group === "尺寸与位置" && ids.some((id) => !original.nodes[id].childIds.length && !original.nodes[id].slotId) ? <p className="template-native__measured" role="status">当前为空，画布使用编辑占位；模板仍按所选高度规则输出，添加内容后按实际内容重测。</p> : null}
-      {group === "间距与对齐" && ids.length > 0 && ids.every((id) => supportsTemplateContainerAlignment(context(original, id).rules)) ? <div role="group" aria-label="容器内容对齐九宫格">
+      {group === "间距与对齐" && canDragPadding && targetBreakpoint === breakpoint ? <button type="button" className="template-native__spacing-action" disabled={controlsDisabled} onClick={() => {
+        if (focusFirstInvalidNumberField()) return;
+        const accepted = requestTemplateCanvasSpacingEditing(firstId, targetBreakpoint);
+        setOperationError(accepted ? null : "请先在当前画布显示这个对象，再拖动调整留白。");
+        if (accepted) onStartCanvasEdit?.();
+      }}>在画布调整留白</button> : null}
+      {group === (isRootSelection ? "布局" : "间距与对齐") && ids.length > 0 && ids.every((id) => supportsTemplateContainerAlignment(context(original, id).rules)) ? <div role="group" aria-label="容器内容对齐九宫格">
         <p>按画面方向对齐；网格作用于单元内对象，已填满的轴没有可见位移。</p>
         <div className="template-editor__composition" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 4 }}>
           {(["start", "center", "end"] as const).flatMap((vertical, row) => (["start", "center", "end"] as const).map((horizontal, column) => {
@@ -760,6 +799,13 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
           } else if (!property.slot && (["gap", "radius", "minWidth"].includes(property.path) || property.path.startsWith("padding.") || property.path.startsWith("margin."))) interactionStartValue = 0;
         }
         const propertyDisabled = !ids.length || Boolean(pendingRatio) || Boolean(pendingLayout && pendingLayout.property.key !== property.key) || foreignInteraction;
+        const visualChoice = nodeIds.length === 1 && (
+          (allImages && property.path === "objectFit") || (allText && ["fontWeight", "textAlign"].includes(property.path))
+        );
+        const compactProperty = visualChoice || (isRootSelection && (property.group === "尺寸与位置" || property.path.startsWith("padding.")));
+        const titleWeight = selectedNodes[0]?.slotId
+          ? original.slots[selectedNodes[0].slotId]?.type === "heading" || ["display", "heading"].includes(context(effective, firstId).slot.fontRole ?? "")
+          : false;
         const quickValues = property.path === "gap" ? GAP_QUICK_VALUES : null;
         const radiusRaw = property.path === "radius" && !mixed ? comparableValues[0] : undefined;
         const radiusValue = radiusRaw && typeof radiusRaw === "object"
@@ -776,7 +822,12 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
           <div className={`template-native__property ${property.group === "尺寸与位置" ? "template-native__size-property" : ""} ${property.path.startsWith("padding.") ? "template-native__pad" : ""}`} data-template-spacing-side={/^(padding|margin)\./.test(property.path) ? property.path.split(".")[1] : undefined} data-template-design-property={property.key} data-template-inheritance={targetBreakpoint === "mobile" ? inheritance : undefined}>
           <PropertyInput property={property} value={values[0]} mixed={mixed} disabled={propertyDisabled}
             interactionStartValue={interactionStartValue}
-            optionDisabledReason={(value) => ids.map((id) => getTemplateSizeOptionDisabledReason(original, id, targetBreakpoint, property.path, value)
+            compact={compactProperty || (allContainers && property.path === "width")}
+            visual={visualChoice}
+            titleWeight={titleWeight}
+            optionDisabledReason={(value) => isRootSelection && property.path === "height" && value === "aspect-ratio" && values[0] !== value
+              ? "请使用上方画幅预设"
+              : ids.map((id) => getTemplateSizeOptionDisabledReason(original, id, targetBreakpoint, property.path, value)
               ?? ((property.path === "width" && value === "fixed" && typeof context(original, id).rules.width !== "object") || (property.path === "height" && ["fixed", "min-height"].includes(value) && context(original, id).rules.height.mode !== value)
                 ? !context(original, id).measuredSize || !Number.isFinite(context(original, id).measuredSize?.[property.path as "width" | "height"]) ? "请先聚焦此断点并显示对象" : undefined : undefined)).find(Boolean)}
             unit={property.unit === "px" ? readPath(property.slot ? context(effective, firstId).slot : context(effective, firstId).rules, `${property.path}.unit`) as string | undefined : undefined}
@@ -838,8 +889,12 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
           </div> : null}
           <div className="template-native__property-status">
           {property.key !== "focus.y" && hasOwnValue && (targetBreakpoint !== "desktop" || canResetSystemValue(property)) ? <button type="button" aria-label={targetBreakpoint === "desktop" ? `${actionLabel}恢复系统默认` : "恢复继承"} title={`${actionLabel}：${targetBreakpoint === "desktop" ? "移除此项显式值，保留手机覆盖" : "移除此项当前设备覆盖，重新使用上级值"}`} disabled={controlsDisabled} onClick={() => reset(property)}>{targetBreakpoint === "desktop" ? "恢复系统默认" : "恢复继承"}</button> : null}</div>
-          <PropertyMetadata label={`${sourceLabel}${mixed ? " · 混合值" : ""}${changedSinceSave(property) ? " · 未保存" : ""}`}>
-          <small>来源：{new Set(sources).size === 1 ? BP_LABELS[sources[0]] : "多个来源"}{sources.every((item) => item === "desktop") ? " · 对象显式值" : sources.every((item) => item === targetBreakpoint) ? " · 当前断点显式覆盖" : sources.every((item) => item !== targetBreakpoint && item !== "system") ? " · 继承值" : ""}{mixed ? " · 混合值" : ""}</small>
+          {compactProperty ? (
+            targetBreakpoint === "mobile" || changedSinceSave(property)
+              ? <small>{targetBreakpoint === "mobile" ? sourceLabel : ""}{changedSinceSave(property) ? (targetBreakpoint === "mobile" ? " · 未保存" : "未保存") : ""}</small>
+              : null
+          ) : <div className="template-native__property-metadata">
+          <small>来源：{new Set(sources).size === 1 ? BP_LABELS[sources[0]] : "多个来源"}{sources.every((item) => item === "desktop") ? " · 对象显式值" : sources.every((item) => item === targetBreakpoint) ? " · 当前断点显式覆盖" : sources.every((item) => item !== targetBreakpoint && item !== "system") ? " · 继承值" : ""}{mixed ? " · 混合值" : ""}{changedSinceSave(property) ? " · 未保存" : ""}</small>
           <small data-template-effective-value>实际生效：{property.slot && isRenderedTypographyProperty(property.path)
             ? measuredMixed ? "多个画布计算值" : measuredValues[0] ? `${measuredValues[0]}（当前画布计算值）` : "未取得文字渲染值；隐藏或空内容时不推测数值"
             : mixed ? "多个有效值" : property.key.startsWith("focus.") ? `${values[0]}%` : property.options?.find(([key]) => key === String(values[0]))?.[1] ?? describeTemplateEffectiveValue(readPath(property.slot ? context(effective, firstId).slot : context(effective, firstId).rules, property.path), property.path, context(effective, firstId).rules, Boolean(property.slot), context(effective, firstId).slot)}</small>
@@ -860,7 +915,7 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
               }
             } }); setOperationError(result.ok ? null : result.message); if (result.ok) setPendingAll(null); }}>确认统一</button><button type="button" onClick={() => setPendingAll(null)}>取消</button>
           </div> : null}
-          </PropertyMetadata>
+          </div>}
           </div>
         </Fragment>;
         };
@@ -871,83 +926,85 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
           {(["padding", "margin"] as const).map((kind) => {
             const edges = properties.filter((property) => property.path.startsWith(`${kind}.`));
             if (!edges.length) return null;
-            return <fieldset key={kind} className="template-native__spacing-model" data-template-spacing-model={kind}>
+            const fieldset = <fieldset key={kind} className="template-native__spacing-model" data-template-spacing-model={kind}>
               <legend>{kind === "padding" ? "内部留白" : "外部间距"}</legend>
-              <small>前台间距优先使用 4 的倍数。已保存的 rem 或 vw 会保留，不会改写。</small>
+              {!isRootSelection ? <small>前台间距优先使用 4 的倍数。已保存的 rem 或 vw 会保留，不会改写。</small> : null}
               {kind === "padding" ? <label className="template-native__spacing-link"><input type="checkbox" checked={linkPadding} disabled={controlsDisabled} onChange={(event) => setLinkPadding(event.target.checked)} />四边内边距联动</label> : null}
               <span className="template-native__spacing-center" aria-hidden="true">{kind === "padding" ? "内容区域" : "所选对象"}</span>
               {edges.map(renderProperty)}
             </fieldset>;
+            if (!isRootSelection) return fieldset;
+
+            const padding = context(effective, firstId).rules.padding;
+            const hasMobilePadding = targetBreakpoint === "mobile"
+              && edges.some((property) => source(property, firstId) === "mobile");
+            return <div key={kind} className="template-native__overall-padding" role="group" aria-label="整体留白">
+              <div className="template-native__padding-values">
+                {(["top", "right", "bottom", "left"] as const).map((side, index) => {
+                  const edge = padding?.[side];
+                  return <span key={side}>{["上", "右", "下", "左"][index]} <strong>{edge ? `${edge.value}${edge.unit}` : "未设置"}</strong></span>;
+                })}
+              </div>
+              {hasMobilePadding ? <button type="button" disabled={controlsDisabled} onClick={() => {
+                if (!focusFirstInvalidNumberField()) reset({ label: "留白", path: "padding" });
+              }}>恢复留白继承</button> : null}
+              <section className="template-native__custom-padding">
+                <h4>自定义留白</h4>
+                {fieldset}
+              </section>
+            </div>;
           })}
         </>;
       })()}
-      {group === "尺寸与位置" && !allText ? <div className="template-native__ratio" role="group" aria-label={isRootSelection ? "模板整体比例预设" : "对象外框比例预设"} data-template-shared-scope={isRootSelection ? "frame" : undefined}>
-        <span title="调整对象高度与宽度的关系，不修改图片内容焦点">{isRootSelection ? "标准双端画幅" : "外框比例"}</span>
-        {isRootSelection ? <p>以下两项两端一起生效，不随当前查看的手机或桌面改变。</p> : null}
-        {isRootSelection ? <small>选择一组标准画幅，同时设置桌面比例与手机对换比例。手机恢复跟随桌面。原先与整节同一对比例的舞台和铺满图片会改到新画幅；作品卡、Logo 等独立比例保留。放不下时提示溢出。</small> : null}
-        {ratioMeasurementMissing ? <small>请先聚焦修改范围对应的设备并显示对象，才能按实际尺寸调整比例。</small> : null}
-        {(isRootSelection ? ROOT_RATIO_PRESETS[targetBreakpoint === "mobile" ? "mobile" : "desktop"] : allContainers ? CONTAINER_RATIO_PRESETS : OBJECT_RATIO_PRESETS).map(([width, height]) => <button type="button" key={`${width}:${height}`} aria-label={`${width}:${height}`} aria-pressed={ids.length > 0 && ids.every((id) => {
-          if (isRootSelection) {
-            if (effective.metadata.geometryPolicy !== "paired-canvas") return false;
-            const desktopFrame = resolveTemplateDesignFrame(effective, "desktop");
-            const mobileFrame = resolveTemplateDesignFrame(effective, "mobile");
-            return Boolean(mobileFrame.pairedCanvas && desktopFrame.heightMode === "aspect-ratio"
-              && desktopFrame.ratioLabel === (targetBreakpoint === "mobile" ? `${height}:${width}` : `${width}:${height}`)
-              && mobileFrame.ratioLabel === (targetBreakpoint === "mobile" ? `${width}:${height}` : `${height}:${width}`));
-          }
-          if (positionedIds.includes(id)) return renderedValues[id]?.breakpoint === targetBreakpoint && Math.abs(Number(renderedValues[id]?.borderWidth) / Number(renderedValues[id]?.borderHeight) - width / height) < .001;
-          const rule = context(effective, id).rules.height; return rule.mode === "aspect-ratio" && Boolean(rule.ratio && rule.ratio.width * height === rule.ratio.height * width);
-        })} disabled={!ids.length || Boolean(pendingLayout) || foreignInteraction || ratioMeasurementMissing} onClick={() => {
-          if (focusFirstInvalidNumberField()) return;
-          if (!pendingRatio) for (const id of positionedIds) {
-            const placement = context(original, id).rules.placement!;
-            ratioParentSizes.current[id] = { width: Number(renderedValues[id].borderWidth) / placement.width, height: Number(renderedValues[id].borderHeight) / placement.height };
-          }
-          const value = { width, height };
-          const result = edit(OBJECT_RATIO_PROPERTY, value, true);
-          setPendingAll(null); setOperationError(result && !result.ok ? result.message : null);
-          setPendingRatio(result?.ok ? value : null);
-        }}><svg aria-hidden="true" data-template-ratio-shape={`${width}:${height}`} viewBox="0 0 48 42" focusable="false"><rect x={(48 - 34 * width / Math.max(width, height)) / 2} y={(42 - 34 * height / Math.max(width, height)) / 2} width={34 * width / Math.max(width, height)} height={34 * height / Math.max(width, height)} /></svg><span>{width}:{height}</span>{isRootSelection ? <small>{targetBreakpoint === "mobile" ? "桌面" : "手机"} {height}:{width}</small> : null}</button>)}
-        {pendingRatio ? <div role="group" aria-label="确认对象比例"><p>{isRootSelection
-          ? `正在预览标准双端画幅：桌面 ${targetBreakpoint === "mobile" ? `${pendingRatio.height}:${pendingRatio.width}` : `${pendingRatio.width}:${pendingRatio.height}`}，手机 ${targetBreakpoint === "mobile" ? `${pendingRatio.width}:${pendingRatio.height}` : `${pendingRatio.height}:${pendingRatio.width}`}。确认会替换两端整体高度/比例，并让原先跟随整节的舞台和图片槽位改到新画幅。手机恢复自动跟随。文字、链接和独立比例（作品卡 4:5、Logo）保留，可一次撤销。`
-          : `画布正在预览 ${pendingRatio.width}:${pendingRatio.height}；确认后写入${targetBreakpoint === "desktop" ? "桌面基础" : "手机覆盖"}，可一次撤销。`}</p>
-          <button type="button" onClick={() => {
-            const result = edit(OBJECT_RATIO_PROPERTY, pendingRatio, false);
-            ratioParentSizes.current = {};
-            setOperationError(result && !result.ok ? result.message : null); setPendingRatio(null);
-          }}>确认对象比例</button>
-          <button type="button" onClick={() => { cancel(); setPendingRatio(null); }}>取消比例预览</button>
-        </div> : null}
-      </div> : null}
+      {group === "文字或媒体" && allImages && imageFocusValue ? <>
+        <ImageFocusField
+          key={`focus:${selectionKey}:${targetBreakpoint}`}
+          label="画面焦点"
+          value={imageFocusValue}
+          disabled={controlsDisabled}
+          previewSrc={imagePreviewSrc}
+          previewFit={imagePreviewFit}
+          onRequestCanvasAdjust={imagePreviewSrc && targetBreakpoint === breakpoint ? () => {
+            if (focusFirstInvalidNumberField()) return;
+            useTemplateEditorSession.getState().setImageFocusEditing(firstId);
+            onStartCanvasEdit?.();
+          } : undefined}
+          onChange={(focus) => {
+            cancel();
+            const result = useTemplateEditorSession.getState().executeCommand({
+              type: "update-definition",
+              label: "调整图片焦点",
+              update: (next) => {
+                const slotId = next.nodes[firstId]?.slotId;
+                if (!slotId) return;
+                setTemplateSlotRule(next, slotId, targetBreakpoint, "objectPosition", percentToExactObjectPosition(focus));
+              },
+            });
+            setOperationError(result.ok ? null : result.message);
+          }}
+        />
+        {(() => {
+          const focusProperty = descriptors.find((property) => property.key === "focus.x");
+          if (!focusProperty) return null;
+          const hasOwnValue = ids.some((id) => source(focusProperty, id) === targetBreakpoint);
+          if (!hasOwnValue || (targetBreakpoint === "desktop" && !canResetSystemValue(focusProperty))) return null;
+          return <button type="button" aria-label={targetBreakpoint === "desktop" ? "图片焦点恢复系统默认" : "恢复继承"} disabled={controlsDisabled} onClick={() => reset(focusProperty)}>
+            {targetBreakpoint === "desktop" ? "恢复系统默认" : "恢复继承"}
+          </button>;
+        })()}
+      </> : null}
+      {group === "尺寸与位置" && !allText && !isRootSelection ? ratioPresets : null}
       {group === "文字或媒体" && !allText && nodeIds.length === 1 && !isRootSelection ? <TemplateDefaultContentControls section="text-style" key={`${firstId}:${targetBreakpoint}`} nodeId={firstId} breakpoint={targetBreakpoint} disabled={controlsDisabled} /> : null}
       {group === "尺寸与位置" && isRootSelection ? <div className="template-native__overall">
-        {original.metadata.canvasSize ? <details className="template-native__design-width" onToggle={(event) => {
-          if (!event.currentTarget.open && event.currentTarget.querySelector('[aria-invalid="true"]')) {
-            event.currentTarget.open = true;
-            focusFirstInvalidNumberField();
-          }
-        }}>
-          <summary>设计基准宽度 · {original.metadata.canvasSize.width} px</summary>
+        {original.metadata.canvasSize ? <section className="template-native__design-width">
+          <h4>设计基准宽度</h4>
           {targetBreakpoint === "desktop" ? <NumberField key={`${selectionKey}:design-width:${targetBreakpoint}`} label="设计宽度"
             value={effective.metadata.canvasSize?.width} min={1} max={4096} step={1} unit="px" disabled={controlsDisabled}
             onPreview={(value) => edit(DESIGN_WIDTH_PROPERTY, value, true)}
             onChange={(value) => edit(DESIGN_WIDTH_PROPERTY, value, false)} onCancel={cancel} commitUnchanged />
-            : <p>手机默认预览宽度为 390 px，可在画布顶部调整；本节高度按所选高度方式计算。</p>}
-          {targetBreakpoint === "desktop" ? <p>桌面默认预览宽度为 1440 px，可在画布顶部调整。设计宽度只保留这份模板的坐标基准。</p> : null}
-          <p>预览宽度与缩放请在画布顶部调整，不改变模板设计。</p>
-        </details> : null}
-        <p className="template-native__public-width"><strong>整体宽度</strong><span>适应页面可用宽度</span></p>
-        <details className="template-native__size-notes"><summary>尺寸与预览规则</summary>
-          <p>设计宽度会保存并可撤销，保留内部对象及各端独立设置；画布工具中的预览宽度仅用于观察。</p>
-          <p>预览宽度用于模拟屏幕，缩放只改变看图大小；整体高度由上面的高度方式决定。</p>
-          <p>{overallFrame?.pairedCanvas && overallFrame.heightMode === "aspect-ratio"
-            ? "整节按桌面比例对换后的画幅显示；原先跟随整节的舞台和铺满图片使用同一对比例。文字放不下会显示溢出提示。作品图不会被压扁。"
-            : ["auto", "fit"].includes(context(effective, firstId).rules.height.mode)
-            ? "本节高度随图片、文字和留白增长，不要求铺满一屏。图片框比例单独设置，不决定整个模板的比例。"
-            : context(effective, firstId).rules.height.mode === "aspect-ratio"
-              ? "优先按整体宽度计算比例高度；内容和最小尺寸可能撑高模板。比例不会自动让内部区域填满，需另外设置布局与对齐。"
-              : "高度受指定尺寸约束。请检查长文和手机画面，超出时调整高度或内部布局，不要裁掉必要文字。"}</p>
-        </details>
+            : <p>当前设计基准宽度为 {original.metadata.canvasSize.width} px。手机默认预览宽度为 390 px，可在画布顶部调整；本节高度按所选高度方式计算。</p>}
+          {targetBreakpoint === "desktop" ? <p>设计宽度是模板的坐标基准。只想换屏幕尺寸查看时，请在画布顶部调整预览宽度。</p> : null}
+        </section> : null}
       </div> : null}
     </PropertyGroup>)}
     {sectionCopyState ? <div className="template-native__copy-visibility" data-template-section-copy={sectionCopyState} data-template-shared-scope="copy">
@@ -962,7 +1019,7 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
         <button type="button" aria-pressed={sectionCopyState === "shown"} disabled={controlsDisabled} onClick={() => setSectionCopyVisibility(true)}>显示</button>
       </div>
     </div> : null}
-    <details className="template-native__breakpoint-actions"><summary><span>设备覆盖</span><small>断点显示与继承</small></summary>
+    <section className="template-native__breakpoint-actions"><h3>设备覆盖</h3>
     <p>{targetBreakpoint === "desktop" ? "无独立覆盖的手机会跟随基础值。" : "修改只作用于手机，不改变桌面。"}</p>
     {nodeIds.length > 1 ? <div role="group" aria-label="多选断点可见性"><button type="button" disabled={controlsDisabled} onClick={() => changeVisibility(false)}>当前断点全部显示</button><button type="button" disabled={controlsDisabled} onClick={() => changeVisibility(true)}>当前断点全部隐藏</button></div> : !isRootSelection ? <button type="button" disabled={controlsDisabled} onClick={() => changeVisibility()}>显示／隐藏当前断点</button> : <small>模板整体在所有设备保留；可分别调整内部区域的显示。</small>}
     {targetBreakpoint !== "desktop" ? <button type="button" disabled={controlsDisabled} onClick={() => { cancel(); const result = useTemplateEditorSession.getState().executeCommand({ type: "update-definition", label: "恢复所选对象全部继承", update: (next) => {
@@ -970,6 +1027,6 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
     } }); setOperationError(result.ok ? null : result.message); }}>全部恢复继承</button> : null}
     {nodeIds.length === 1 ? <TemplateAnchorControls nodeId={firstId} disabled={controlsDisabled || targetBreakpoint !== breakpoint} /> : null}
     <TemplateNativeResponsiveControls nodeIds={nodeIds} breakpoint={targetBreakpoint} disabled={controlsDisabled} getProperties={getNativeDesignProperties} />
-    </details>
+    </section>
   </section>;
 }

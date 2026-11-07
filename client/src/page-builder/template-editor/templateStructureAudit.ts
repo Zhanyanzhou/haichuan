@@ -19,7 +19,7 @@ export interface TemplateStructureIssue {
   nodeId?: string;
   roleId?: string;
   device?: TemplateBreakpoint;
-  repair?: "add-region" | "add-slot" | "restore-required-slot" | "restore-required-slot-device" | "disable-required-slot-page-hide" | "enable-required-slot-page-edit" | "restore-required-role";
+  repair?: "restore-required-slot" | "restore-required-slot-device" | "disable-required-slot-page-hide" | "enable-required-slot-page-edit" | "restore-required-role";
 }
 
 export interface TemplateStructureAudit {
@@ -87,7 +87,7 @@ export function buildTemplateStructureAudit(
       issues.push({
         code: "EMPTY_STRUCTURE_NODE",
         level: "warning",
-        message: `“${node.name}”还没有内容，请添加槽位或删除空结构。`,
+        message: `“${node.name}”还没有内容。可以删除这个空结构，或在模板组件库选择已有内容的模板。`,
         nodeId: node.nodeId,
       });
     }
@@ -166,18 +166,16 @@ export function buildTemplateStructureAudit(
     issues.push({
       code: "MISSING_REGION",
       level: "error",
-      message: "模板还没有内容区域，请先添加区域。",
+      message: "模板没有内容区域，无法发布。可以撤销本次编辑中的删除，或在模板组件库选择已有内容的模板。",
       nodeId: definition.rootNodeId,
-      repair: "add-region",
     });
   }
   if (slotCount === 0) {
     issues.push({
       code: "MISSING_SLOT",
       level: "error",
-      message: "模板还没有内容槽位，请添加图片、文字、商品或行动槽位。",
+      message: "模板没有内容槽位，无法发布。可以撤销本次编辑中的删除，或在模板组件库选择已有内容的模板。",
       nodeId: definition.rootNodeId,
-      repair: "add-slot",
     });
   }
 

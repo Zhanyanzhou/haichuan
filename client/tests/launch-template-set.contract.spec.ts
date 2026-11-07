@@ -290,7 +290,8 @@ test("实现源与文档骨架逐节点一致，且七块定义各自通过发�
     const validator = await import(/* @vite-ignore */ "/src/page-builder/template-definition/validateTemplateDefinition.ts");
 
     type Shape = { type: string; name: string; children?: Shape[] };
-    type Slot = { key: string; label?: string; type: string; required: boolean; editable: boolean; hideable: boolean; emptyPolicy?: string; desktopRules?: { aspectRatio?: string }; mobileRules?: { aspectRatio?: string } };
+    type ImageRules = { aspectRatio?: string; objectFit?: string; objectPosition?: string };
+    type Slot = { key: string; label?: string; type: string; semanticRole?: string; required: boolean; editable: boolean; hideable: boolean; emptyPolicy?: string; desktopRules?: ImageRules; mobileRules?: ImageRules };
     type Node = { nodeId: string; type: string; name: string; childIds: string[]; slotId?: string; hidden: boolean };
     type Definition = {
       name: string;
@@ -374,6 +375,14 @@ test("实现源与文档骨架逐节点一致，且七块定义各自通过发�
       // 不变量 I 与机器合同的交界：槽位一律可编辑、可隐藏、非必填，且公开清空策略是 hide。
       for (const slot of Object.values(definition.slots)) {
         const where = `${role} · ${slot.label ?? slot.key}`;
+        if (slot.type === "image") {
+          const expectedFit = slot.semanticRole === "logo" || role === "creation-grid" ? "contain" : "cover";
+          for (const rules of [slot.desktopRules, slot.mobileRules]) {
+            if (rules?.objectFit !== expectedFit || rules.objectPosition !== "center center") {
+              slotViolations.push(`${where}：图片默认适配或焦点不符合用途`);
+            }
+          }
+        }
         if (!slot.editable || !slot.hideable || slot.required) {
           slotViolations.push(`${where}：editable=${slot.editable} hideable=${slot.hideable} required=${slot.required}`);
         }

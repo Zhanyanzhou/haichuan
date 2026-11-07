@@ -32,15 +32,21 @@ import {
   withoutContentTemplatePublicationAttestation,
   type ContentTemplateIssue,
 } from "./content-template-contract";
-import { customerFacingProductWhereForVisibilities } from "../products/product-eligibility";
+import {
+  customerFacingProductWhereForVisibilities,
+  publicMediaAssetWhere,
+  withPublicMediaEligibility,
+} from "../products/product-eligibility";
 import {
   DYNAMIC_TEMPLATE_BLOCK_TYPE,
   DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY,
   collectDynamicTemplateInstanceReferences,
   dynamicTemplateVersionKey,
   getDynamicTemplateDocumentMediaReferences,
+  getWorkGridImageSlotIds,
   readDynamicTemplateInstanceReference,
   validateDynamicTemplateInstance,
+  type DynamicTemplateActionReference,
 } from "./dynamic-template-instance";
 import {
   calculateDynamicTemplateDefinitionChecksum,
@@ -205,8 +211,37 @@ function pageReadCache(scope: PageReadValidationScope, db: PageValidationDb) {
 
 type PageValidationDb = Pick<
   Prisma.TransactionClient,
-  "siteSetting" | "product" | "category" | "dynamicTemplateVersion"
+  "siteSetting" | "product" | "productImage" | "category" | "dynamicTemplateVersion"
 >;
+
+function parseWorkImageReference(url: string) {
+  const match = /^\/products\/public\/([1-9]\d{0,9})\/media\/([1-9]\d{0,9})$/.exec(url);
+  if (!match) return null;
+  const productId = Number(match[1]);
+  const imageId = Number(match[2]);
+  return productId <= 2_147_483_647 && imageId <= 2_147_483_647 ? { productId, imageId } : null;
+}
+
+async function findPublicWorkImages(db: PageValidationDb, imageIds: readonly number[]) {
+  type PublicWorkImage = {
+    id: number;
+    productId: number;
+    mediaAssetId: number | null;
+    product: { code: string };
+  };
+  if (imageIds.length === 0) return new Map<number, PublicWorkImage>();
+  const now = new Date();
+  const images = await db.productImage.findMany({
+    where: {
+      id: { in: [...new Set(imageIds)] },
+      isVideo: false,
+      mediaAsset: { is: publicMediaAssetWhere(now) },
+      product: { is: withPublicMediaEligibility(customerFacingProductWhereForVisibilities(["PUBLIC"]), now) },
+    },
+    select: { id: true, productId: true, mediaAssetId: true, product: { select: { code: true } } },
+  });
+  return new Map(images.map((image) => [image.id, image]));
+}
 
 type PageDocumentStaffActor = Pick<StaffPrincipal, "id" | "sessionFamilyId">;
 type PageDocumentStaffActorInput = PageDocumentStaffActor | number | undefined;
@@ -237,25 +272,6 @@ function isBusinessRegionBlock(value: unknown): value is VisiblePuckBlock {
     value.type === "业务功能区" &&
     isRecord(value.props)
   );
-}
-
-function isBrandContentBlock(value: unknown): value is VisiblePuckBlock {
-  return (
-    isVisiblePuckBlock(value) &&
-    (Boolean(CONTENT_TEMPLATE_BY_MODULE_TYPE[value.type]) || value.type === DYNAMIC_TEMPLATE_BLOCK_TYPE)
-  );
-}
-
-/**
- * D.45：联系页的公开内容就是微信、电话和预约。没有品牌导语时，固定业务区本身可以发布。
- * 一旦放了可见品牌模块，业务区仍须紧随首个品牌模块。
- */
-function isStandaloneContactPage(pageKey: string, rootContent: readonly unknown[]): boolean {
-  if (pageKey !== "contact") return false;
-  const visibleRegions = rootContent.filter((block) =>
-    isBusinessRegionBlock(block) && block.props.isVisible !== false
-  );
-  return visibleRegions.length === 1 && !rootContent.some(isBrandContentBlock);
 }
 
 function toInputJsonValue(value: unknown): Prisma.InputJsonValue {
@@ -540,6 +556,7 @@ export class PageModulesService {
           draftEnvelopePaths.has(issue.pathSuffix)
           || directInstanceFieldIssue
           || contentAuthorizationIssue
+          || issue.pathSuffix.endsWith(".workProductCode")
           || issue.pathSuffix.startsWith(".hiddenSlotIds")
           || issue.pathSuffix.startsWith(".layoutOverridesByNodeId")
         ) {
@@ -2791,8 +2808,22 @@ export class PageModulesService {
       `${reference.path ?? ""}\u0000${reference.url}`,
       reference,
     ])).values()];
+    const workImagesByUrl = new Map(uniqueReferences.flatMap((reference) => {
+      const image = parseWorkImageReference(reference.url);
+      return image ? [[reference.url, image] as const] : [];
+    }));
+    const workImages = await findPublicWorkImages(db, [...workImagesByUrl.values()].map((image) => image.imageId));
+    const managedReferences = uniqueReferences.map((reference) => {
+      const imageRef = workImagesByUrl.get(reference.url);
+      if (!imageRef) return reference;
+      const image = workImages.get(imageRef.imageId);
+      return {
+        ...reference,
+        verifiedProductMediaAssetId: image?.productId === imageRef.productId ? image.mediaAssetId : null,
+      };
+    });
     const resolution = await this.mediaAuthorizationResolver.resolveReferences(
-      uniqueReferences,
+      managedReferences,
       db === this.prisma
         ? { mode: "ENFORCE", fileVerificationScope: scope ? pageReadCache(scope, db).fileVerification : undefined }
         : { transaction: db as Prisma.TransactionClient, mode: "ENFORCE", fileVerificationScope: scope ? pageReadCache(scope, db).fileVerification : undefined },
@@ -3150,6 +3181,15 @@ export class PageModulesService {
       string,
       Array<{ blockId?: string; path: string; label: string; field: string; index?: number }>
     >();
+    const workImageReferences: Array<{
+      productId: number;
+      imageId: number;
+      code?: string;
+      label: string;
+      path: string;
+      blockId?: string;
+      field: string;
+    }> = [];
     const categorySlugs = new Set<string>();
     const categoryReferences = new Map<
       string,
@@ -3693,28 +3733,6 @@ export class PageModulesService {
       attachBlockContext(props);
     };
 
-    const visibleContentCount = Array.isArray(puckData.content)
-      ? puckData.content.filter(isVisiblePuckBlock).length
-      : 0;
-    const visibleZoneCount =
-      pageRule?.contentPlacement !== "root-only"
-      && isRecord(puckData.zones)
-        ? Object.values(puckData.zones).reduce(
-            (count: number, zoneBlocks: unknown) =>
-              count +
-              (Array.isArray(zoneBlocks)
-                ? zoneBlocks.filter(isVisiblePuckBlock).length
-                : 0),
-            0,
-          )
-        : 0;
-
-    const rootContentForPlacement = Array.isArray(puckData.content) ? puckData.content : [];
-    const standaloneContactPage = isStandaloneContactPage(pageKey, rootContentForPlacement);
-    if (visibleContentCount + visibleZoneCount === 0 && !standaloneContactPage) {
-      errors.push("页面至少需要 1 个可见的前台内容模块");
-    }
-
     const orderedVisibleBlocks = [
       ...(Array.isArray(puckData.content) ? puckData.content : []),
       ...(pageRule?.contentPlacement !== "root-only"
@@ -3764,19 +3782,6 @@ export class PageModulesService {
           errors.push("固定业务区必须属于当前页面且保持锁定");
         }
       });
-      const semanticRootContent = rootContent.filter((block) =>
-        isBusinessRegionBlock(block) || (
-          isVisiblePuckBlock(block) &&
-          (Boolean(CONTENT_TEMPLATE_BY_MODULE_TYPE[block.type]) || block.type === DYNAMIC_TEMPLATE_BLOCK_TYPE)
-        ),
-      );
-      if (
-        pageRule.businessRegionPosition === "after-first-brand-block"
-        && !standaloneContactPage
-        && semanticRootContent.findIndex(isBusinessRegionBlock) !== 1
-      ) {
-        errors.push("固定业务区必须紧随首个品牌框架模块之后");
-      }
     }
 
     if (Array.isArray(puckData.content)) {
@@ -3917,8 +3922,26 @@ export class PageModulesService {
             };
           }
         }
+        const workImageSlots = result.definition ? getWorkGridImageSlotIds(result.definition) : new Set<string>();
+        const workCodesBySlot = new Map(result.actions.flatMap((action) => (
+          action.sourceField === "workProductCode" ? [[action.slotId, action.value] as const] : []
+        )));
         for (const asset of result.assets) {
           const assetLabel = `${instance.label}：${result.definition?.slots[asset.slotId]?.label ?? asset.slotId} 素材`;
+          const workImage = asset.sourceField === "src" && workImageSlots.has(asset.slotId)
+            ? parseWorkImageReference(asset.url)
+            : null;
+          if (workImage) {
+            workImageReferences.push({
+              ...workImage,
+              code: workCodesBySlot.get(asset.slotId),
+              label: assetLabel,
+              blockId: instance.blockId,
+              path: `${instance.path}.props.contentBySlotId.${asset.slotId}.src`,
+              field: asset.slotId,
+            });
+            continue;
+          }
           if (!this.isSafeAssetUrl(asset.url)) {
             const errorIndex = errors.push(`${assetLabel}地址不合法`) - 1;
             errorContexts[errorIndex] = {
@@ -3947,12 +3970,18 @@ export class PageModulesService {
             }
           }
         }
-        const registerProductCode = (slotId: string, code: string, index?: number) => {
+        const registerProductCode = (
+          slotId: string,
+          code: string,
+          index?: number,
+          sourceField?: DynamicTemplateActionReference["sourceField"],
+        ) => {
           productCodes.add(code);
           const references = productCodeReferences.get(code) ?? [];
+          const slotPath = `${instance.path}.props.contentBySlotId.${slotId}${index === undefined ? "" : `[${index}]`}`;
           references.push({
             blockId: instance.blockId,
-            path: `${instance.path}.props.contentBySlotId.${slotId}${index === undefined ? "" : `[${index}]`}`,
+            path: sourceField ? `${slotPath}.${sourceField}` : slotPath,
             label: instance.label,
             field: slotId,
             ...(index === undefined ? {} : { index }),
@@ -3979,7 +4008,7 @@ export class PageModulesService {
         });
         for (const action of result.actions) {
           if (action.targetType === "product") {
-            registerProductCode(action.slotId, action.value, action.index);
+            registerProductCode(action.slotId, action.value, action.index, action.sourceField);
           } else if (action.targetType === "category") {
             registerCategorySlug(action.slotId, action.value, action.index);
           } else if (
@@ -4079,6 +4108,16 @@ export class PageModulesService {
             );
           }
         }
+      }
+    }
+
+    if (workImageReferences.length > 0) {
+      const imagesById = await findPublicWorkImages(db, workImageReferences.map((reference) => reference.imageId));
+      for (const reference of workImageReferences) {
+        const image = imagesById.get(reference.imageId);
+        if (image?.productId === reference.productId && (!reference.code || image.product.code === reference.code)) continue;
+        const errorIndex = errors.push(`${reference.label}不可公开使用，请重新选择对应作品或更换卡片图片`) - 1;
+        errorContexts[errorIndex] = reference;
       }
     }
 

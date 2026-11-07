@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
-import { createBlankTemplate, applyBasicSkeleton, productionStageAction, completeProductionReviews as reviewTemplateForPublish } from "./fixtures/template-authoring-main-route";
+import { createBlankTemplate, addContentGroupsAndSlots, applyBasicSkeleton, productionStageAction, completeProductionReviews as reviewTemplateForPublish } from "./fixtures/template-authoring-main-route";
 
 import type { DynamicTemplatePageFieldDescriptor } from "../src/page-builder/dynamic-template-instance/pageFieldDescriptors";
 import type { TemplateDefinitionV2 } from "../src/page-builder/template-definition";
@@ -670,6 +670,19 @@ async function readRendererGeometry(
   });
 }
 
+function collapsesInMissingContentPreview(
+  definition: TemplateDefinitionV2,
+  nodeId: string,
+  hiddenNodeIds: ReadonlySet<string>,
+): boolean {
+  const node = definition.nodes[nodeId];
+  if (!node || nodeId === definition.rootNodeId) return false;
+  if (node.slotId) return hiddenNodeIds.has(nodeId);
+  return node.childIds.length > 0 && node.childIds.every(
+    (childId) => collapsesInMissingContentPreview(definition, childId, hiddenNodeIds),
+  );
+}
+
 function expectRendererGeometry(
   geometry: Awaited<ReturnType<typeof readRendererGeometry>>,
   definition: TemplateDefinitionV2,
@@ -678,6 +691,8 @@ function expectRendererGeometry(
 ) {
   const identity = expectExactStructure(definition);
   const hiddenNodeIdSet = new Set(hiddenNodeIds);
+  const isCollapsedBranch = (nodeId: string) =>
+    collapsesInMissingContentPreview(definition, nodeId, hiddenNodeIdSet);
   const expectedOrder = [
     identity.rootNodeId,
     identity.regionIds[0],
@@ -686,26 +701,18 @@ function expectRendererGeometry(
     identity.regionIds[1],
     identity.groupIds[1],
     ...identity.slotNodeIds.slice(1),
-  ].filter((nodeId) => !hiddenNodeIdSet.has(nodeId));
+  ].filter((nodeId) => !isCollapsedBranch(nodeId));
   expect(geometry.nodes.map((node) => node.nodeId), `${device} 必须按 Definition 深度优先顺序渲染真实节点`)
     .toEqual(expectedOrder);
   const expectedParents = new Map<string, string | null>([[identity.rootNodeId, null]]);
   for (const node of Object.values(definition.nodes)) {
     for (const childId of node.childIds) expectedParents.set(childId, node.nodeId);
   }
-  const isCollapsedBranch = (nodeId: string): boolean => {
-    const node = definition.nodes[nodeId];
-    if (!node) return false;
-    if (node.slotId) return hiddenNodeIdSet.has(nodeId);
-    return node.childIds.length > 0 && node.childIds.every(isCollapsedBranch);
-  };
   for (const node of geometry.nodes) {
     expect(node.parentNodeId, `${device}.${node.nodeId} 必须保持 Definition 父子关系`)
       .toBe(expectedParents.get(node.nodeId));
     expect(node.rect.width, `${device}.${node.nodeId} 宽度必须非零`).toBeGreaterThan(0);
-    if (!isCollapsedBranch(node.nodeId)) {
-      expect(node.rect.height, `${device}.${node.nodeId} 高度必须非零`).toBeGreaterThan(0);
-    }
+    expect(node.rect.height, `${device}.${node.nodeId} 高度必须非零`).toBeGreaterThan(0);
   }
   expect(geometry.root.rect.width, `${device} Renderer 根宽度必须非零`).toBeGreaterThan(0);
   expect(geometry.root.rect.height, `${device} Renderer 根高度必须非零`).toBeGreaterThan(0);
@@ -716,7 +723,7 @@ function expectRendererGeometry(
   for (const parent of Object.values(definition.nodes)) {
     if (parent.childIds.length < 2) continue;
     const orderedChildren = parent.childIds
-      .filter((childId) => !hiddenNodeIdSet.has(childId))
+      .filter((childId) => !isCollapsedBranch(childId))
       .map((childId, index) => ({ childId, index, order: definition.nodes[childId].responsive[device].order }))
       .sort((left, right) => left.order - right.order || left.index - right.index)
       .map(({ childId }) => byId.get(childId)!);
@@ -735,16 +742,23 @@ function expectResponsiveRootGeometry(
   geometry: Awaited<ReturnType<typeof readRendererGeometry>>,
   definition: TemplateDefinitionV2,
   device: "desktop" | "mobile",
+  hiddenNodeIds: readonly string[],
 ) {
   const identity = expectExactStructure(definition);
   const byId = new Map(geometry.nodes.map((node) => [node.nodeId, node]));
   const root = byId.get(identity.rootNodeId);
   const firstRegion = byId.get(identity.regionIds[0]);
   const secondRegion = byId.get(identity.regionIds[1]);
-  if (!root || !firstRegion || !secondRegion) throw new Error(`${device} 缺少根级响应式几何节点`);
+  if (!root) throw new Error(`${device} 缺少根级响应式几何节点`);
   expect(root.display, `${device} 根节点必须使用真实 flex 构图`).toBe("flex");
   expect(root.flexDirection, `${device} 根节点方向必须与当前端定义一致`)
     .toBe(device === "desktop" ? "row" : "column");
+  if (!firstRegion || !secondRegion) {
+    const hidden = new Set(hiddenNodeIds);
+    expect(Boolean(firstRegion)).toBe(!collapsesInMissingContentPreview(definition, identity.regionIds[0], hidden));
+    expect(Boolean(secondRegion)).toBe(!collapsesInMissingContentPreview(definition, identity.regionIds[1], hidden));
+    return;
+  }
   if (device === "desktop") {
     expect(secondRegion.rect.x, "桌面端第二内容区域必须真实位于第一内容区域右侧")
       .toBeGreaterThan(firstRegion.rect.x + 1);
@@ -873,12 +887,9 @@ async function expectPageFieldSummary(
   const expected = [
     {
       control: "image",
-      controlLabel: "图片选择",
       editable: true,
       hideable: true,
       label: "工艺主图",
-      limit: "建议 1600 × 1000 像素",
-      overrideCopy: "页面设计覆盖：允许图片适配/图片焦点覆盖",
       policy: {
         position: false, size: false, zIndex: false, imageFit: true, imageFocus: true,
         typography: false, spacing: false, minWidthPercent: 25, maxWidthPercent: 150,
@@ -889,12 +900,9 @@ async function expectPageFieldSummary(
     },
     {
       control: "text",
-      controlLabel: "文字输入",
       editable: true,
       hideable: false,
       label: "工艺标题",
-      limit: "最小 2 字；最大 36 字",
-      overrideCopy: "页面设计覆盖：允许文字样式覆盖；字号 12–96 像素",
       policy: {
         position: false, size: false, zIndex: false, imageFit: false, imageFocus: false,
         typography: true, spacing: false, minWidthPercent: 25, maxWidthPercent: 150,
@@ -905,12 +913,9 @@ async function expectPageFieldSummary(
     },
     {
       control: "text",
-      controlLabel: "文字输入",
       editable: true,
       hideable: true,
       label: "正文槽位",
-      limit: "最小 0 字；最大 240 字",
-      overrideCopy: "页面设计覆盖：允许间距覆盖；间距不超过 120 像素",
       policy: {
         position: false, size: false, zIndex: false, imageFit: false, imageFocus: false,
         typography: false, spacing: true, minWidthPercent: 25, maxWidthPercent: 150,
@@ -921,12 +926,9 @@ async function expectPageFieldSummary(
     },
     {
       control: "link",
-      controlLabel: "行动与链接",
       editable: true,
       hideable: true,
       label: "了解工艺",
-      limit: "未设置额外限制",
-      overrideCopy: "页面设计覆盖：允许位置覆盖；偏移不超过 30%",
       policy: {
         position: true, size: false, zIndex: false, imageFit: false, imageFocus: false,
         typography: false, spacing: false, minWidthPercent: 25, maxWidthPercent: 150,
@@ -974,9 +976,6 @@ async function expectPageFieldSummary(
       expect(JSON.parse(validationAttribute!)).toEqual(item.validation);
       expect(JSON.parse(policyAttribute!)).toEqual(item.policy);
       await expect(field).toContainText(`${item.required ? "必须由页面填写" : "建议填写"} · 可填写 · ${item.hideable ? "可隐藏" : "固定显示"}`);
-      await expect(field).toContainText(`控件：${item.controlLabel}`);
-      await expect(field).toContainText(`限制：${item.limit}`);
-      await expect(field).toContainText(item.overrideCopy);
     }
   }
 }
@@ -986,52 +985,6 @@ async function openBlankTemplate(page: Page) {
   await createBlankTemplate(page);
   await expect(page.getByRole("tree", { name: "模板区域与槽位" }).getByRole("treeitem")).toHaveCount(0);
   await (await productionStageAction(page, "交付信息")).click();
-}
-
-async function chooseAddTarget(page: Page, label: string) {
-  const target = page.getByLabel("添加目标");
-  const value = await target.locator("option").filter({ hasText: label }).getAttribute("value");
-  if (!value) throw new Error(`缺少添加目标：${label}`);
-  await target.selectOption(value);
-}
-
-async function addTwoRegionsAndGroups(page: Page) {
-  const tools = page.getByRole("complementary", { name: "模板结构" });
-  await tools.getByRole("button", { name: "添加区域", exact: true }).click();
-  await tools.getByRole("button", { name: "添加区域", exact: true }).click();
-  const regionDialog = page.getByRole("dialog", { name: "添加区域" });
-  await regionDialog.getByLabel("区域插入位置").selectOption("after");
-  await regionDialog.getByRole("button", { name: "确认添加区域" }).click();
-  const tree = page.getByRole("tree", { name: "模板区域与槽位" });
-  await expect(tree.getByRole("treeitem", { name: /内容区域 1/ })).toBeVisible();
-  await expect(tree.getByRole("treeitem", { name: /内容区域 2/ })).toBeVisible();
-
-  await tree.getByRole("treeitem", { name: /内容区域 1/ }).click();
-  await tools.getByRole("button", { name: "添加槽位" }).click();
-  await page.getByRole("button", { name: "添加左右排列布局分组" }).click();
-  await page.keyboard.press("Escape");
-  await page.getByLabel("节点名称").first().fill("图片组");
-  await page.getByLabel("节点名称").first().press("Tab");
-  await tools.getByRole("button", { name: "添加槽位" }).click();
-  await chooseAddTarget(page, "图片组");
-  await page.getByRole("button", { name: "添加图片槽位" }).click();
-  await page.keyboard.press("Escape");
-
-  await tree.getByRole("treeitem", { name: /内容区域 2/ }).click();
-  await tools.getByRole("button", { name: "添加槽位" }).click();
-  await page.getByRole("button", { name: "添加上下排列布局分组" }).click();
-  await page.keyboard.press("Escape");
-  await page.getByLabel("节点名称").first().fill("文字组");
-  await page.getByLabel("节点名称").first().press("Tab");
-  await tools.getByRole("button", { name: "添加槽位" }).click();
-  await chooseAddTarget(page, "文字组");
-  await page.getByRole("button", { name: "添加标题槽位" }).click();
-  await page.getByRole("button", { name: "添加正文槽位" }).click();
-  await page.getByRole("button", { name: "添加按钮槽位" }).click();
-  await page.keyboard.press("Escape");
-  for (const name of ["图片组 布局容器", "图片槽位", "文字组 布局容器", "标题槽位", "正文槽位", "按钮槽位"]) {
-    await expect(tree.getByRole("treeitem", { name: new RegExp(name) })).toBeVisible();
-  }
 }
 
 async function saveDraft(page: Page) {
@@ -1106,7 +1059,7 @@ test("历史 4:3 双图文夹具保持可编辑双端结构且零网络写", asy
   expect(server.pageWrites).toEqual([]);
 });
 
-test("结构选择默认在当前容器末尾新增，undo/redo 恢复命令前后选择", async ({ page }) => {
+test("结构选择同步画布和属性，现有容器不提供新增槽位入口", async ({ page }) => {
   const server = await installTemplateServer(page);
   await openBlankTemplate(page);
   await page.getByRole("textbox", { name: "模板名称", exact: true }).fill("插入与选择验收模板");
@@ -1145,40 +1098,13 @@ test("结构选择默认在当前容器末尾新增，undo/redo 恢复命令前�
   await textGroupItem.getByText("文字组", { exact: true }).click();
   await expectUnifiedSelection(textGroupId);
 
-  const networkBeforeInsert = readServerCounters(server);
-  await page.getByRole("complementary", { name: "模板结构", exact: true })
-    .getByRole("button", { name: "添加槽位", exact: true })
-    .click();
-  const addDialog = page.getByRole("dialog", { name: "添加槽位", exact: true });
-  await expect(addDialog).toContainText("当前选择：文字组");
-  await expect(addDialog.getByLabel("添加目标")).toHaveValue(textGroupId);
-  await expect(addDialog).toContainText("添加到：");
-  await addDialog.getByRole("button", { name: "添加按钮槽位", exact: true }).click();
-  await expect(page.getByText("按钮槽位已添加到“文字组”", { exact: true })).toBeVisible();
-
-  const afterAdd = await readSessionSnapshot(page);
-  if (!afterAdd.definition) throw new Error("新增按钮后缺少定义");
-  const addedNodeId = afterAdd.definition.nodes[textGroupId].childIds
-    .find((nodeId) => !originalTextChildren.includes(nodeId));
-  if (!addedNodeId) throw new Error("按钮槽位未落入文字组");
-  expect(afterAdd.definition.nodes[addedNodeId].type).toBe("ButtonSlot");
-  await expectUnifiedSelection(addedNodeId);
-
-  await page.getByRole("button", { name: "撤销", exact: true }).click();
-  const afterUndo = await readSessionSnapshot(page);
-  expect(afterUndo.definition?.nodes[addedNodeId]).toBeUndefined();
-  await expectUnifiedSelection(textGroupId);
-
-  await page.getByRole("button", { name: "重做", exact: true }).click();
-  const afterRedo = await readSessionSnapshot(page);
-  expect(afterRedo.definition?.nodes[addedNodeId]?.type).toBe("ButtonSlot");
-  expect(afterRedo.definition?.nodes[textGroupId].childIds).toContain(addedNodeId);
-  await expectUnifiedSelection(addedNodeId);
-  expect(readServerCounters(server), "选择、新增与 undo/redo 只改内存草稿")
-    .toEqual(networkBeforeInsert);
+  await expect(page.getByRole("button", { name: "添加槽位", exact: true })).toHaveCount(0);
+  await expect(page.getByText("＋ 添加内容", { exact: true })).toHaveCount(0);
+  expect((await readSessionSnapshot(page)).definition?.nodes[textGroupId].childIds).toEqual(originalTextChildren);
+  expect(server.dynamicWrites).toEqual([]);
 });
 
-test("自建单区域图文组可跨组移动、双端重排，并原子取消必填删除后保存重开", async ({ page }) => {
+test("既有单区域图文组可跨组移动、双端重排，并原子取消必填删除后保存重开", async ({ page }) => {
   const server = await installTemplateServer(page);
   await openBlankTemplate(page);
   await page.getByRole("textbox", { name: "模板名称", exact: true }).fill("单区域自建图文模板");
@@ -1186,50 +1112,29 @@ test("自建单区域图文组可跨组移动、双端重排，并原子取消�
 
   const structure = page.getByRole("complementary", { name: "模板结构", exact: true });
   const tree = structure.getByRole("tree", { name: "模板区域与槽位" });
-  await structure.getByRole("button", { name: "添加区域", exact: true }).click();
-  const regionItem = tree.getByRole("treeitem", { name: /内容区域 1/ });
-  await expect(regionItem).toBeVisible();
-
-  await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
-  await page.getByRole("button", { name: "添加左右排列布局分组", exact: true }).click();
-  await page.keyboard.press("Escape");
-  const compositionItem = tree.getByRole("treeitem", { name: /左右布局组 布局容器/ });
-  const compositionId = await compositionItem.getAttribute("data-selection-target-id");
-  if (!compositionId) throw new Error("自建左右主组缺少稳定节点身份");
-  await page.getByLabel("节点名称").first().fill("工艺图文组");
-  await page.getByLabel("节点名称").first().press("Tab");
-
-  const addVerticalGroup = async (name: string) => {
-    await tree.locator(`[role="treeitem"][data-selection-target-id="${compositionId}"]`).click();
-    await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
-    const addDialog = page.getByRole("dialog", { name: "添加槽位", exact: true });
-    const vertical = addDialog.getByRole("button", { name: "添加上下排列布局分组", exact: true });
-    await expect(vertical, "左右主组内必须能继续建立合法的纵向图片/文字组").toBeEnabled();
-    await vertical.click();
-    await page.keyboard.press("Escape");
-    await page.getByLabel("节点名称").first().fill(name);
-    await page.getByLabel("节点名称").first().press("Tab");
-    const item = tree.getByRole("treeitem", { name: new RegExp(`${name} 布局容器`) });
-    const nodeId = await item.getAttribute("data-selection-target-id");
-    if (!nodeId) throw new Error(`${name}缺少稳定节点身份`);
-    return nodeId;
-  };
-
-  const imageGroupId = await addVerticalGroup("图片组");
-  await tree.locator(`[role="treeitem"][data-selection-target-id="${imageGroupId}"]`).click();
-  await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
-  const imageDialog = page.getByRole("dialog", { name: "添加槽位", exact: true });
-  await imageDialog.getByRole("button", { name: "添加图片槽位", exact: true }).click();
-  await imageDialog.getByRole("button", { name: "添加标题槽位", exact: true }).click();
-  await page.keyboard.press("Escape");
-
-  const textGroupId = await addVerticalGroup("文字组");
-  await tree.locator(`[role="treeitem"][data-selection-target-id="${textGroupId}"]`).click();
-  await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
-  const textDialog = page.getByRole("dialog", { name: "添加槽位", exact: true });
-  await textDialog.getByRole("button", { name: "添加正文槽位", exact: true }).click();
-  await textDialog.getByRole("button", { name: "添加按钮槽位", exact: true }).click();
-  await page.keyboard.press("Escape");
+  // 直接装入既有图文结构，保留跨组移动与保存回读的界面覆盖。
+  const { compositionId, imageGroupId, textGroupId } = await page.evaluate(async () => {
+    const repo = "/src/page-builder/template-editor/dynamicTemplateDraftRepository.ts";
+    const operations = "/src/page-builder/template-definition/operations.ts";
+    const session = "/src/page-builder/template-editor/templateEditorSession.ts";
+    const [{ addConfiguredTemplateRegion }, { addDynamicTemplateLayoutGroup, addDynamicTemplateNode }, { useTemplateEditorSession }] = await Promise.all([
+      import(/* @vite-ignore */ repo), import(/* @vite-ignore */ operations), import(/* @vite-ignore */ session),
+    ]);
+    const state = useTemplateEditorSession.getState();
+    const region = addConfiguredTemplateRegion(state.draft.definition);
+    const composition = addDynamicTemplateLayoutGroup(region.definition, region.nodeId, "horizontal");
+    const image = addDynamicTemplateLayoutGroup(composition.definition, composition.nodeId, "vertical");
+    const words = addDynamicTemplateLayoutGroup(image.definition, composition.nodeId, "vertical");
+    let definition = words.definition;
+    for (const [parentId, type] of [[image.nodeId, "ImageSlot"], [image.nodeId, "HeadingSlot"], [words.nodeId, "TextSlot"], [words.nodeId, "ButtonSlot"]]) {
+      definition = addDynamicTemplateNode(definition, parentId, type).definition;
+    }
+    definition.nodes[composition.nodeId].name = "工艺图文组";
+    definition.nodes[image.nodeId].name = "图片组";
+    definition.nodes[words.nodeId].name = "文字组";
+    state.setDynamicDefinition(definition);
+    return { compositionId: composition.nodeId, imageGroupId: image.nodeId, textGroupId: words.nodeId };
+  });
 
   const beforeMove = await readSessionSnapshot(page);
   if (!beforeMove.definition) throw new Error("自建图文组后缺少模板定义");
@@ -1424,7 +1329,7 @@ test("模板文本字段逐字编辑只提交一次历史，Escape 恢复且允�
   expect(server.dynamicWrites).toEqual([]);
 });
 
-test("TD-6A 同一个专用模板从真正空白制作到目录精确 v1", async ({ page }) => {
+test("TD-6A 装入既有结构的模板草稿并发布到目录精确 v1", async ({ page }) => {
   test.setTimeout(150_000);
   const server = await installTemplateServer(page);
   const pageErrors: string[] = [];
@@ -1458,7 +1363,7 @@ test("TD-6A 同一个专用模板从真正空白制作到目录精确 v1", async
     .getByRole("textbox", { name: "用途", exact: true });
   await purposeInput.fill("工艺介绍与细节说明");
   await purposeInput.press("Tab");
-  await addTwoRegionsAndGroups(page);
+  await addContentGroupsAndSlots(page);
 
   const tree = page.getByRole("tree", { name: "模板区域与槽位" });
   const initialSession = await readSessionSnapshot(page);
@@ -1477,11 +1382,7 @@ test("TD-6A 同一个专用模板从真正空白制作到目录精确 v1", async
   await page.getByRole("button", { name: "确认排列转换", exact: true }).click();
   await tree.getByRole("treeitem", { name: "图片组 布局容器" }).click();
   await page.getByRole("button", { name: /桌面端模板布局/ }).click();
-  await page.getByRole("button", { name: "预览左右排列", exact: true }).click();
-  await page.getByRole("button", { name: "确认排列转换", exact: true }).click();
-  await page.getByRole("button", { name: /移动端模板布局/ }).click();
-  await page.getByRole("button", { name: "预览上下排列", exact: true }).click();
-  await page.getByRole("button", { name: "确认排列转换", exact: true }).click();
+  await expect(page.getByRole("button", { name: "预览左右排列", exact: true })).toBeDisabled();
 
   await openPageField(page, /图片槽位/, "工艺主图");
   const systemIdentity = page.getByText("系统身份 · 改名称不会改变身份", { exact: true });
@@ -1525,8 +1426,8 @@ test("TD-6A 同一个专用模板从真正空白制作到目录精确 v1", async
     .toBe("row");
   expect(authoredSession.definition.nodes[authoredSession.definition.rootNodeId].responsive.mobile.direction)
     .toBe("column");
-  expect(authoredSession.definition.nodes[imageGroupId].responsive.desktop.direction).toBe("row");
-  expect(authoredSession.definition.nodes[imageGroupId].responsive.mobile.direction).toBe("column");
+  expect(authoredSession.definition.nodes[imageGroupId].responsive)
+    .toEqual(initialSession.definition.nodes[imageGroupId].responsive);
   await expectPageFieldSummary(page, authoredSession.pageFields);
   const pageFieldsByLabel = Object.fromEntries(authoredSession.pageFields.map((field) => [field.label, field]));
   expect(pageFieldsByLabel["工艺主图"].effectiveDesignOverrideCapabilities).toMatchObject({ imageFit: true });
@@ -1698,7 +1599,7 @@ test("TD-6A 同一个专用模板从真正空白制作到目录精确 v1", async
         : [];
       const geometry = await readRendererGeometry(page, redoneBatch.definition!, run.device);
       expectRendererGeometry(geometry, redoneBatch.definition!, run.device, missingNodeIds);
-      expectResponsiveRootGeometry(geometry, redoneBatch.definition!, run.device);
+      expectResponsiveRootGeometry(geometry, redoneBatch.definition!, run.device, missingNodeIds);
       if (value === "short-text") shortHeight = geometry.root.scrollHeight;
       if (value === "long-text") {
         expect(geometry.root.scrollHeight, `${run.device} 长文不得出现失控高度`)
@@ -1740,7 +1641,6 @@ test("TD-6A 同一个专用模板从真正空白制作到目录精确 v1", async
   await page.getByRole("tab", { name: "页面开放范围", exact: true }).click();
   await (await productionStageAction(page, "发布检查")).click();
   const manualReview = page.getByRole("region", { name: "本次发布检查", exact: true });
-  await manualReview.getByText("预览与核对（可选）", { exact: true }).click();
   await manualReview.getByRole("button", { name: "发布检查桌面端模板布局", exact: true }).click();
   await manualReview.getByRole("button", { name: "确认已核对桌面端布局", exact: true }).click();
   await manualReview.getByRole("button", { name: "发布检查移动端模板布局", exact: true }).click();
@@ -2120,58 +2020,18 @@ test("TD-6A 同一个专用模板从真正空白制作到目录精确 v1", async
   expect(server.unexpectedRequests).toEqual([]);
 });
 
-test("TD-6B 完整模板的取消、非法落点、结构锁定和发布阻断全部保持零网络写", async ({ page }) => {
+test("TD-6B 完整模板没有新增入口，发布阻断保持零网络写", async ({ page }) => {
   const server = await installTemplateServer(page);
   await openBlankTemplate(page);
   await page.getByRole("textbox", { name: "模板名称", exact: true }).fill("TD-6B 发布前边界专用模板");
   await page.getByRole("textbox", { name: "模板名称", exact: true }).press("Tab");
-  await addTwoRegionsAndGroups(page);
+  await addContentGroupsAndSlots(page);
   const structure = page.getByRole("complementary", { name: "模板结构", exact: true });
   const tree = page.getByRole("tree", { name: "模板区域与槽位" });
 
-  const beforeCancel = await readSessionSnapshot(page);
-  const cancelNetwork = readServerCounters(server);
-  await structure.getByRole("button", { name: "添加区域", exact: true }).click();
-  const regionDialog = page.getByRole("dialog", { name: "添加区域", exact: true });
-  await expect(regionDialog).toBeVisible();
-  await regionDialog.getByRole("button", { name: "关闭添加区域", exact: true }).click();
-  await expect(regionDialog).toBeHidden();
-  expect(await readSessionSnapshot(page), "取消添加区域必须保持完整模板事实不变").toEqual(beforeCancel);
-  expect(readServerCounters(server), "取消添加区域不得产生请求").toEqual(cancelNetwork);
-
-  const rootTarget = page.getByRole("button", { name: "选择模板目标 模板根节点", exact: true });
-  await rootTarget.focus();
-  await page.keyboard.press("Enter");
-  const beforeInvalid = await readSessionSnapshot(page);
-  const invalidNetwork = readServerCounters(server);
-  await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
-  const invalidPanel = page.getByRole("dialog", { name: "添加槽位", exact: true });
-  await expect(invalidPanel.getByLabel("添加目标")).toHaveValue("");
-  await expect(invalidPanel.getByRole("button", { name: "添加图片槽位", exact: true })).toBeDisabled();
-  await expect(invalidPanel.getByRole("button", { name: "关闭添加槽位", exact: true })).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(invalidPanel).toBeHidden();
-  expect(await readSessionSnapshot(page), "非法根级槽位落点必须零 definition/history 变化").toEqual(beforeInvalid);
-  expect(readServerCounters(server), "非法根级槽位落点不得产生请求").toEqual(invalidNetwork);
-
-  await tree.getByRole("treeitem", { name: /内容区域 1/ }).click();
-  await setSwitch(page, "锁定位置、尺寸和层级", true);
-  const locked = await readSessionSnapshot(page);
-  const lockedNetwork = readServerCounters(server);
-  await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
-  const lockedPanel = page.getByRole("dialog", { name: "添加槽位", exact: true });
-  const lockedOptions = lockedPanel.getByLabel("添加目标").getByRole("option");
-  await expect(lockedOptions.filter({ hasText: /^内容区域 1（.*已锁定.*）$/ })).toHaveAttribute("disabled", "");
-  await expect(lockedOptions.filter({ hasText: /^内容区域 1 \/ 图片组（.*已锁定.*）$/ }))
-    .toHaveAttribute("disabled", "");
-  await expect(lockedPanel.getByRole("button", { name: "添加图片槽位", exact: true })).toBeDisabled();
-  await page.keyboard.press("Escape");
-  await expect(lockedPanel).toBeHidden();
-  expect(await readSessionSnapshot(page), "锁定目标必须拒绝结构写入并保持当前模板").toEqual(locked);
-  expect(readServerCounters(server), "锁定目标拒绝路径不得产生请求").toEqual(lockedNetwork);
-
-  // 结束锁定场景后显式解锁，才能继续编辑其子槽位的页面要求。
-  await setSwitch(page, "锁定位置、尺寸和层级", false);
+  await expect(structure.getByRole("button", { name: /^(添加区域|添加槽位)$/ })).toHaveCount(0);
+  await expect(page.getByText("＋ 添加内容", { exact: true })).toHaveCount(0);
+  expect(server.dynamicWrites).toEqual([]);
   await tree.getByRole("treeitem", { name: /标题槽位/ }).click();
   await page.getByRole("tab", { name: "页面开放范围", exact: true }).click();
   await expect(page.getByRole("switch", { name: "公开时必须有内容", exact: true })).toBeDisabled();
@@ -2218,7 +2078,7 @@ test("TD-6B 完整模板保存 500、迟到成功和 409 均保留当前输入�
   await (await productionStageAction(page, "交付信息")).click();
   await page.getByLabel("用途", { exact: true }).fill("验证完整模板保存失败与重试边界");
   await page.getByLabel("用途", { exact: true }).press("Tab");
-  await addTwoRegionsAndGroups(page);
+  await addContentGroupsAndSlots(page);
   await saveDraft(page);
   const templateId = server.resource?.templateId;
   if (!templateId) throw new Error("保存边界缺少首次持久化模板身份");
@@ -2306,7 +2166,7 @@ test("TD-6B 迟到发布响应不确定时只核对一次，目录失败只重�
   await (await productionStageAction(page, "交付信息")).click();
   await page.getByLabel("用途", { exact: true }).fill("验证发布响应不确定时的核对与目录重试");
   await page.getByLabel("用途", { exact: true }).press("Tab");
-  await addTwoRegionsAndGroups(page);
+  await addContentGroupsAndSlots(page);
   await saveDraft(page);
   const templateId = server.resource?.templateId;
   if (!templateId) throw new Error("发布核对边界缺少持久化模板身份");
@@ -2425,7 +2285,7 @@ test("TD-6A 保存成功但发布 403 时明确保留完整草稿且未发布", 
   await (await productionStageAction(page, "交付信息")).click();
   await page.getByLabel("用途", { exact: true }).fill("验证发布失败后完整草稿恢复");
   await page.getByLabel("用途", { exact: true }).press("Tab");
-  await addTwoRegionsAndGroups(page);
+  await addContentGroupsAndSlots(page);
   await completeProductionReviews(page);
   const beforePublish = await readSessionSnapshot(page);
   if (!beforePublish.definition) throw new Error("发布失败用例缺少完整内存定义");

@@ -3,33 +3,12 @@ import { addTemplateLayoutStarter, getTemplateLayoutStarterUnavailableReason, TE
 import { createNewDynamicTemplateDraft } from "../src/page-builder/template-editor/dynamicTemplateDraftRepository";
 import { resolveTemplateNodeRules } from "../src/page-builder/template-definition/responsive";
 import { useTemplateEditorSession } from "../src/page-builder/template-editor/templateEditorSession";
-import { addFirstRegion, createBlankTemplate, firstRegionAction, installNewTemplateServer, readSession, stableAuthoringFacts, structurePanel } from "./fixtures/template-authoring-main-route";
+import { addFirstRegion, createBlankTemplate, installNewTemplateServer, readSession, stableAuthoringFacts, structurePanel } from "./fixtures/template-authoring-main-route";
 
 test.afterEach(() => useTemplateEditorSession.getState().close());
 
 function activeStructurePanel(page: Page) {
   return structurePanel(page).or(page.getByRole("dialog", { name: "模板结构", exact: true }));
-}
-
-async function openLayoutStarterPicker(page: Page) {
-  const palette = page.getByRole("dialog", { name: "添加槽位", exact: true });
-  if (!await palette.isVisible()) {
-    await activeStructurePanel(page).getByRole("button", { name: "添加槽位", exact: true }).click();
-  }
-  await palette.getByRole("button", { name: "选择常用布局", exact: true }).click();
-  const picker = page.getByRole("dialog", { name: "选择常用布局", exact: true });
-  await expect(picker).toBeVisible();
-  return picker;
-}
-
-async function addFirstRegionForCurrentViewport(page: Page) {
-  if (await structurePanel(page).isVisible()) {
-    await addFirstRegion(page);
-    return;
-  }
-  await firstRegionAction(page).click();
-  await page.getByRole("button", { name: "展开模板结构面板", exact: true }).click();
-  await expect(activeStructurePanel(page).getByRole("treeitem", { name: /内容区域 1/ })).toBeVisible();
 }
 
 for (const option of TEMPLATE_LAYOUT_STARTERS) {
@@ -94,30 +73,14 @@ test("既有网格按合法嵌套提供布局，拒绝直接网格套网格且�
 });
 
 for (const width of [390, 1200, 1600]) {
-  test(`确定性 UI ${width}px：空白先建区域后选择图文布局、取消零写入、一次撤销还原`, async ({ page }, testInfo) => {
+  test(`确定性 UI ${width}px：模板结构区保留，常用布局新增入口已移除`, async ({ page }) => {
     const server = await installNewTemplateServer(page);
     await page.setViewportSize({ width, height: 1000 });
     await createBlankTemplate(page);
-    await addFirstRegionForCurrentViewport(page);
-    const before = await readSession(page);
-    const picker = await openLayoutStarterPicker(page);
-    await expect(picker).toContainText("添加到：内容区域 1");
-    await expect(page.locator(".ant-popover").filter({ has: picker })).toHaveCSS("opacity", "1");
-    await page.screenshot({ path: testInfo.outputPath("layout-picker.png") });
-    await picker.getByRole("button", { name: "取消选择布局", exact: true }).click();
-    expect(stableAuthoringFacts(await readSession(page))).toEqual(stableAuthoringFacts(before));
-    const reopenedPicker = await openLayoutStarterPicker(page);
-    await reopenedPicker.getByRole("button", { name: /^左图右文/ }).click();
-    await expect(reopenedPicker).toBeHidden();
-    const created = await readSession(page);
-    expect(created.historyPast).toHaveLength(before.historyPast.length + 1);
-    expect(created.pageFields.map((field) => field.label)).toEqual(["主图", "主标题", "正文说明", "行动按钮"]);
-    expect(created.definition!.nodes[created.selectedObjectId!].name).toBe("图片区域");
-    expect(server.writes).toEqual([]);
-    const frame = page.frameLocator("iframe[title$='模板隔离画布']");
-    await expect(frame.locator(`[data-template-node-id="${created.selectedObjectId}"]`)).toBeVisible();
-    await page.keyboard.press("Control+z");
-    expect((await readSession(page)).definition).toEqual(before.definition);
+    const expand = page.getByRole("button", { name: "展开模板结构面板", exact: true });
+    if (await expand.isVisible()) await expand.click();
+    await expect(activeStructurePanel(page)).toBeVisible();
+    await expect(page.getByRole("button", { name: /^(添加区域|添加槽位|选择常用布局)$/ })).toHaveCount(0);
     expect(server.writes).toEqual([]);
   });
 }
@@ -127,8 +90,19 @@ test("确定性 UI：三张卡片实际呈现桌面三列和手机单列，设�
   await page.setViewportSize({ width: 1600, height: 1000 });
   await createBlankTemplate(page);
   await addFirstRegion(page);
-  const picker = await openLayoutStarterPicker(page);
-  await picker.getByRole("button", { name: /^三列卡片/ }).click();
+  // 用已存在的三列布局测试两个画布端点。
+  await page.evaluate(async () => {
+    const layoutModule = "/src/page-builder/template-editor/templateLayoutStarters.ts";
+    const sessionModule = "/src/page-builder/template-editor/templateEditorSession.ts";
+    const [{ addTemplateLayoutStarter, TEMPLATE_LAYOUT_STARTERS }, { useTemplateEditorSession }] = await Promise.all([
+      import(/* @vite-ignore */ layoutModule), import(/* @vite-ignore */ sessionModule),
+    ]);
+    const state = useTemplateEditorSession.getState();
+    const definition = state.draft.definition;
+    const [regionId] = definition.nodes[definition.rootNodeId].childIds;
+    const starter = TEMPLATE_LAYOUT_STARTERS.find((entry: { label: string }) => entry.label === "三列卡片");
+    state.setDynamicDefinition(addTemplateLayoutStarter(definition, regionId, starter.id).definition);
+  });
   const created = await readSession(page);
   const layout = Object.values(created.definition!.nodes).find((node) => node.name === "三列卡片")!;
   const groups = layout.childIds;
@@ -152,25 +126,14 @@ test("确定性 UI：三张卡片实际呈现桌面三列和手机单列，设�
   await page.screenshot({ path: testInfo.outputPath("cards-mobile.png") });
 });
 
-test("确定性 UI：从结构区建立两栏后，连续添加沿用首个待填区域", async ({ page }) => {
+test("确定性 UI：已有结构的选中区域不显示新增控件", async ({ page }) => {
   const server = await installNewTemplateServer(page);
   await page.setViewportSize({ width: 1600, height: 1000 });
   await createBlankTemplate(page);
   await addFirstRegion(page);
-  await structurePanel(page).getByRole("button", { name: "添加槽位", exact: true }).click();
-  const palette = page.getByRole("dialog", { name: "添加槽位", exact: true });
-  await palette.getByRole("button", { name: "选择常用布局", exact: true }).click();
-  await page.getByRole("dialog", { name: "选择常用布局", exact: true }).getByRole("button", { name: /^左右两栏/ }).click();
-  const built = await readSession(page);
-  const targetId = built.selectedObjectId!;
-  expect(built.definition!.nodes[targetId].name).toBe("左侧区域");
-  await expect(palette.getByRole("combobox", { name: "添加目标", exact: true })).toHaveValue(targetId);
-  await palette.getByRole("button", { name: "添加标题槽位", exact: true }).click();
-  await palette.getByRole("button", { name: "添加正文槽位", exact: true }).click();
-  const after = await readSession(page);
-  const children = after.definition!.nodes[targetId].childIds;
-  expect(children.map((id) => after.definition!.nodes[id].type)).toEqual(["HeadingSlot", "TextSlot"]);
-  expect(after.historyPast).toHaveLength(built.historyPast.length + 2);
-  expect(Object.keys(after.definition!.slots)).toHaveLength(2);
+  const before = await readSession(page);
+  await expect(structurePanel(page).getByRole("treeitem", { name: /内容区域 1/ })).toBeVisible();
+  await expect(structurePanel(page).getByRole("button", { name: /^(添加槽位|添加区域)$/ })).toHaveCount(0);
+  expect(stableAuthoringFacts(await readSession(page))).toEqual(stableAuthoringFacts(before));
   expect(server.writes).toEqual([]);
 });

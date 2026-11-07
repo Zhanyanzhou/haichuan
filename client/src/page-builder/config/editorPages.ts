@@ -89,7 +89,7 @@ const editorPageDefinitions: Record<EditorPageKey, EditorPageDefinition> = {
     businessRegion: {
       title: "选款工具与商品结果",
       description: "搜索、筛选、排序、快速查看、选款清单与询价由选款中心的真实业务逻辑驱动。",
-      items: "关键词/货号搜索|条件筛选|排序与结果|快速查看|选款清单|提交询价",
+      items: "关键词/款号搜索|条件筛选|排序与结果|快速查看|选款清单|提交询价",
     },
   },
   custom: {
@@ -232,7 +232,7 @@ export function isContentTemplateBlockPublicRenderable(
   return hasMedia || hasRequiredText || hasCollectionContent || hasNoRequiredContent;
 }
 
-/** 覆盖式白色导航只有在首个可见品牌模块满足机器合同要求时启用。 */
+/** 只在页面开头有可覆盖的品牌模块时使用浅色导航。 */
 export function resolvePageHeaderMode(
   key: EditorPageKey,
   data: ({
@@ -246,8 +246,9 @@ export function resolvePageHeaderMode(
     return "solid";
   }
   const firstVisible = data?.content?.find(
-    (block) => block?.props?.isVisible !== false && block?.type !== "业务功能区",
+    (block) => block?.type === "业务功能区" || block?.props?.isVisible !== false,
   );
+  if (firstVisible?.type === "业务功能区") return rule.headerMode.fallback;
   if (firstVisible?.type === DYNAMIC_TEMPLATE_BLOCK_TYPE) {
     if (!isContentTemplateBlockPublicRenderable(firstVisible, data)) {
       return rule.headerMode.fallback;
@@ -292,19 +293,23 @@ function placeBusinessRegion(
   content: PuckBlock[],
   businessRegionBlock: PuckBlock,
 ) {
-  const contentWithoutBusinessRegion = content.filter(
-    (block) => block?.type !== "业务功能区",
-  );
-  const firstVisibleBrandIndex = contentWithoutBusinessRegion.findIndex(
+  const existingIndex = content.findIndex((block) => block?.type === "业务功能区");
+  if (existingIndex >= 0) {
+    // 保留文档中的顺序，同时规范化第一个固定业务区并过滤重复项。
+    return content.flatMap((block, index) => index === existingIndex
+      ? [businessRegionBlock]
+      : block?.type === "业务功能区" ? [] : [block]);
+  }
+  const firstVisibleBrandIndex = content.findIndex(
     (block) =>
       block?.props?.isVisible !== false && (
         Boolean(getContentTemplateContract(block?.type || ""))
         || block?.type === DYNAMIC_TEMPLATE_BLOCK_TYPE
       ),
   );
-  // 隐藏备选块和网站设置不参与公开顺序；固定业务区只跟随首个真正可见的品牌模块。
+  // 只在补齐缺少业务区的旧文档时沿用原默认插入位置。
   const insertionIndex = firstVisibleBrandIndex >= 0 ? firstVisibleBrandIndex + 1 : 0;
-  const nextContent = [...contentWithoutBusinessRegion];
+  const nextContent = [...content];
   nextContent.splice(insertionIndex, 0, businessRegionBlock);
   return nextContent;
 }

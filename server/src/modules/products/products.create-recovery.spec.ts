@@ -31,7 +31,8 @@ function persistedProduct(overrides: Record<string, unknown> = {}) {
     detailContent: null,
     status: "DRAFT",
     visibility: "PUBLIC",
-    salesMode: "DISPLAY_ONLY",
+    salesMode: "CUSTOM_INQUIRY",
+    priceMin: 1000,
     inventoryPolicy: "STANDARD",
     purchaseRegion: "MAINLAND",
     publishMode: "WAREHOUSE",
@@ -57,6 +58,7 @@ function persistedProduct(overrides: Record<string, unknown> = {}) {
       skuCode: `${createInput.code}-DEFAULT`,
       material: "GOLD_999",
       size: null,
+      color: null,
       goldWeight: 0,
       price: 0,
       isActive: true,
@@ -111,7 +113,7 @@ function createService(
   };
 }
 
-test("同货号且完整创建意图一致时恢复原商品并保持零业务写", async () => {
+test("同款号且完整创建意图一致时恢复原商品并保持零业务写", async () => {
   const harness = createService(async () => persistedProduct());
 
   const result = await harness.service.create({ ...createInput }, adminActor);
@@ -121,15 +123,41 @@ test("同货号且完整创建意图一致时恢复原商品并保持零业务�
   assert.equal("skus" in result, false);
 });
 
-test("同货号但创建意图不同仍冲突，不能认领既有商品", async () => {
+test("同款号但创建意图不同仍冲突，不能认领既有商品", async () => {
   const harness = createService(async () => persistedProduct({ name: "另一件作品" }));
 
   await assert.rejects(
     () => harness.service.create({ ...createInput }, adminActor),
-    (error: unknown) => error instanceof ConflictException && error.message.includes("商品货号"),
+    (error: unknown) => error instanceof ConflictException && error.message.includes("商品款号"),
   );
 
   assert.deepEqual(harness.reads(), { transactions: 2, categoryReads: 1 });
+});
+
+test("同款号 SKU 颜色不同不视为同一创建意图", async () => {
+  const harness = createService(async () => persistedProduct({
+    skus: [{
+      skuCode: "HC-CREATE-RECOVERY-001-WHITE",
+      material: "GOLD_999",
+      size: null,
+      color: "白色",
+      goldWeight: 0,
+      price: 12800,
+      isActive: true,
+    }],
+  }));
+
+  await assert.rejects(
+    () => harness.service.create({
+      ...createInput,
+      skus: [{
+        skuCode: "HC-CREATE-RECOVERY-001-WHITE",
+        color: "玫瑰金",
+        price: 12800,
+      }],
+    }, adminActor),
+    (error: unknown) => error instanceof ConflictException && error.message.includes("商品款号"),
+  );
 });
 
 test("并发创建由唯一约束裁决后再次权威读取并恢复同一商品", async () => {

@@ -21,7 +21,7 @@ export default function ContactLanding({
 }) {
   const preview = mode === "editor-preview";
   const resource = contact;
-  const { active: decorated } = usePageDecorationState();
+  const { active: decorated, ownsPrimaryHeading } = usePageDecorationState();
   const setPageMeta = usePageMetaStore((state) => state.setMeta);
   const clearPageMeta = usePageMetaStore((state) => state.clear);
   const customer = useCustomerAuthStore((state) => state.customer);
@@ -65,6 +65,7 @@ export default function ContactLanding({
 
   return (
     <div className="contact-direct">
+      {!preview && !ownsPrimaryHeading ? <h1 className="sr-only">联系海川</h1> : null}
       <div className={`contact-direct__content${decorated ? " contact-direct__content--decorated" : ""}`}>
         {rawReference ? <section className="contact-direct__context" aria-label="咨询作品">
           <h2>关于这件作品</h2>

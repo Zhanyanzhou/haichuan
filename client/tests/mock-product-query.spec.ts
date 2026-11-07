@@ -58,7 +58,7 @@ const products = [
 ];
 
 test.describe("商品 Mock 查询模型", () => {
-  test("支持精确货号、关键词和材质中文名", () => {
+  test("支持精确款号、关键词和材质中文名", () => {
     expect(filterProducts(products, { exactCode: "HC-MOCK-002" }))
       .toEqual([products[2]]);
     expect(filterProducts(products, { keyword: "戒指" }))
@@ -103,7 +103,7 @@ test.describe("商品 Mock 查询模型", () => {
     ).toEqual([3, 2]);
   });
 
-  test("显式 Mock 模式下商品目录继续消费精确货号查询", async ({ page }) => {
+  test("显式 Mock 模式下商品目录继续消费精确款号查询", async ({ page }) => {
     test.skip(appMode !== "mock", "该回归仅验证显式 Vite mock 模式");
 
     await page.goto("/catalog?query=JH-ES-001");

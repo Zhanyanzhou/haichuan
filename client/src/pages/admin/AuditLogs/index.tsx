@@ -288,9 +288,11 @@ function isUncertainWriteResult(error: unknown) {
   return status === undefined || status === 408 || status >= 500;
 }
 
+type LoadState = "initial" | "refreshing" | "settled";
+
 export default function AuditLogs() {
   const { message } = AntdApp.useApp();
-  const [loading, setLoading] = useState(true);
+  const [logsLoadState, setLogsLoadState] = useState<LoadState>("initial");
   const [error, setError] = useState("");
   const [logs, setLogs] = useState<AuditLogRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -301,7 +303,8 @@ export default function AuditLogs() {
   const [action, setAction] = useState<string>();
   const [selectedLog, setSelectedLog] = useState<AuditLogRow | null>(null);
   const [notificationFailures, setNotificationFailures] = useState<NotificationFailureRow[]>([]);
-  const [notificationFailuresLoading, setNotificationFailuresLoading] = useState(true);
+  const [notificationFailuresLoadState, setNotificationFailuresLoadState] =
+    useState<LoadState>("initial");
   const [notificationFailuresError, setNotificationFailuresError] = useState("");
   const [retryingEventIds, setRetryingEventIds] = useState<Set<number>>(new Set());
   const notificationRetryKeysRef = useRef(new Map<number, string>());
@@ -309,6 +312,7 @@ export default function AuditLogs() {
   const [notificationRetryUncertainIds, setNotificationRetryUncertainIds] =
     useState<Set<number>>(new Set());
   const requestSequence = useRef(0);
+  const notificationFailuresRequestSequence = useRef(0);
 
   const setNotificationRetryUncertain = (eventId: number, uncertain: boolean) => {
     if (uncertain) notificationRetryUncertainIdsRef.current.add(eventId);
@@ -318,7 +322,7 @@ export default function AuditLogs() {
 
   const load = useCallback(async () => {
     const requestId = ++requestSequence.current;
-    setLoading(true);
+    setLogsLoadState((state) => state === "initial" ? state : "refreshing");
     setError("");
     try {
       const response = await settingsApi.getLogs({
@@ -336,7 +340,7 @@ export default function AuditLogs() {
       if (requestId !== requestSequence.current) return;
       setError(getSafeAdminErrorMessage(loadError, "操作日志加载失败。请稍后重新加载。"));
     } finally {
-      if (requestId === requestSequence.current) setLoading(false);
+      if (requestId === requestSequence.current) setLogsLoadState("settled");
     }
   }, [action, keyword, module, page]);
 
@@ -345,13 +349,15 @@ export default function AuditLogs() {
   }, [load]);
 
   const loadNotificationFailures = useCallback(async () => {
-    setNotificationFailuresLoading(true);
+    const requestId = ++notificationFailuresRequestSequence.current;
+    setNotificationFailuresLoadState((state) => state === "initial" ? state : "refreshing");
     setNotificationFailuresError("");
     try {
       const response = await api.get("/notification-operations/failures", {
         params: { page: 1, pageSize: 20 },
       });
       const data = unwrapResponse<PaginatedResult<NotificationFailureRow>>(response);
+      if (requestId !== notificationFailuresRequestSequence.current) return;
       setNotificationFailures((current) => {
         const next = [...(data?.list ?? [])];
         const nextIds = new Set(next.map(({ id }) => id));
@@ -366,12 +372,15 @@ export default function AuditLogs() {
         return next;
       });
     } catch (loadError: unknown) {
+      if (requestId !== notificationFailuresRequestSequence.current) return;
       setNotificationFailuresError(getSafeAdminErrorMessage(
         loadError,
         "通知投递故障加载失败。请稍后重新加载。",
       ));
     } finally {
-      setNotificationFailuresLoading(false);
+      if (requestId === notificationFailuresRequestSequence.current) {
+        setNotificationFailuresLoadState("settled");
+      }
     }
   }, []);
 
@@ -569,6 +578,12 @@ export default function AuditLogs() {
     setPage(1);
   };
 
+  if (logsLoadState === "initial" || notificationFailuresLoadState === "initial") {
+    return <AdminLoadingState subject="操作日志" />;
+  }
+
+  const loading = logsLoadState === "refreshing";
+  const notificationFailuresLoading = notificationFailuresLoadState === "refreshing";
   return (
     <div className="audit-logs">
       <AdminPageHeader
@@ -605,7 +620,7 @@ export default function AuditLogs() {
           />
         ) : null}
         {notificationFailuresLoading ? (
-          <AdminLoadingState subject="通知投递故障" />
+          <AdminLoadingState subject="通知投递故障" compact />
         ) : notificationFailuresError ? (
           <AdminErrorState
             message={notificationFailuresError}
@@ -680,7 +695,7 @@ export default function AuditLogs() {
         ) : null}
 
         {loading ? (
-          <AdminLoadingState subject="操作日志" />
+          <AdminLoadingState subject="操作日志" compact />
         ) : error ? (
           <AdminErrorState message={error} onRetry={() => void load()} />
         ) : logs.length === 0 ? (

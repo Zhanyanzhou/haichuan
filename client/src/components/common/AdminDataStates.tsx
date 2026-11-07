@@ -20,6 +20,7 @@ interface LoadingProps {
   subject?: string;
   message?: string;
   compact?: boolean;
+  allowInteraction?: boolean;
 }
 
 interface EmptyProps extends Props {
@@ -32,13 +33,19 @@ interface ErrorProps extends Props {
   action?: string;
 }
 
-export function AdminLoadingState({ subject = '数据', message, compact = false }: LoadingProps = {}) {
+export function AdminLoadingState({
+  subject = '数据',
+  message,
+  compact = false,
+  allowInteraction = false,
+}: LoadingProps = {}) {
   const text = message ?? getAdminLoadingText(subject);
   return (
     <RouteLoading
       scope={compact ? 'panel' : 'region'}
       surface="admin"
       label={text}
+      className={allowInteraction ? 'site-route-loading--nonblocking' : undefined}
     />
   );
 }

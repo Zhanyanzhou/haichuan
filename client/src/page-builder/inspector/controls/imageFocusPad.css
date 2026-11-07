@@ -74,7 +74,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-[data-image-focus-mode="assist"] .homepage-editor__inspector-disclosure {
+[data-image-focus-mode="assist"] .homepage-editor__inspector-field-group {
   margin-top: 4px;
 }
 

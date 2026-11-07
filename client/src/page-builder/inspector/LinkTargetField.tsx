@@ -1,11 +1,17 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Modal, Radio, Space } from "antd";
 import ProductReferencesField from "@/page-builder/fields/ProductReferencesField";
 import CategoryReferencesField from "@/page-builder/fields/CategoryReferencesField";
-import { editorPages } from "@/page-builder/config/editorPages";
-import { isContentTemplatePageTarget } from "@/page-builder/generated/contentTemplates.generated";
+import { singleReferencePickerModalProps } from "@/page-builder/fields/referencePickerModal";
+import { editorPages, getEditorPageByPath } from "@/page-builder/config/editorPages";
+import {
+  isContentTemplatePageTarget,
+  normalizeContentTemplatePageTarget,
+} from "@/page-builder/generated/contentTemplates.generated";
 import {
   normalizeHttpsExternalTarget,
   normalizeLinkTargetType,
+  resolveLinkTargetUrl,
   type LinkTargetType,
   type LinkTargetValue,
 } from "@/page-builder/utils/linkTarget";
@@ -17,6 +23,8 @@ interface LinkTargetFieldProps extends LinkTargetValue {
   description?: string;
   /** 条目内嵌的紧凑形态:省略标题与说明行 */
   compact?: boolean;
+  /** 商品、分类、站内页面由分段按钮直接打开单选弹窗。 */
+  pickerPresentation?: "inline" | "dialog";
   /**
    * 属性键前缀:patch 键按 `${prefix}TargetType/...` 生成。
    * 缺省写 targetType/productId/linkUrl。
@@ -24,11 +32,10 @@ interface LinkTargetFieldProps extends LinkTargetValue {
   keyPrefix?: string;
 }
 
+const publicPageOptions = editorPages.filter((page) => isContentTemplatePageTarget(page.publicPath));
+
 /**
- * 链接字段(紧凑一行式,2026-08-18 P1-3 统一形态):
- * 分段「不跳转 | 商品 | 页面」+ 行内对应选择器。
- * 页面态用 datalist 提供正式 PageDocument 路由；允许附带查询参数，
- * 但不存在的路径、商品详情和其他非内容页会立即提示并在发布时被拒绝。
+ * 商家视图在弹窗里选择公开页面；其他调用方继续使用支持查询参数的行内路径。
  * compact 供 arrayFields 条目内嵌;keyPrefix 供同模块第二链接(如次按钮)。
  */
 export default function LinkTargetField({
@@ -42,12 +49,27 @@ export default function LinkTargetField({
   label = "点击后跳转",
   description = "一个模块只设置一个明确去向，避免多个入口分散注意力。",
   compact = false,
+  pickerPresentation = "inline",
   keyPrefix = "",
 }: LinkTargetFieldProps) {
   const normalizedTargetType = normalizeLinkTargetType({ targetType, productCode, productId, categorySlug, linkUrl });
   const normalizedProductCode = typeof productCode === "string" ? productCode.trim() : "";
   const normalizedProductId = Number(productId) || 0;
   const normalizedCategorySlug = typeof categorySlug === "string" ? categorySlug.trim() : "";
+  const [picker, setPicker] = useState<{ type: "product" | "category" | "page"; open: boolean } | null>(null);
+  const [pageDraftPath, setPageDraftPath] = useState("");
+  const dialogPicker = pickerPresentation === "dialog";
+  const currentPagePath = dialogPicker && normalizedTargetType === "page"
+    ? normalizeContentTemplatePageTarget(linkUrl)?.split("?")[0]
+    : undefined;
+  const currentPage = currentPagePath ? getEditorPageByPath(currentPagePath) : undefined;
+  const dialogProductCode = normalizedTargetType === "product" ? normalizedProductCode : "";
+  const dialogProductId = normalizedTargetType === "product" && !dialogProductCode ? normalizedProductId : 0;
+  const dialogCategorySlug = normalizedTargetType === "category" ? normalizedCategorySlug : "";
+  const dialogProductCodes = useMemo(() => dialogProductCode ? [dialogProductCode] : [], [dialogProductCode]);
+  const dialogProductIds = useMemo(() => dialogProductId > 0 ? [dialogProductId] : [], [dialogProductId]);
+  const dialogCategorySlugs = useMemo(() => dialogCategorySlug ? [dialogCategorySlug] : [], [dialogCategorySlug]);
+  const closePicker = () => setPicker((current) => current ? { ...current, open: false } : null);
   const detailRef = useRef<HTMLDivElement | null>(null);
   const previousTargetTypeRef = useRef(normalizedTargetType);
 
@@ -56,7 +78,8 @@ export default function LinkTargetField({
     previousTargetTypeRef.current = normalizedTargetType;
     if (
       previousTargetType === normalizedTargetType ||
-      normalizedTargetType === "none"
+      normalizedTargetType === "none" ||
+      (dialogPicker && normalizedTargetType !== "external")
     ) {
       return;
     }
@@ -82,7 +105,7 @@ export default function LinkTargetField({
       }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [normalizedTargetType]);
+  }, [dialogPicker, normalizedTargetType]);
   // 前缀键遵循 camelCase:targetType / secondaryTargetType。
   // 无前缀时仅首字母小写(TargetType→targetType),不能整词 toLowerCase——
   // 否则写入 targettype 键,渲染端/发布校验读驼峰键会静默失联(2026-08-18 实测抓出)。
@@ -113,6 +136,7 @@ export default function LinkTargetField({
       patch[key("ProductCode")] = "";
       patch[key("ProductId")] = 0;
       patch[key("CategorySlug")] = "";
+      if (dialogPicker) patch[key("LinkUrl")] = "";
     }
     onChange(patch);
   };
@@ -123,6 +147,9 @@ export default function LinkTargetField({
   const externalInvalid =
     normalizedTargetType === "external" &&
     !normalizeHttpsExternalTarget(linkUrl);
+  const inspectableTarget = dialogPicker && (normalizedTargetType === "page" || normalizedTargetType === "external")
+    ? resolveLinkTargetUrl({ targetType: normalizedTargetType, categorySlug, linkUrl })
+    : "";
 
   return (
     <>
@@ -143,20 +170,122 @@ export default function LinkTargetField({
           "page", "页面",
         ], [
           "external", "外链",
-        ]] as const).map(([value, text]) => (
-          <button
-            key={value}
-            type="button"
-            className={normalizedTargetType === value ? "is-active" : ""}
-            aria-pressed={normalizedTargetType === value}
-            onClick={() => updateTargetType(value)}
-          >
-            {text}
-          </button>
-        ))}
+        ]] as const).map(([value, text]) => {
+          const opensPicker = dialogPicker && (value === "product" || value === "category" || value === "page");
+          return (
+            <button
+              key={value}
+              type="button"
+              className={normalizedTargetType === value ? "is-active" : ""}
+              aria-pressed={normalizedTargetType === value}
+              aria-haspopup={opensPicker ? "dialog" : undefined}
+              onClick={() => {
+                if (opensPicker) {
+                  if (value === "page") setPageDraftPath(currentPagePath ?? "");
+                  setPicker({ type: value, open: true });
+                } else if (!dialogPicker || value !== normalizedTargetType) {
+                  updateTargetType(value);
+                }
+              }}
+            >
+              {text}
+            </button>
+          );
+        })}
       </div>
 
-      {normalizedTargetType === "product" ? (
+      {dialogPicker && (normalizedTargetType === "product" || picker?.type === "product") ? (
+        <ProductReferencesField
+          value={dialogProductCodes}
+          legacyIds={dialogProductIds}
+          onChange={(codes) => {
+            if (!codes[0]) return;
+            onChange({
+              [key("TargetType")]: "product",
+              [key("ProductCode")]: codes[0],
+              [key("ProductId")]: 0,
+              [key("CategorySlug")]: "",
+              [key("LinkUrl")]: "",
+            });
+          }}
+          minProducts={1}
+          maxProducts={1}
+          singlePicker={{
+            open: picker?.type === "product" && picker.open,
+            onOpen: () => setPicker({ type: "product", open: true }),
+            onClose: closePicker,
+          }}
+        />
+      ) : null}
+
+      {dialogPicker && (normalizedTargetType === "category" || picker?.type === "category") ? (
+        <CategoryReferencesField
+          value={dialogCategorySlugs}
+          onChange={(slugs) => {
+            if (!slugs[0]) return;
+            onChange({
+              [key("TargetType")]: "category",
+              [key("CategorySlug")]: slugs[0],
+              [key("ProductCode")]: "",
+              [key("ProductId")]: 0,
+              [key("LinkUrl")]: "",
+            });
+          }}
+          minItems={1}
+          maxItems={1}
+          singlePicker={{ open: picker?.type === "category" && picker.open, onClose: closePicker }}
+        />
+      ) : null}
+      {dialogPicker && normalizedTargetType === "product" && !dialogProductCode && !dialogProductId ? (
+        <span className="homepage-editor__inspector-hint" role="alert">请选择要跳转的商品。</span>
+      ) : null}
+      {dialogPicker && normalizedTargetType === "category" && !dialogCategorySlug ? (
+        <span className="homepage-editor__inspector-hint" role="alert">请选择要跳转的分类。</span>
+      ) : null}
+      {dialogPicker && normalizedTargetType === "page" ? (
+        currentPage ? <span>跳转至「{currentPage.label}」</span> : (
+          <span className="homepage-editor__inspector-hint" role="alert">
+            {linkUrl ? "原页面链接不可用，请重新选择页面。" : "请选择要跳转的页面。"}
+          </span>
+        )
+      ) : null}
+      {dialogPicker && picker?.type === "page" ? (
+        <Modal
+          {...singleReferencePickerModalProps}
+          title="选择页面"
+          open={picker.open}
+          okText="确认选择"
+          cancelText="取消"
+          okButtonProps={{ disabled: !pageDraftPath, size: "large" }}
+          onCancel={closePicker}
+          onOk={() => {
+            if (!pageDraftPath) return;
+            // 确认同一页面时保留历史链接携带的查询参数。
+            if (currentPagePath !== pageDraftPath) {
+              onChange({
+                [key("TargetType")]: "page",
+                [key("ProductCode")]: "",
+                [key("ProductId")]: 0,
+                [key("CategorySlug")]: "",
+                [key("LinkUrl")]: pageDraftPath,
+              });
+            }
+            closePicker();
+          }}
+        >
+          <div className="homepage-editor__product-picker-dialog" role="radiogroup" aria-label="站内页面">
+            <Radio.Group value={pageDraftPath} onChange={(event) => setPageDraftPath(event.target.value)}>
+              <Space direction="vertical" size="middle">
+                {publicPageOptions.map((page) => (
+                  <Radio key={page.key} value={page.publicPath}>{page.label}</Radio>
+                ))}
+              </Space>
+            </Radio.Group>
+          </div>
+        </Modal>
+      ) : null}
+
+      {!dialogPicker && normalizedTargetType === "product" ? (
         <div
           ref={detailRef}
           className="homepage-editor__inspector-field homepage-editor__link-target-detail"
@@ -175,7 +304,7 @@ export default function LinkTargetField({
         </div>
       ) : null}
 
-      {normalizedTargetType === "category" ? (
+      {!dialogPicker && normalizedTargetType === "category" ? (
         <div
           ref={detailRef}
           className="homepage-editor__inspector-field homepage-editor__link-target-detail"
@@ -190,7 +319,7 @@ export default function LinkTargetField({
         </div>
       ) : null}
 
-      {normalizedTargetType === "page" ? (
+      {!dialogPicker && normalizedTargetType === "page" ? (
         <div
           ref={detailRef}
           className="homepage-editor__inspector-field homepage-editor__link-target-detail"
@@ -245,6 +374,17 @@ export default function LinkTargetField({
             </span>
           ) : null}
         </div>
+      ) : null}
+      {inspectableTarget ? (
+        <a
+          className="homepage-editor__linked-target-detail"
+          href={inspectableTarget}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="查看跳转目标（新标签页）"
+        >
+          查看跳转目标
+        </a>
       ) : null}
     </>
   );

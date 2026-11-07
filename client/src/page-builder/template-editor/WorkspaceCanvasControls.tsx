@@ -180,6 +180,7 @@ function CanvasZoomInput({
 export default function WorkspaceCanvasControls({
   isFitView,
   zoom,
+  displayZoom,
   viewportLabel,
   editableSize,
   onFit,
@@ -201,10 +202,12 @@ export default function WorkspaceCanvasControls({
   onLocateSelection,
   onFitSelection,
   viewActions,
+  workspaceSizeControl,
   variant = "full",
 }: {
   isFitView: boolean;
   zoom: number;
+  displayZoom?: number;
   viewportLabel: string;
   editableSize?: EditableCanvasSize;
   onFit: () => void;
@@ -226,8 +229,10 @@ export default function WorkspaceCanvasControls({
   onLocateSelection?: () => void;
   onFitSelection?: () => void;
   viewActions?: ReactNode;
+  workspaceSizeControl?: ReactNode;
   variant?: "full" | "minimal";
 }) {
+  const effectiveZoom = displayZoom ?? zoom;
   const [isSizeEditorOpen, setIsSizeEditorOpen] = useState(false);
   const [isViewToolsOpen, setIsViewToolsOpen] = useState(false);
   const controlsRef = useRef<HTMLDivElement>(null);
@@ -464,7 +469,7 @@ export default function WorkspaceCanvasControls({
       ) : (
         <button
           type="button"
-          className={!isFitView && Math.abs(zoom - 1) < 0.005 ? "is-active" : ""}
+          className={!isFitView && Math.abs(effectiveZoom - 1) < 0.005 ? "is-active" : ""}
           onClick={onActualSize}
         >
           100%
@@ -476,15 +481,16 @@ export default function WorkspaceCanvasControls({
       {!editableSize ? (
         <output
           className="homepage-editor__canvas-readout"
-          aria-label={`画布尺寸 ${viewportLabel}，缩放 ${Math.round(zoom * 100)}%`}
+          aria-label={`画布尺寸 ${viewportLabel}，${displayZoom === undefined ? "缩放" : "显示比例"} ${Math.round(effectiveZoom * 100)}%`}
         >
           <span>{viewportLabel}</span>
-          {Math.round(zoom * 100)}%
+          {Math.round(effectiveZoom * 100)}%
         </output>
       ) : null}
       <button type="button" onClick={onZoomIn} aria-label="放大画布">
         +
       </button>
+      {workspaceSizeControl}
       {editableSize ? (
         <>
           <span className="template-editor__canvas-controls-divider" aria-hidden="true" />

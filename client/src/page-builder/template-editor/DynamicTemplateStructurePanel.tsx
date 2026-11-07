@@ -62,8 +62,6 @@ import {
 import { orderStructureChildIds } from "./structureReadingOrder";
 import { settleEvenWorkGrid } from "./evenWorkGridMaintenance";
 import { requestDeleteTemplateNode } from "./requestTemplateNodeDeletion";
-import { addConfiguredTemplateRegion } from "./dynamicTemplateDraftRepository";
-import { DynamicTemplateNodePalette } from "./DynamicTemplateToolbox";
 import {
   getTemplateContractRoleLabel,
   TEMPLATE_CONTRACT_KIND_LABELS,
@@ -522,8 +520,6 @@ function getStructureIssueDisplayMessage(
     const region = regions.find((candidate) => candidate.nodeId === issue.nodeId);
     return `${region?.label ?? "内容区域"} 暂无内容`;
   }
-  if (issue.code === "MISSING_REGION") return "模板尚未创建内容区域";
-  if (issue.code === "MISSING_SLOT") return "模板尚未添加内容槽位";
   return issue.message.replace(/[。]$/, "");
 }
 
@@ -603,8 +599,6 @@ export default function DynamicTemplateStructurePanel({
   const [openedMenuNodeId, setOpenedMenuNodeId] = useState<string | null>(null);
   const [dragMarker, setDragMarker] = useState<DragMarker>(null);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const paletteToolsRef = useRef<HTMLDivElement>(null);
   const [focusedTreeItemKey, setFocusedTreeItemKey] = useState<string | null>(null);
   const [selectionExclusion, setSelectionExclusion] = useState<TemplateEditorSelectionExclusion | null>(null);
   const treeItemElements = useRef(new Map<string, HTMLDivElement>());
@@ -946,11 +940,6 @@ export default function DynamicTemplateStructurePanel({
   };
 
   const repairIssue = (issue: TemplateStructureIssue) => {
-    if (issue.repair === "add-slot") {
-      // 复用添加入口的当前选择、合法落点和焦点恢复；打开流程不写入结构。
-      paletteToolsRef.current?.querySelector<HTMLButtonElement>('button[aria-label="添加槽位"]')?.click();
-      return;
-    }
     if (issue.repair === "restore-required-role" && issue.nodeId && issue.roleId) {
       const slot = regions.flatMap((region) => region.slots).find((candidate) => (
         candidate.nodeId === issue.nodeId && candidate.roleIds.includes(issue.roleId!)
@@ -1014,23 +1003,6 @@ export default function DynamicTemplateStructurePanel({
         },
       );
       return;
-    }
-    try {
-      let next = currentDraft.definition;
-      let parentId = next.nodes[next.rootNodeId]?.childIds.find((nodeId) => (
-        getDynamicTemplateNodeRegistryEntry(next.nodes[nodeId].type).kind === "structure"
-      ));
-      if (!parentId) {
-        const region = addConfiguredTemplateRegion(next);
-        next = region.definition;
-        parentId = region.nodeId;
-      }
-      if (issue.repair === "add-region") {
-        applyStructureDefinition(next, { onSuccess: () => selectObject(parentId) });
-        return;
-      }
-    } catch (error) {
-      showStructureCommandError(`${error instanceof Error ? error.message : "结构修复失败"} 请检查当前模板结构后重试。`);
     }
   };
 
@@ -1499,7 +1471,7 @@ export default function DynamicTemplateStructurePanel({
                   <li key={`${issue.code}:${issue.nodeId ?? "root"}:${issue.roleId ?? index}`} className={`is-${issue.level}`}>
                     <span title={issue.message}>{getStructureIssueDisplayMessage(issue, regions)}</span>
                     <button type="button" onClick={() => selectIssue(issue)}>定位</button>
-                    {issue.repair ? <button type="button" onClick={() => repairIssue(issue)}>{issue.repair === "add-slot" ? "选择内容" : "修复"}</button> : null}
+                    {issue.repair ? <button type="button" onClick={() => repairIssue(issue)}>修复</button> : null}
                   </li>
                 ))}
               </ul>
@@ -1802,9 +1774,6 @@ export default function DynamicTemplateStructurePanel({
             );
           })}
         </ol>
-      </div>
-      <div ref={paletteToolsRef}>
-        <DynamicTemplateNodePalette open={paletteOpen} onOpenChange={setPaletteOpen} />
       </div>
       <p className="template-editor__structure-note">按阅读顺序排列 · 右侧设置属性</p>
     </aside>

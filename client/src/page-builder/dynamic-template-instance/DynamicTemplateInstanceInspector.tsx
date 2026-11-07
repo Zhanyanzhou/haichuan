@@ -1,10 +1,12 @@
-import { useRef, useState } from "react";
-import { App as AntdApp, Button, Input, Select, Tag } from "antd";
+import { Button, Input, Tag } from "antd";
+import { useEffect, useRef, useState } from "react";
+import { normalizePublicProductReference } from "@/utils/publicProductPath";
+import { productApi } from "@/services/api";
+import { requestStatus } from "@/services/httpClient";
+import type { Product } from "@/types";
+import { unwrapResponse } from "@/utils/unwrap";
 import MediaPickerField, { mediaSpecFromRecommendation, mediaSpecMatchingFrame } from "../fields/MediaPickerField";
-import { ratioLabelOf } from "../config/imageSpecs";
 import ProductReferencesField from "../fields/ProductReferencesField";
-import NumberField, { focusFirstInvalidNumberField } from "../inspector/controls/NumberField";
-import RestoreDefaultButton from "../inspector/controls/RestoreDefaultButton";
 import SegmentedField from "../inspector/controls/SegmentedField";
 import SwitchField from "../inspector/controls/SwitchField";
 import LinkTargetField from "../inspector/LinkTargetField";
@@ -13,17 +15,22 @@ import {
   type DynamicTemplateSlotDefinition,
   type TemplateInstanceLayoutOverride,
 } from "../template-definition";
-import ActionCopyHint from "../template-definition/ActionCopyHint";
+import { describeActionCopy } from "../template-definition/templateCopyUnits";
+import { hasTemplateImageContent } from "../template-definition/imageContent";
+import { isTemplateProductImage } from "../template-definition/managedMediaPreview";
+import { getTemplateVisibleLayoutChildIds, getWorkGridImageSlotIds } from "../template-definition/layoutAuthoring";
 import { objectPositionToPercent } from "../template-definition/imagePosition";
 import { describeEffectiveImageFrames } from "../template-definition/mobileWorkGrid";
-import { resolveTemplateNodeRules } from "../template-definition/responsive";
+import { resolveTemplateNodeRules, resolveTemplateSlotRules } from "../template-definition/responsive";
+import { defaultTemplateImageFit } from "../template-definition/designPropertySemantics";
+import { sectionCopyHiddenByDefault } from "../template-definition/sectionCopyVisibility";
 import {
   formatExactTemplateRatio,
   getEffectiveTemplateRootRules,
   isContentHeightSplitSection,
   resolvePairedMobileCanvas,
 } from "../template-definition/templateDimensions";
-import { useVisualEditorSession, type VisualNodeKind } from "../visual-editor/visualEditorSession";
+import { useVisualEditorSession } from "../visual-editor/visualEditorSession";
 import { useResolvedDynamicTemplate } from "./registry";
 import {
   DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY,
@@ -37,20 +44,10 @@ import {
   stripNonEditableSlotContent,
 } from "./unauthorizedSlotContent";
 import DynamicTemplateUpgradePanel from "./DynamicTemplateUpgradePanel";
+import PageLayoutPresetCards from "./PageLayoutPresetCards";
 import { catalogCardName } from "../template-editor/catalogCardName";
 import { usePublishedTemplateSectionRoles } from "../template-editor/publishedTemplateSectionRoles";
-import {
-  promoteInstanceOverridesToTemplateDraft,
-  type PromoteDynamicTemplateInstanceRequest,
-} from "./promoteToTemplate";
-import ImageFocusField from "../inspector/controls/ImageFocusField";
-import InspectorFooterBar from "../inspector/InspectorFooterBar";
-import { resolvePublishIssueReviewAction } from "../inspector/publishReminderDialog";
-import {
-  getInspectorPublishIssues,
-  type PublishValidationIssue,
-  type PublishValidationStatus,
-} from "../inspector/publishValidation";
+import type { PublishValidationIssue } from "../inspector/publishValidation";
 import {
   getDynamicTemplatePageFieldDataAttributes,
   getDynamicTemplatePageFieldDescriptors,
@@ -62,6 +59,14 @@ import { resolveDynamicTemplatePublicVisibility } from "./publicVisibility";
 
 const { TextArea } = Input;
 
+function hasPageFieldValue(value: unknown): boolean {
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.some(hasPageFieldValue);
+  return Object.entries(asRecord(value)).some(([key, entry]) => (
+    (key !== "targetType" || entry !== "none") && hasPageFieldValue(entry)
+  ));
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -69,47 +74,89 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 function readPageImage(value: unknown) {
-  if (typeof value === "string") return { src: value, alt: "", mobileSrc: "" };
+  if (typeof value === "string") return { src: value, alt: "", mobileSrc: "", workProductCode: "" };
   const record = asRecord(value);
   return {
     src: typeof record.src === "string" ? record.src : "",
     alt: typeof record.alt === "string" ? record.alt : "",
     mobileSrc: typeof record.mobileSrc === "string" ? record.mobileSrc : "",
+    workProductCode: normalizePublicProductReference(record.workProductCode) ?? "",
   };
 }
 
 function readDeviceImagePresentation(
-  slot: DynamicTemplateSlotDefinition,
+  slotRules: DynamicTemplateSlotDefinition["desktopRules"],
   imageLayout: TemplateInstanceLayoutOverride | undefined,
-  device: "desktop" | "mobile",
+  defaultFit: NonNullable<TemplateInstanceLayoutOverride["objectFit"]>,
 ) {
-  const slotRules = device === "desktop" ? slot.desktopRules : slot.mobileRules;
   const layout = imageLayout ?? {};
   const defaultFocus = objectPositionToPercent(slotRules.objectPosition);
   return {
-    slotRules,
+    defaultFit,
     imageLayout: layout,
     defaultFocus,
-    objectFit: layout.objectFit ?? slotRules.objectFit ?? "cover",
+    objectFit: layout.objectFit ?? defaultFit,
     focus: {
       x: layout.focusXPercent ?? defaultFocus.x,
       y: layout.focusYPercent ?? defaultFocus.y,
     },
-    hasOverride: layout.objectFit !== undefined
-      || layout.imageScalePercent !== undefined
-      || layout.focusXPercent !== undefined
-      || layout.focusYPercent !== undefined,
   };
 }
 
-function writePageImage(image: { src: string; alt: string; mobileSrc: string }) {
+function hasImageCompositionOverride(layout: TemplateInstanceLayoutOverride | undefined): boolean {
+  return layout?.objectFit !== undefined
+    || layout?.imageScalePercent !== undefined
+    || layout?.focusXPercent !== undefined
+    || layout?.focusYPercent !== undefined;
+}
+
+function writePageImage(image: ReturnType<typeof readPageImage>) {
   const mobileSrc = image.mobileSrc.trim();
   if (!image.src.trim() && !image.alt.trim() && !mobileSrc) return "";
   return {
     src: image.src,
     alt: image.alt,
     ...(mobileSrc ? { mobileSrc } : {}),
+    ...(image.workProductCode ? { workProductCode: image.workProductCode } : {}),
   };
+}
+
+function needsWorkMainImage(image: ReturnType<typeof readPageImage>) {
+  return !image.src.trim() || isTemplateProductImage(image.src);
+}
+
+async function readWorkMainImage(code: string, signal: AbortSignal) {
+  try {
+    const product = unwrapResponse<Product>(await productApi.getPublicById(code, {
+      locale: "zh-CN", publicOnly: true, suppressGlobalError: true, signal,
+    }));
+    const primary = product?.primaryImage;
+    if (product?.code !== code || !primary || primary.isVideo) return null;
+    const canonicalUrl = `/products/public/${product.id}/media/${primary.id}`;
+    if (primary.mediaUrl !== canonicalUrl || !isTemplateProductImage(canonicalUrl)) return null;
+    return { src: canonicalUrl, alt: product.name?.trim() || code };
+  } catch (error) {
+    if (requestStatus(error) !== 404) throw error;
+    return null;
+  }
+}
+
+const WORK_IMAGE_COMPOSITION_FIELDS = ["objectFit", "imageScalePercent", "focusXPercent", "focusYPercent"] as const;
+
+function withWorkImageComposition(target: unknown, source: unknown) {
+  const next = { ...asRecord(target) };
+  const previous = asRecord(source);
+  for (const device of ["desktop", "mobile"] as const) {
+    const overrides = { ...asRecord(next[device]) };
+    const previousOverrides = asRecord(previous[device]);
+    for (const property of WORK_IMAGE_COMPOSITION_FIELDS) {
+      if (previousOverrides[property] === undefined) delete overrides[property];
+      else overrides[property] = previousOverrides[property];
+    }
+    if (Object.keys(overrides).length) next[device] = overrides;
+    else delete next[device];
+  }
+  return next;
 }
 
 function parseInspectorRatio(ratio: string | undefined): number | undefined {
@@ -119,106 +166,13 @@ function parseInspectorRatio(ratio: string | undefined): number | undefined {
   return width / height;
 }
 
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function getImageAssetGuidance(
-  slot: DynamicTemplateSlotDefinition,
-  validation: DynamicTemplatePageFieldDescriptor["validation"],
-  context: {
-    sectionRole?: string;
-    geometryPolicy?: "paired-canvas" | "hero-media-frame";
-    device: "desktop" | "mobile";
-    /** 手机整节对换后的画框。有值时，建议尺寸跟画布，不跟槽位上的桌面比例。 */
-    effectiveMobileFrame?: string;
-  },
-) {
-  const parts: string[] = [];
-  const { recommendedWidth, recommendedHeight } = validation;
-  const frames = describeEffectiveImageFrames({
-    sectionRole: context.sectionRole,
-    semanticRole: slot.semanticRole,
-    geometryPolicy: context.geometryPolicy,
-    desktopRatioLabel: slot.desktopRules.aspectRatio,
-    mobileRatioLabel: slot.mobileRules.aspectRatio,
-  });
-  const heroSlot = context.sectionRole === "page-hero"
-    && (slot.semanticRole === "backgroundImage" || slot.semanticRole === "heroImage");
-  const swappedFrame = context.effectiveMobileFrame && context.effectiveMobileFrame !== "auto"
-    ? context.effectiveMobileFrame
-    : undefined;
-  const portraitLabel = swappedFrame
-    ?? (heroSlot && (frames.firstHero === "9:16" || frames.mobile === "9:16") ? "9:16" : undefined);
-  if (portraitLabel && frames.desktop && frames.desktop !== portraitLabel) {
-    const desktopSpec = mediaSpecFromRecommendation(
-      recommendedWidth,
-      recommendedHeight,
-      frames.desktop,
-      "桌面",
-    );
-    const mobileSpec = mediaSpecMatchingFrame(recommendedWidth, recommendedHeight, portraitLabel, "手机");
-    if (context.device === "mobile") {
-      if (mobileSpec) parts.push(`建议素材：${mobileSpec.width} × ${mobileSpec.height}（${portraitLabel}）`);
-      if (frames.laterHero && portraitLabel === "9:16") parts.push(`后面的全幅画面 ${frames.laterHero}`);
-      parts.push(portraitLabel === "9:16"
-        ? frames.note
-        : `手机整节按 ${portraitLabel} 显示，上传尺寸也按 ${portraitLabel}。`);
-    } else if (desktopSpec) {
-      parts.push(`建议素材：${desktopSpec.width} × ${desktopSpec.height}（${ratioLabelOf(desktopSpec)}）`);
-      parts.push(`当前画框 ${frames.desktop}`);
-    }
-    return parts.join("。");
-  }
-  if (recommendedWidth && recommendedHeight) {
-    parts.push(`建议素材：${recommendedWidth} × ${recommendedHeight} 像素`);
-  } else if (recommendedWidth) {
-    parts.push(`建议素材宽度：${recommendedWidth} 像素`);
-  } else if (recommendedHeight) {
-    parts.push(`建议素材高度：${recommendedHeight} 像素`);
-  }
-  const currentFrame = context.device === "mobile"
-    ? (frames.firstHero ?? frames.mobile)
-    : frames.desktop;
-  if (currentFrame) parts.push(`当前画框 ${currentFrame}`);
-  if (context.device === "mobile" && frames.laterHero) {
-    parts.push(`后面的全幅画面 ${frames.laterHero}`);
-  }
-  parts.push(frames.note);
-  return parts.join("。");
-}
-
-function visualKindForField(field: DynamicTemplatePageFieldDescriptor): VisualNodeKind {
-  if (field.controlKind === "image") return "media";
-  if (field.controlKind === "text") return "text";
-  if (field.controlKind === "link") return "action";
-  if (field.controlKind === "product") return "product";
-  return "structured";
-}
-
-
 export default function DynamicTemplateInstanceInspector({
-  hasUnsavedChanges,
-  hasPersistedDraft,
-  saving,
   publishIssues,
-  validationStatus,
-  onRetryValidation,
   onOpenPublishReview,
-  canPromoteToTemplate = false,
-  onPromoteToTemplate,
   pageKey,
 }: {
-  hasUnsavedChanges: boolean;
-  hasPersistedDraft: boolean;
-  saving: boolean;
   publishIssues: PublishValidationIssue[];
-  validationStatus?: PublishValidationStatus;
-  onRetryValidation?: () => void;
-  onOpenPageSettings?: (field?: string) => void;
   onOpenPublishReview?: () => void;
-  canPromoteToTemplate?: boolean;
-  onPromoteToTemplate?: (request: PromoteDynamicTemplateInstanceRequest) => void | Promise<void>;
   pageKey?: string;
 }) {
   const editor = useInspectorModuleEditor();
@@ -226,34 +180,45 @@ export default function DynamicTemplateInstanceInspector({
   const catalogRoles = usePublishedTemplateSectionRoles((state) => state.rolesByTemplateId);
   const resolved = useResolvedDynamicTemplate(props.templateId ?? "", Number(props.templateVersion));
   const selection = useVisualEditorSession((state) => state.selection);
-  const selectVisualNode = useVisualEditorSession((state) => state.selectNode);
-  const clearVisualNode = useVisualEditorSession((state) => state.clearNode);
-  const { modal } = AntdApp.useApp();
-  const propertyScrollRef = useRef<HTMLDivElement>(null);
-  const [promotingToTemplate, setPromotingToTemplate] = useState(false);
+  const fieldRequest = useVisualEditorSession((state) => state.contentActionRequest);
+  const [dismissedDescriptionRequest, setDismissedDescriptionRequest] = useState<typeof fieldRequest>(null);
+  const inspectorRef = useRef<HTMLElement>(null);
+  const editorBlockId = getDynamicTemplateInstanceEditorBlockId(props);
+  const [workPicker, setWorkPicker] = useState<{ blockId: string; slotId: string } | null>(null);
+  const [pendingWorkUploads, setPendingWorkUploads] = useState(0);
+  const pendingWorkUploadsRef = useRef(0);
+  useEffect(() => {
+    if (!fieldRequest || fieldRequest.field === "alt" || fieldRequest.blockId !== editorBlockId) return;
+    const field = inspectorRef.current?.querySelector<HTMLElement>(
+      `[data-inspector-object-id="${CSS.escape(fieldRequest.nodeId)}"]`,
+    );
+    if (!field) return;
+    field.focus({ preventScroll: true });
+    const scroller = field.closest<HTMLElement>(".homepage-editor__properties-scroll");
+    if (scroller) {
+      scroller.scrollTop += field.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+    }
+  }, [editorBlockId, fieldRequest, resolved]);
   if (!editor) return null;
   if (!resolved) {
     return (
       <section className="homepage-editor__properties" aria-label="模板实例属性">
         <div className="homepage-editor__properties-scroll">
           <div className="homepage-editor__properties-empty-state" role="alert">
-            <strong>无法读取模板版本</strong>
-            <span>{props.templateId} v{props.templateVersion}</span>
+            <strong>暂时无法打开此区块</strong>
+            <span>请稍后重试。</span>
           </div>
         </div>
       </section>
     );
   }
   const definition = resolved.definition;
-  const editorBlockId = getDynamicTemplateInstanceEditorBlockId(props);
   const pageFields = getDynamicTemplatePageFieldDescriptors(definition);
+  const sectionRole = definition.metadata.sectionRole ?? definition.templateRecipe?.sectionRole;
+  const displayRole = sectionRole ?? (props.templateId ? catalogRoles[props.templateId] : undefined);
   const pageFieldBySlotId = new Map(pageFields.map((field) => [field.slotId, field]));
   const content = asRecord(props.contentBySlotId);
   const imageCarriesCopy = props.imageCarriesCopy === true;
-  const hasImageSlot = Object.values(definition.slots).some((slot) => slot.type === "image");
-  const headingMustBeFilled = Object.values(definition.slots).some(
-    (slot) => slot.type === "heading" && slot.required,
-  );
   const mediaSideDeclaration = definition.metadata.pageSettings?.mediaSide;
   const selectedMediaSide = props.pageSettings?.mediaSide ?? mediaSideDeclaration?.authoredSide ?? "start";
   // 与 renderPlan 的镜像条件一致：目标容器在桌面不是横排时，左右选择不会改变画面
@@ -274,46 +239,90 @@ export default function DynamicTemplateInstanceInspector({
     ? definition.slots[selectedNode.slotId]
     : undefined;
   const selectedPageField = selectedSlot ? pageFieldBySlotId.get(selectedSlot.slotId) : undefined;
-  const selectedPolicy = selectedPageField?.effectiveDesignOverrideCapabilities ?? null;
-  const slotGroups = groupDynamicTemplatePageFields(pageFields, selectedNode?.slotId);
+  const selectedImage = selectedPageField?.editable && selectedPageField.controlKind === "image"
+    ? readPageImage(content[selectedPageField.slotId])
+    : null;
+  const canCorrectImageDescription = Boolean(selectedImage?.alt.trim() && (selectedImage.src.trim() || selectedImage.mobileSrc.trim()));
   const layoutOverrides = props.layoutOverridesByNodeId ?? {};
-  const promotionPreview = promoteInstanceOverridesToTemplateDraft({
-    sourceDefinition: definition,
-    targetDefinition: definition,
-    layoutOverridesByNodeId: props.layoutOverridesByNodeId,
+  const styleOverrideCount = Object.values(layoutOverrides).filter((byDevice) => (
+    Object.values(byDevice).some((override) => Object.keys(override ?? {}).some((key) => key !== "visuallyCollapsed"))
+  )).length + Number(Boolean(props.pageSettings?.mediaSide));
+  const breakpoint = editor.device === "mobile" ? "mobile" : "desktop";
+  const hasImageOnDevice = pageFields.some((field) => (
+    field.controlKind === "image" && !hidden.includes(field.slotId)
+    && hasTemplateImageContent(content[field.slotId], breakpoint)
+  ));
+  const workSlotIds = getWorkGridImageSlotIds(definition);
+  const workFields = pageFields.filter((field) => workSlotIds.has(field.slotId));
+  const visibleWorkNodes = (device: "desktop" | "mobile") => {
+    const visible = new Set<string>();
+    if (!workFields.length) return visible;
+    const rootRules = getEffectiveTemplateRootRules(definition, device);
+    if (definition.nodes[definition.rootNodeId].hidden || rootRules.hidden || rootRules.display === "none") return visible;
+    const visit = (nodeId: string) => {
+      if (visible.has(nodeId)) return;
+      visible.add(nodeId);
+      getTemplateVisibleLayoutChildIds(definition, nodeId, device).forEach(visit);
+    };
+    visit(definition.rootNodeId);
+    return visible;
+  };
+  const desktopWorkNodes = visibleWorkNodes("desktop");
+  const mobileWorkNodes = visibleWorkNodes("mobile");
+  const isAvailableWorkSlot = (field: DynamicTemplatePageFieldDescriptor, values: Record<string, unknown>, hiddenSlots: readonly unknown[]) => {
+    const image = readPageImage(values[field.slotId]);
+    const visible = breakpoint === "mobile" ? mobileWorkNodes : desktopWorkNodes;
+    return field.editable && !hiddenSlots.includes(field.slotId) && visible.has(field.nodeId) && !image.workProductCode;
+  };
+  const availableWorkFields = workFields.filter((field) => isAvailableWorkSlot(field, content, hidden));
+  const missingWorkCount = workFields.filter((field) => (
+    hidden.includes(field.slotId) || !hasTemplateImageContent(content[field.slotId], breakpoint)
+  )).length;
+  const editableFields = pageFields.filter((field) => {
+    if (!field.editable) return false;
+    const slot = definition.slots[field.slotId];
+    if (imageCarriesCopy && !field.required && (slot.key === "subtitle" || slot.semanticRole === "subtitle")) return false;
+    if (field.required || hasPageFieldValue(content[field.slotId])) return true;
+    return !sectionCopyHiddenByDefault(sectionRole, slot, resolveTemplateNodeRules(definition, field.nodeId, breakpoint).hidden);
   });
-  const contentOverrideCount = Object.keys(content).length + hidden.length + (props.isVisible === false ? 1 : 0);
+  const heroCopyFields = sectionRole === "page-hero"
+    ? editableFields.filter((field) => ["heading", "text", "richText"].includes(field.slotType))
+    : [];
+  const supplementalFields = editableFields.filter((field) => {
+    if (heroCopyFields.includes(field)) return false;
+    if (field.required || workSlotIds.has(field.slotId)) return false;
+    const slot = definition.slots[field.slotId];
+    if (sectionRole === "creation-grid") return field.controlKind === "text" || field.controlKind === "link";
+    if (sectionRole !== "page-hero" && sectionRole !== "editorial-split") return false;
+    return field.controlKind === "link" || field.slotType === "badge" || slot.semanticRole === "secondaryImage"
+      || ["subtitle", "logo", "brandName", "eyebrow"].includes(slot.semanticRole ?? slot.key);
+  });
+  const primaryFields = editableFields.filter((field) => !supplementalFields.includes(field) && !heroCopyFields.includes(field));
+  if (sectionRole === "editorial-split") {
+    primaryFields.sort((left, right) => Number(right.controlKind === "text") - Number(left.controlKind === "text"));
+  }
+  const slotGroups = groupDynamicTemplatePageFields(primaryFields, selectedNode?.slotId);
+  const primaryImage = primaryFields.find((field) => field.controlKind === "image");
+  const artworkImage = imageCarriesCopy ? editableFields.find((field) => (
+    field.controlKind === "image" && !hidden.includes(field.slotId)
+    && hasTemplateImageContent(content[field.slotId], breakpoint)
+  )) : undefined;
+  const fieldDisplayLabel = (field: DynamicTemplatePageFieldDescriptor) => field.slotType === "button" && field.label === "按钮 / CTA"
+    ? "按钮与跳转" : field.label;
   const publicDecision = resolveDynamicTemplatePublicVisibility({
     definition,
     contentBySlotId: content,
     hiddenSlotIds: hidden,
-    breakpoint: editor.device === "mobile" ? "mobile" : "desktop",
+    breakpoint,
     pageKey,
   });
-  const designOverrideCount = Object.values(layoutOverrides).reduce((total, devices) => (
-    total + Object.values(devices ?? {}).reduce((deviceTotal, override) => (
-      deviceTotal + Object.keys(override ?? {}).length
-    ), 0)
-  ), 0);
-  const currentPublishIssues = getInspectorPublishIssues(
-    publishIssues,
-    editorBlockId,
-    [props.instanceId],
-  );
-  const currentPublishErrorCount = currentPublishIssues.filter(
-    (issue) => issue.severity === "error",
-  ).length;
-  // 页脚汇总整页阻断；对象状态必须区分当前实例与页面其他问题。
-  const instancePublishErrorCount = currentPublishIssues.filter((issue) => (
+  const instancePublishErrorCount = publishIssues.filter((issue) => (
     issue.severity === "error"
     && (issue.blockId === editorBlockId || issue.blockId === props.instanceId)
   )).length;
-  const currentPublishWarningCount = currentPublishIssues.filter(
-    (issue) => issue.severity === "warning",
-  ).length;
   const publicVisibilityState = props.isVisible === false
     ? "hidden"
-    : currentPublishErrorCount > 0
+    : instancePublishErrorCount > 0
       ? "blocked"
       : publicDecision.visible
         ? "ready"
@@ -321,48 +330,85 @@ export default function DynamicTemplateInstanceInspector({
   const nodeBySlotId = new Map(
     Object.values(definition.nodes).flatMap((candidate) => candidate.slotId ? [[candidate.slotId, candidate] as const] : []),
   );
-  const instancePropertyNodes = Object.values(definition.nodes).filter((candidate) => {
-    const candidateField = candidate.slotId ? pageFieldBySlotId.get(candidate.slotId) : undefined;
-    return Boolean(candidateField?.editable);
-  });
-  const selectedPropertyNodeId = selectedNode
-    && instancePropertyNodes.some((candidate) => candidate.nodeId === selectedNode.nodeId)
-    ? selectedNode.nodeId
-    : "";
-  const selectedLayout = selectedNode
-    ? layoutOverrides[selectedNode.nodeId]?.[editor.device] ?? {}
-    : {};
-  const selectedTextSlot = Boolean(
-    selectedSlot && ["heading", "text", "richText", "badge"].includes(selectedSlot.type),
-  );
-
-  const selectInstancePropertyScope = (nodeId: string) => {
-    if (focusFirstInvalidNumberField()) return;
-    if (!nodeId) {
-      clearVisualNode(editorBlockId);
-      return;
-    }
-    const nextNode = definition.nodes[nodeId];
-    const nextSlot = nextNode?.slotId ? definition.slots[nextNode.slotId] : undefined;
-    const nextField = nextSlot ? pageFieldBySlotId.get(nextSlot.slotId) : undefined;
-    if (!nextNode || !nextSlot?.editable || !nextField) return;
-    const policy = nextField.effectiveDesignOverrideCapabilities;
-    selectVisualNode({
-      blockId: editorBlockId,
-      moduleType: props.moduleName || definition.name,
-      nodeId: nextNode.nodeId,
-      kind: visualKindForField(nextField),
-      canAdjustLayout: Boolean(policy && (policy.position || policy.size)),
-      canAdjustMedia: Boolean(nextSlot.type === "image" && policy && (policy.imageFit || policy.imageFocus)),
-    });
-    const slotId = nextSlot.slotId;
-    requestAnimationFrame(() => {
-      propertyScrollRef.current
-        ?.querySelector<HTMLElement>(`[data-slot-id="${CSS.escape(slotId)}"]`)
-        ?.scrollIntoView({ block: "nearest" });
+  const workNeighbor = (field: DynamicTemplatePageFieldDescriptor, offset: -1 | 1) => {
+    const adjacent = workFields[workFields.indexOf(field) + offset];
+    if (!adjacent?.editable || !field.editable || hidden.includes(field.slotId) || hidden.includes(adjacent.slotId)) return;
+    const sourceSlot = definition.slots[field.slotId];
+    const targetSlot = definition.slots[adjacent.slotId];
+    const sameGrid = Object.values(definition.nodes).some((node) =>
+      node.type === "Grid" && node.childIds.includes(field.nodeId) && node.childIds.includes(adjacent.nodeId));
+    if (!sameGrid || [desktopWorkNodes, mobileWorkNodes].some((visible) => (
+      !visible.has(field.nodeId) || !visible.has(adjacent.nodeId)
+    ))) return;
+    // 只交换同一网格内等价的图片卡位，避免把作品放进约束不同的槽位。
+    const cardRules = (slot: DynamicTemplateSlotDefinition, descriptor: DynamicTemplatePageFieldDescriptor) =>
+      JSON.stringify([slot.required, slot.hideable, slot.validation, slot.desktopRules, slot.mobileRules,
+        descriptor.effectiveDesignOverrideCapabilities]);
+    if (cardRules(sourceSlot, field) !== cardRules(targetSlot, adjacent)) return;
+    return adjacent;
+  };
+  const moveWork = (field: DynamicTemplatePageFieldDescriptor, adjacent: DynamicTemplatePageFieldDescriptor) => {
+    if (pendingWorkUploads || editor.historyTransactionPending) return;
+    editor.updateHistoryTransaction((current) => {
+      const nextContent = { ...asRecord(current.contentBySlotId) };
+      const nextOverrides = { ...asRecord(current.layoutOverridesByNodeId) };
+      // 图片、手机专用图、替代文字和关联作品一起移动，取景也随图片移动。
+      const swap = (values: Record<string, unknown>, from: string, to: string) => {
+        const original = values[from];
+        if (Object.prototype.hasOwnProperty.call(values, to)) values[from] = values[to];
+        else delete values[from];
+        if (original !== undefined) values[to] = original;
+        else delete values[to];
+      };
+      swap(nextContent, field.slotId, adjacent.slotId);
+      const source = nextOverrides[field.nodeId];
+      const destination = nextOverrides[adjacent.nodeId];
+      for (const [nodeId, target, previous] of [
+        [field.nodeId, source, destination],
+        [adjacent.nodeId, destination, source],
+      ] as const) {
+        const layout = withWorkImageComposition(target, previous);
+        if (Object.keys(layout).length) nextOverrides[nodeId] = layout;
+        else delete nextOverrides[nodeId];
+      }
+      return { contentBySlotId: nextContent, layoutOverridesByNodeId: nextOverrides };
     });
   };
-
+  const linkWorkBatch = async (codes: string[], signal: AbortSignal) => {
+    const retryMessage = "作品卡位已变化，请关闭后重新选择。";
+    if (pendingWorkUploadsRef.current || editor.historyTransactionPending) return retryMessage;
+    const fields = availableWorkFields.slice(0, codes.length);
+    const references = codes.map(normalizePublicProductReference);
+    if (!fields.length || fields.length !== codes.length || references.some((code) => !code)) return retryMessage;
+    const images = await Promise.all(fields.map(({ slotId }, index) => (
+      needsWorkMainImage(readPageImage(content[slotId])) ? readWorkMainImage(references[index]!, signal) : null
+    )));
+    if (signal.aborted) return;
+    const missing = fields.findIndex(({ slotId }, index) => needsWorkMainImage(readPageImage(content[slotId])) && !images[index]);
+    if (missing >= 0) return `作品 ${references[missing]} 的公开主图不可用。请选择其他作品后重试。`;
+    if (pendingWorkUploadsRef.current) return retryMessage;
+    const committed = editor.updateHistoryTransaction((current) => {
+      const values = asRecord(current.contentBySlotId);
+      const hiddenSlots = Array.isArray(current.hiddenSlotIds) ? current.hiddenSlotIds : [];
+      if (!fields.every((field, index) => (
+        isAvailableWorkSlot(field, values, hiddenSlots)
+        && (!needsWorkMainImage(readPageImage(values[field.slotId])) || images[index])
+      ))) return;
+      const nextContent = { ...values };
+      fields.forEach(({ slotId }, index) => {
+        const image = readPageImage(values[slotId]);
+        const primary = needsWorkMainImage(image) ? images[index] : null;
+        nextContent[slotId] = writePageImage({
+          ...image,
+          src: primary?.src ?? image.src,
+          alt: !image.mobileSrc.trim() && primary && (!image.alt.trim() || isTemplateProductImage(image.src)) ? primary.alt : image.alt,
+          workProductCode: references[index] ?? "",
+        });
+      });
+      return { contentBySlotId: nextContent };
+    });
+    return committed ? undefined : retryMessage;
+  };
   const updateContent = (slotId: string, value: unknown) => {
     editor.updateFromCurrent((current) => ({
       contentBySlotId: {
@@ -371,29 +417,60 @@ export default function DynamicTemplateInstanceInspector({
       },
     }));
   };
-  const resetContent = (slotId: string) => {
-    editor.updateFromCurrent((current) => {
-      const next = { ...asRecord(current.contentBySlotId) };
-      delete next[slotId];
-      return { contentBySlotId: next };
-    });
-  };
   const stripLockedPageValues = () => {
     editor.updateFromCurrent((current) => ({
       contentBySlotId: stripNonEditableSlotContent(current.contentBySlotId, definition),
     }));
   };
   const lockedLeftoverCount = countNonEditableSlotContent(content, definition);
-  const toggleHidden = (slotId: string, checked: boolean) => {
+  const showPreviouslyHiddenField = (slotId: string) => {
     editor.updateFromCurrent((current) => {
       const currentHidden = Array.isArray(current.hiddenSlotIds)
         ? current.hiddenSlotIds.filter((value): value is string => typeof value === "string")
         : [];
       return {
-        hiddenSlotIds: checked
-          ? [...new Set([...currentHidden, slotId])]
-          : currentHidden.filter((value) => value !== slotId),
+        hiddenSlotIds: currentHidden.filter((value) => value !== slotId),
       };
+    });
+  };
+  const fieldActions = editableFields.flatMap((field) => {
+    const label = fieldDisplayLabel(field);
+    const node = nodeBySlotId.get(field.slotId);
+    const actions = [];
+    if (hidden.includes(field.slotId) && field.hideable && !field.required) {
+      actions.push({
+        key: `show-${field.slotId}`,
+        label: `恢复显示${label}`,
+        onClick: () => showPreviouslyHiddenField(field.slotId),
+      });
+    }
+    if (field.controlKind === "image" && node
+      && hasImageCompositionOverride(layoutOverrides[node.nodeId]?.[breakpoint])) {
+      actions.push({
+        key: `reset-${field.slotId}`,
+        label: `恢复${label}的模板取景`,
+        onClick: () => updateMediaPresentation(node.nodeId, breakpoint, {
+          objectFit: undefined,
+          imageScalePercent: undefined,
+          focusXPercent: undefined,
+          focusYPercent: undefined,
+        }),
+      });
+    }
+    return actions;
+  });
+  const restoreInstanceStyle = () => {
+    const visibilityOverrides: NonNullable<DynamicTemplateInstanceProps["layoutOverridesByNodeId"]> = {};
+    for (const [nodeId, byDevice] of Object.entries(layoutOverrides)) {
+      for (const device of ["desktop", "mobile"] as const) {
+        const visuallyCollapsed = byDevice[device]?.visuallyCollapsed;
+        if (visuallyCollapsed === undefined) continue;
+        (visibilityOverrides[nodeId] ??= {})[device] = { visuallyCollapsed };
+      }
+    }
+    editor.updateHistoryTransaction({
+      layoutOverridesByNodeId: visibilityOverrides,
+      ...(props.pageSettings?.mediaSide ? { pageSettings: { ...props.pageSettings, mediaSide: undefined } } : {}),
     });
   };
   const updateMediaPresentation = (
@@ -421,117 +498,11 @@ export default function DynamicTemplateInstanceInspector({
       return { layoutOverridesByNodeId: nextOverrides };
     });
   };
-  const updateSelectedPresentation = (patch: Partial<TemplateInstanceLayoutOverride>) => {
-    if (!selectedNode || !selectedPolicy) return;
-    const safePatch: Partial<TemplateInstanceLayoutOverride> = {};
-    if (selectedPolicy.position && Object.prototype.hasOwnProperty.call(patch, "offsetXPercent")) {
-      const next = patch.offsetXPercent === undefined
-        ? undefined
-        : clamp(patch.offsetXPercent, -selectedPolicy.maxOffsetPercent, selectedPolicy.maxOffsetPercent);
-      safePatch.offsetXPercent = next === 0 ? undefined : next;
-    }
-    if (selectedPolicy.position && Object.prototype.hasOwnProperty.call(patch, "offsetYPercent")) {
-      const next = patch.offsetYPercent === undefined
-        ? undefined
-        : clamp(patch.offsetYPercent, -selectedPolicy.maxOffsetPercent, selectedPolicy.maxOffsetPercent);
-      safePatch.offsetYPercent = next === 0 ? undefined : next;
-    }
-    if (selectedPolicy.size && Object.prototype.hasOwnProperty.call(patch, "widthPercent")) {
-      const next = patch.widthPercent === undefined
-        ? undefined
-        : clamp(patch.widthPercent, selectedPolicy.minWidthPercent, selectedPolicy.maxWidthPercent);
-      safePatch.widthPercent = next === 100 ? undefined : next;
-    }
-    if (selectedPolicy.zIndex && Object.prototype.hasOwnProperty.call(patch, "zIndex")) {
-      const next = patch.zIndex === undefined ? undefined : clamp(Math.round(patch.zIndex), -10, 10);
-      safePatch.zIndex = next === 0 ? undefined : next;
-    }
-    if (selectedPolicy.typography && selectedTextSlot && Object.prototype.hasOwnProperty.call(patch, "fontSizePx")) {
-      safePatch.fontSizePx = patch.fontSizePx === undefined
-        ? undefined
-        : clamp(patch.fontSizePx, selectedPolicy.minFontSizePx ?? 12, selectedPolicy.maxFontSizePx ?? 96);
-    }
-    if (selectedPolicy.typography && selectedTextSlot && Object.prototype.hasOwnProperty.call(patch, "textAlign")) {
-      safePatch.textAlign = patch.textAlign;
-    }
-    if (selectedPolicy.spacing && selectedTextSlot && Object.prototype.hasOwnProperty.call(patch, "marginTopPx")) {
-      const next = patch.marginTopPx === undefined
-        ? undefined
-        : clamp(patch.marginTopPx, 0, selectedPolicy.maxSpacingPx ?? 120);
-      safePatch.marginTopPx = next === 0 ? undefined : next;
-    }
-    if (selectedPolicy.spacing && selectedTextSlot && Object.prototype.hasOwnProperty.call(patch, "marginBottomPx")) {
-      const next = patch.marginBottomPx === undefined
-        ? undefined
-        : clamp(patch.marginBottomPx, 0, selectedPolicy.maxSpacingPx ?? 120);
-      safePatch.marginBottomPx = next === 0 ? undefined : next;
-    }
-    if (Object.keys(safePatch).length === 0) return;
-    editor.updateFromCurrent((current) => {
-      const currentOverrides = asRecord(current.layoutOverridesByNodeId);
-      const currentNode = asRecord(currentOverrides[selectedNode.nodeId]);
-      const currentDevice = asRecord(currentNode[editor.device]);
-      const nextDevice: Record<string, unknown> = { ...currentDevice };
-      for (const [key, value] of Object.entries(safePatch)) {
-        if (value === undefined) delete nextDevice[key];
-        else nextDevice[key] = value;
-      }
-      const nextOverrides = { ...currentOverrides };
-      const nextNode = { ...currentNode };
-      if (Object.keys(nextDevice).length > 0) nextNode[editor.device] = nextDevice;
-      else delete nextNode[editor.device];
-      if (Object.keys(nextNode).length > 0) nextOverrides[selectedNode.nodeId] = nextNode;
-      else delete nextOverrides[selectedNode.nodeId];
-      return { layoutOverridesByNodeId: nextOverrides };
-    });
-  };
-  const resetSelectedPresentation = () => {
-    if (!selectedNode) return;
-    editor.updateHistoryTransaction((current) => {
-      const currentOverrides = asRecord(current.layoutOverridesByNodeId);
-      const currentNode = asRecord(currentOverrides[selectedNode.nodeId]);
-      const nextNode = { ...currentNode };
-      delete nextNode[editor.device];
-      const nextOverrides = { ...currentOverrides };
-      if (Object.keys(nextNode).length > 0) nextOverrides[selectedNode.nodeId] = nextNode;
-      else delete nextOverrides[selectedNode.nodeId];
-      return { layoutOverridesByNodeId: nextOverrides };
-    });
-  };
-
-  const promoteToTemplate = async () => {
-    if (!canPromoteToTemplate || !onPromoteToTemplate || promotionPreview.promoted.length === 0) return;
-    setPromotingToTemplate(true);
-    try {
-      await onPromoteToTemplate({
-        templateId: props.templateId,
-        sourceVersion: resolved.version,
-        sourceDefinitionChecksum: resolved.definitionChecksum,
-        sourceDefinition: definition,
-        layoutOverridesByNodeId: props.layoutOverridesByNodeId,
-      });
-    } finally {
-      setPromotingToTemplate(false);
-    }
-  };
-
   const renderSlotControl = (field: DynamicTemplatePageFieldDescriptor) => {
     const slot = definition.slots[field.slotId];
     const hasPageValue = Object.prototype.hasOwnProperty.call(content, slot.slotId);
     // 面板只显示本页填写的值。模板示例不预填，没填的槽位在页面画布上收起。
     const value = hasPageValue ? content[slot.slotId] : undefined;
-    if (!field.editable) {
-      return (
-        <>
-          <p className="homepage-editor__properties-hint">此内容由模板锁定，页面不能修改。</p>
-          {hasPageValue ? (
-            <p className="homepage-editor__properties-hint" role="status">
-              当前草稿仍保留旧的页面覆盖，发布前需要移除。
-            </p>
-          ) : null}
-        </>
-      );
-    }
     if (field.controlKind === "text" && ["heading", "badge", "icon"].includes(field.slotType)) {
       return (
         <Input
@@ -557,16 +528,29 @@ export default function DynamicTemplateInstanceInspector({
     if (field.controlKind === "image") {
       const image = readPageImage(value);
       const commitImage = (patch: Partial<typeof image>) => {
-        updateContent(slot.slotId, writePageImage({ ...image, ...patch }));
+        // 上传可能在切端后才完成，合并时读取最新的另一端图片和替代文字。
+        editor.updateFromCurrent((current) => {
+          const currentContent = asRecord(current.contentBySlotId);
+          return {
+            contentBySlotId: {
+              ...currentContent,
+              [slot.slotId]: writePageImage({ ...readPageImage(currentContent[slot.slotId]), ...patch }),
+            },
+          };
+        });
       };
       const imageNode = nodeBySlotId.get(slot.slotId);
       const imagePolicy = field.effectiveDesignOverrideCapabilities;
       const nodeLayout = imageNode ? layoutOverrides[imageNode.nodeId] : undefined;
-      const desktopPresentation = readDeviceImagePresentation(slot, nodeLayout?.desktop, "desktop");
-      const mobilePresentation = readDeviceImagePresentation(slot, nodeLayout?.mobile, "mobile");
-      const mobilePreviewSrc = image.mobileSrc.trim() || image.src.trim();
-      const explicitMobileFit = nodeLayout?.mobile?.objectFit;
-      const sectionRole = definition.metadata.sectionRole ?? definition.templateRecipe?.sectionRole;
+      const desktopRules = resolveTemplateSlotRules(definition, slot.slotId, "desktop");
+      const mobileRules = resolveTemplateSlotRules(definition, slot.slotId, "mobile");
+      const inheritedFit = definition.schemaVersion >= 2 ? nodeLayout?.desktop?.objectFit : undefined;
+      const usageFit = defaultTemplateImageFit(slot.semanticRole, workSlotIds.has(slot.slotId));
+      const desktopDefaultFit = field === artworkImage ? "contain" : desktopRules.objectFit ?? usageFit;
+      const mobileDefaultFit = inheritedFit ?? (field === artworkImage ? "contain" : mobileRules.objectFit ?? usageFit);
+      const desktopPresentation = readDeviceImagePresentation(desktopRules, nodeLayout?.desktop, desktopDefaultFit);
+      const mobilePresentation = readDeviceImagePresentation(mobileRules, nodeLayout?.mobile, mobileDefaultFit);
+      const explicitMobileFit = nodeLayout?.mobile?.objectFit ?? inheritedFit;
       const heroCapable = sectionRole === "page-hero"
         && (slot.semanticRole === "backgroundImage" || slot.semanticRole === "heroImage");
       const desktopRatio = parseInspectorRatio(slot.desktopRules.aspectRatio);
@@ -587,14 +571,6 @@ export default function DynamicTemplateInstanceInspector({
         && explicitMobileFit !== "fill"
         && Boolean(desktopRatio && desktopRatio >= 1)
         && !heroCanvasFrame;
-      const mobilePreviewFit = reuseLandscape
-        ? "cover"
-        : imageCarriesCopy
-          && !image.mobileSrc.trim()
-          && mobilePresentation.objectFit !== "cover"
-          && mobilePresentation.objectFit !== "fill"
-          ? "contain"
-          : mobilePresentation.objectFit;
       const compositionDevice: "desktop" | "mobile" = editor.device === "mobile" ? "mobile" : "desktop";
       const writeImageComposition = (
         device: "desktop" | "mobile",
@@ -604,12 +580,12 @@ export default function DynamicTemplateInstanceInspector({
         // 只写当前画布这一端。视口由顶部设备切换决定，构图操作不改画布端口。
         updateMediaPresentation(imageNode.nodeId, device, patch);
       };
-      const updateImageFocus = (device: "desktop" | "mobile", next: { x: number; y: number }) => {
+      const updateImageFocus = (device: "desktop" | "mobile", next: Partial<{ x: number; y: number }>) => {
         const presentation = device === "desktop" ? desktopPresentation : mobilePresentation;
-        writeImageComposition(device, {
-          focusXPercent: next.x === presentation.defaultFocus.x ? undefined : next.x,
-          focusYPercent: next.y === presentation.defaultFocus.y ? undefined : next.y,
-        });
+        const patch: Partial<TemplateInstanceLayoutOverride> = {};
+        if (next.x !== undefined) patch.focusXPercent = next.x === presentation.defaultFocus.x ? undefined : next.x;
+        if (next.y !== undefined) patch.focusYPercent = next.y === presentation.defaultFocus.y ? undefined : next.y;
+        writeImageComposition(device, patch);
       };
       const frames = describeEffectiveImageFrames({
         sectionRole,
@@ -624,97 +600,18 @@ export default function DynamicTemplateInstanceInspector({
         ?? slot.mobileRules.aspectRatio
         ?? slot.desktopRules.aspectRatio;
       const reusedPreviewRatio = reuseLandscape ? slot.desktopRules.aspectRatio : mobileFrameLabel;
-      const assetGuidance = getImageAssetGuidance(slot, field.validation, {
-        sectionRole,
-        geometryPolicy: definition.metadata.geometryPolicy,
-        device: compositionDevice,
-        effectiveMobileFrame: heroCanvasFrame,
-      });
-      const renderImageComposition = (device: "desktop" | "mobile", quiet = false) => {
-        if (!imageNode) return null;
-        if (device === "mobile" && !mobilePreviewSrc) return null;
-        const presentation = device === "desktop" ? desktopPresentation : mobilePresentation;
-        const canDrag = presentation.objectFit !== "fill";
-        const hasFit = Boolean(imagePolicy?.imageFit);
-        if (!canDrag && !hasFit) return null;
-        return (
-          <div data-image-composition={device}>
-            {canDrag ? (
-              <ImageFocusField
-                inspectorFieldKeys={{ x: "focusXPercent", y: "focusYPercent" }}
-                inspectorDevice={device}
-                label={`${field.label}画面焦点`}
-                value={presentation.focus}
-                showPad={false}
-                showLabel={false}
-                onChange={(next) => updateImageFocus(device, next)}
-              />
-            ) : null}
-            {hasFit ? (
-              <label
-                className="homepage-editor__inspector-field"
-                data-inspector-field="objectFit"
-                data-inspector-device={device}
-              >
-                <span className="homepage-editor__properties-hint">排列方式</span>
-                <Select
-                  aria-label={`${field.label}图片适配`}
-                  value={presentation.objectFit === "fill" ? undefined : presentation.objectFit}
-                  placeholder={presentation.objectFit === "fill" ? "当前为拉伸，请改为裁切或完整显示" : undefined}
-                  options={[
-                    { value: "cover", label: "填满并裁切" },
-                    { value: "contain", label: "完整显示" },
-                  ]}
-                  onChange={(nextObjectFit) => writeImageComposition(device, {
-                    objectFit: nextObjectFit === (presentation.slotRules.objectFit ?? "cover") ? undefined : nextObjectFit,
-                  })}
-                />
-              </label>
-            ) : null}
-            {hasFit ? (
-              <NumberField
-                inspectorField="imageScalePercent"
-                inspectorDevice={device}
-                label={`${field.label}缩放`}
-                unit="%"
-                min={100}
-                max={200}
-                value={presentation.imageLayout.imageScalePercent}
-                onChange={(imageScalePercent) => writeImageComposition(device, {
-                  imageScalePercent: imageScalePercent === 100 ? undefined : imageScalePercent,
-                })}
-                onClear={() => writeImageComposition(device, { imageScalePercent: undefined })}
-              />
-            ) : null}
-            {presentation.hasOverride ? (
-              <RestoreDefaultButton
-                label="清除这一端的构图"
-                onClick={() => writeImageComposition(device, {
-                  objectFit: undefined,
-                  imageScalePercent: undefined,
-                  focusXPercent: undefined,
-                  focusYPercent: undefined,
-                })}
-              />
-            ) : quiet ? null : (
-              <p className="homepage-editor__properties-hint">
-                当前沿用模板构图，尚未单独设置。
-              </p>
-            )}
-          </div>
-        );
-      };
       const editingMobile = compositionDevice === "mobile";
       const activePresentation = editingMobile ? mobilePresentation : desktopPresentation;
       const activeRatioLabel = editingMobile
         ? (image.mobileSrc.trim() ? mobileFrameLabel : reusedPreviewRatio)
         : slot.desktopRules.aspectRatio;
-      const activeFit = editingMobile ? mobilePreviewFit : desktopPresentation.objectFit;
+      const configuredFit = activePresentation.objectFit;
       const activeSrc = editingMobile ? image.mobileSrc : image.src;
       const inheritedSrc = editingMobile && !image.mobileSrc.trim() ? image.src.trim() : "";
       const canFocusActive = Boolean(imageNode)
         && activePresentation.objectFit !== "fill"
         && Boolean(activeSrc.trim() || inheritedSrc);
+      const canFitActive = Boolean(imageNode && imagePolicy?.imageFit && (activeSrc.trim() || inheritedSrc));
       const activeSpec = !editingMobile || (reuseLandscape && !image.mobileSrc.trim())
         ? mediaSpecFromRecommendation(
           field.validation.recommendedWidth,
@@ -728,9 +625,37 @@ export default function DynamicTemplateInstanceInspector({
           mobileFrameLabel,
           field.label,
         );
+      const showImageDescription = fieldRequest?.field === "alt"
+        && fieldRequest !== dismissedDescriptionRequest
+        && fieldRequest.blockId === editorBlockId
+        && fieldRequest.nodeId === field.nodeId
+        && selectedPageField?.slotId === slot.slotId;
+      const openImageDescription = () => {
+        const session = useVisualEditorSession.getState();
+        const imageSelection = {
+          blockId: editorBlockId,
+          moduleType: editor.moduleType,
+          nodeId: field.nodeId,
+          kind: "media" as const,
+        };
+        session.selectNode(imageSelection);
+        session.requestContentAction(imageSelection, "alt");
+      };
+      const imageHint = editingMobile && activeSrc.trim()
+        ? "正在使用手机专用图"
+        : inheritedSrc ? "手机沿用桌面图"
+          : !activeSrc.trim() && activeSpec
+          ? `建议 ${activeSpec.width} × ${activeSpec.height} px`
+          : "";
       return (
         <div className="homepage-editor__media-controls">
+          {imageHint ? <p className="homepage-editor__properties-hint" data-image-asset-guidance={slot.slotId}
+            data-media-inherited-hint={inheritedSrc ? "true" : undefined}
+            data-mobile-asset-gap={editingMobile && heroCapable && !activeSrc.trim() ? "true" : undefined}>
+            {imageHint}
+          </p> : null}
           <MediaPickerField
+            key={editorBlockId}
             fieldKey={editingMobile ? `${slot.slotId}-mobile` : slot.slotId}
             device={compositionDevice}
             value={activeSrc}
@@ -738,64 +663,140 @@ export default function DynamicTemplateInstanceInspector({
             required={editingMobile ? false : field.required}
             spec={activeSpec}
             previewAspectRatio={activeRatioLabel?.replace(":", " / ")}
-            previewFit={activeFit}
+            previewFit={configuredFit}
             previewFocus={activePresentation.focus}
             previewZoom={(activePresentation.imageLayout.imageScalePercent ?? 100) / 100}
             frameLabel={activeRatioLabel}
+            imageInfo="warnings"
+            compactActions
+            uploadOnly
+            clearImageLabel={editingMobile && image.src.trim() ? "恢复沿用桌面图" : editingMobile ? "移除手机专用图" : "移除桌面图片"}
+            clearImageWarning={!editingMobile && !image.mobileSrc.trim() ? "手机端也会失去沿用的桌面图。" : undefined}
+            onUploadingChange={workSlotIds.has(slot.slotId) ? (uploading) => {
+              pendingWorkUploadsRef.current += uploading ? 1 : -1;
+              setPendingWorkUploads(pendingWorkUploadsRef.current);
+            } : undefined}
             onFocusChange={canFocusActive
               ? (next) => updateImageFocus(compositionDevice, next)
               : undefined}
             onChange={(next) => commitImage(editingMobile ? { mobileSrc: next } : { src: next })}
           />
-          {inheritedSrc ? (
-            <p
-              className="homepage-editor__properties-hint"
-              data-media-inherited-hint="true"
-              data-mobile-asset-gap={editingMobile && heroCapable ? "true" : undefined}
+          {canFitActive ? (
+            <div
+              key={`${editorBlockId}:${slot.slotId}:${compositionDevice}`}
+              className="homepage-editor__instance-subgroup"
+              data-image-composition={compositionDevice}
             >
-              {reuseLandscape
-                ? "这一端用的是桌面横图，按原比例显示。若要竖幅，替换成竖图，只换这一端。"
-                : editingMobile && heroCapable
-                  ? "这一端用的是桌面图，会按手机画框取景。若要竖幅，替换成竖图，只换这一端。"
-                  : "这一端用的是桌面图，按当前画框取景。不合适就替换，只换这一端。"}
-            </p>
+              <div data-inspector-field="objectFit" data-inspector-device={compositionDevice}>
+                <SegmentedField
+                  label="图片适配"
+                  ariaLabel={`${field.label}图片适配`}
+                  value={configuredFit}
+                  hint={configuredFit === "fill" ? "当前为拉伸" : undefined}
+                  options={[
+                    { value: "cover", label: "填满并裁切" },
+                    { value: "contain", label: "完整显示" },
+                  ]}
+                  onChange={(objectFit) => writeImageComposition(compositionDevice, {
+                    objectFit: objectFit === activePresentation.defaultFit
+                      ? undefined : objectFit === "contain" ? "contain" : "cover",
+                  })}
+                />
+              </div>
+            </div>
           ) : null}
-          {renderImageComposition(compositionDevice, Boolean(inheritedSrc))}
-          {imageCarriesCopy ? (
-            <p className="homepage-editor__properties-hint">
-              画面上的字在图片里。换句子要替换当前这一端的图片，不要把横图裁成竖图。
-            </p>
+          {!showImageDescription && (activeSrc.trim() || inheritedSrc) && !(image.workProductCode && !image.alt.trim()) ? (
+            <Button size="small" type="link" onClick={openImageDescription}>
+              {image.alt.trim() ? "编辑图片说明" : "添加图片说明"}
+            </Button>
           ) : null}
-          {editingMobile && heroCapable && !image.mobileSrc?.trim() && !inheritedSrc ? (
-            <p className="homepage-editor__properties-hint" data-mobile-asset-gap="true">
-              {explicitMobileFit === "cover" || explicitMobileFit === "fill"
-                ? "当前适配是铺满，横图可能被裁进手机竖框。若要完整构图，请另传竖图。"
-                : reuseLandscape
-                  ? "还没有手机竖图。这张横图按桌面比例满宽显示，不再裁成竖幅，也不会留出深色边。若要手机竖幅，请另传一张竖图。"
-                  : imageCarriesCopy
-                    ? "这一处可以做页面第一屏，还没有手机图。带字的图会完整放入，不会裁切；请另传竖图。"
-                    : "这一处可以做页面第一屏，还没有手机图。气氛照片会铺满，并可能裁掉主体；请另传竖图。"}
-            </p>
+          {showImageDescription ? (
+            <div className="homepage-editor__instance-subgroup" data-inspector-field="alt">
+              <label className="homepage-editor__inspector-field">
+                <span>图片说明</span>
+                <Input
+                  autoFocus
+                  aria-label={`${field.label}替代文字`}
+                  value={image.alt}
+                  placeholder="简述图中的作品，供读屏使用"
+                  onChange={(event) => commitImage({ alt: event.target.value })}
+                />
+              </label>
+              <Button size="small" aria-label="完成图片说明" onClick={(event) => {
+                setDismissedDescriptionRequest(fieldRequest);
+                event.currentTarget.closest("fieldset")?.focus();
+              }}>完成</Button>
+            </div>
           ) : null}
-          {assetGuidance ? (
-            <p className="homepage-editor__properties-hint" data-image-asset-guidance={slot.slotId}>
-              {assetGuidance}
-            </p>
+          {workSlotIds.has(slot.slotId) && (Boolean(activeSrc.trim() || inheritedSrc) || image.workProductCode) ? (
+            <div className="homepage-editor__instance-subgroup" data-inspector-field="workProductCode">
+              <strong>作品跳转</strong>
+              <ProductReferencesField
+                key={editorBlockId}
+                value={image.workProductCode ? [image.workProductCode] : []}
+                onChange={(codes) => commitImage({ workProductCode: normalizePublicProductReference(codes[0]) ?? "" })}
+                minProducts={1}
+                maxProducts={1}
+                singlePicker={{
+                  open: workPicker?.blockId === editorBlockId && workPicker.slotId === slot.slotId,
+                  onOpen: () => setWorkPicker({ blockId: editorBlockId, slotId: slot.slotId }),
+                  onClose: () => setWorkPicker(null),
+                  onConfirm: isTemplateProductImage(image.src) ? async (code, signal) => {
+                    const primary = await readWorkMainImage(code, signal);
+                    if (signal.aborted) return;
+                    if (!primary) return `作品 ${code} 的公开主图不可用。请选择其他作品后重试。`;
+                    if (pendingWorkUploadsRef.current) return "图片正在上传，请稍后重试。";
+                    const committed = editor.updateHistoryTransaction((current) => {
+                      const values = asRecord(current.contentBySlotId);
+                      const currentImage = readPageImage(values[slot.slotId]);
+                      if (currentImage.workProductCode !== image.workProductCode) return;
+                      const applyMainImage = needsWorkMainImage(currentImage);
+                      return {
+                        contentBySlotId: {
+                          ...values,
+                          [slot.slotId]: writePageImage({
+                            ...currentImage,
+                            src: applyMainImage ? primary.src : currentImage.src,
+                            alt: applyMainImage && !currentImage.mobileSrc.trim() ? primary.alt : currentImage.alt,
+                            workProductCode: code,
+                          }),
+                        },
+                      };
+                    });
+                    return committed ? undefined : "卡位内容已变化，请关闭后重新选择。";
+                  } : undefined,
+                }}
+              />
+              {image.workProductCode && imageNode && !image.alt.trim() && !showImageDescription ? (
+                <div className="homepage-editor__instance-inline-actions">
+                  <span role="status">图片需要说明，才能作为商品链接。</span>
+                  <Button size="small" onClick={openImageDescription}>
+                    填写图片说明
+                  </Button>
+                </div>
+              ) : null}
+              <div className="homepage-editor__instance-inline-actions">
+                {image.workProductCode ? (
+                  <Button size="small" type="text" onClick={() => commitImage({ workProductCode: "" })}>
+                    清除跳转
+                  </Button>
+                ) : (
+                  <Button size="small" onClick={() => setWorkPicker({ blockId: editorBlockId, slotId: slot.slotId })}>
+                    选择商品
+                  </Button>
+                )}
+              </div>
+            </div>
           ) : null}
-          <label className="homepage-editor__inspector-field">
-            <span className="homepage-editor__properties-hint">替代文字</span>
-            <Input
-              aria-label={`${field.label}替代文字`}
-              value={image.alt}
-              placeholder="描述图片内容，供无障碍与图片缺失时使用"
-              onChange={(event) => commitImage({ alt: event.target.value })}
-            />
-          </label>
         </div>
       );
     }
     if (field.controlKind === "link" && (field.slotType === "button" || field.slotType === "link")) {
       const action = asRecord(value);
+      const label = typeof action.label === "string" ? action.label : "";
+      const copyGuidance = describeActionCopy(field.slotType, label);
+      const linksArtwork = imageCarriesCopy && field.slotType === "button";
+      const showActionLabel = !linksArtwork || field.required;
       const targetType = typeof action.targetType === "string" ? action.targetType : "none";
       const linkUrl = targetType === "page"
         ? action.pagePath
@@ -804,17 +805,21 @@ export default function DynamicTemplateInstanceInspector({
           : "";
       return (
         <div style={{ display: "grid", gap: 10 }}>
-          <Input
-            aria-label={`${field.label}文案`}
-            value={typeof action.label === "string" ? action.label : ""}
-            placeholder="行动文案"
-            onChange={(event) => updateContent(slot.slotId, { ...action, label: event.target.value })}
-          />
-          <ActionCopyHint slotType={field.slotType} label={typeof action.label === "string" ? action.label : ""} />
+          {showActionLabel ? (
+            <Input
+              aria-label={`${fieldDisplayLabel(field)}文案`}
+              value={label}
+              placeholder={field.slotType === "button" ? "输入按钮文字" : "输入链接文字"}
+              onChange={(event) => updateContent(slot.slotId, { ...action, label: event.target.value })}
+            />
+          ) : null}
+          {showActionLabel && copyGuidance.review ? <p className="homepage-editor__properties-hint" role="status" data-template-copy-guidance={field.slotType}>{copyGuidance.hint}</p> : null}
           <LinkTargetField
+            key={`${editorBlockId}:${slot.slotId}`}
             id={`dynamic-template-${props.instanceId}-${slot.slotId}`}
             compact
-            label={`${field.label}跳转`}
+            pickerPresentation="dialog"
+            label={`${fieldDisplayLabel(field)}跳转`}
             targetType={targetType}
             productCode={typeof action.productCode === "string" ? action.productCode : ""}
             categorySlug={typeof action.categorySlug === "string" ? action.categorySlug : ""}
@@ -835,6 +840,14 @@ export default function DynamicTemplateInstanceInspector({
               updateContent(slot.slotId, next);
             }}
           />
+          {showActionLabel && !label.trim() && targetType !== "none" ? (
+            <p className="homepage-editor__properties-hint">填写文字后，{field.slotType === "button" ? "按钮" : "链接"}才会显示在页面上。</p>
+          ) : null}
+          {targetType === "product" && typeof action.productCode === "string" && action.productCode.trim() ? (
+            <p className="homepage-editor__properties-hint" role="status">
+              此商品去向仅在装修预览中生效。需要前台跳转时，可选择分类、页面或外链。
+            </p>
+          ) : null}
         </div>
       );
     }
@@ -866,424 +879,86 @@ export default function DynamicTemplateInstanceInspector({
 
   const renderSlotFieldset = (field: DynamicTemplatePageFieldDescriptor) => {
     const slot = definition.slots[field.slotId];
-    const hasPageValue = Object.prototype.hasOwnProperty.call(content, slot.slotId);
-    const resetLabel = definition.schemaVersion >= 3
-      ? field.controlKind === "image" ? "清除页面图片" : "清除页面文案"
-      : field.controlKind === "image" ? "恢复模板图片" : "恢复模板文案";
+    const textNode = ["heading", "text", "richText", "badge"].includes(slot.type) ? nodeBySlotId.get(slot.slotId) : undefined;
+    const hiddenAcrossDevices = hidden.includes(slot.slotId);
+    const visuallyCollapsed = textNode && layoutOverrides[textNode.nodeId]?.[breakpoint]?.visuallyCollapsed === true;
+    const previousWork = workSlotIds.has(slot.slotId) ? workNeighbor(field, -1) : undefined;
+    const nextWork = workSlotIds.has(slot.slotId) ? workNeighbor(field, 1) : undefined;
     return (
-    <fieldset
-      key={slot.slotId}
-      data-slot-id={slot.slotId}
-      data-slot-task={field.task}
-      data-inspector-field={slot.slotId}
-      data-page-field-selected={selectedPageField?.slotId === slot.slotId ? "true" : undefined}
-      {...getDynamicTemplatePageFieldDataAttributes(field, "page")}
-      style={{ border: 0, borderTop: "1px solid var(--adm-line)", margin: 0, padding: "14px" }}
-    >
-      <legend style={{ width: "100%", padding: 0, marginBottom: 10 }}>
-        <strong>{field.label}</strong>
-        <Tag color={field.required ? "red" : "default"} style={{ marginLeft: 8 }}>{publicationPromiseLabel(field, definition.schemaVersion)}</Tag>
-      </legend>
-      {renderSlotControl(field)}
-      {imageCarriesCopy && field.slotType === "heading" ? (
-        <p className="homepage-editor__properties-hint">
-          {field.required
-            ? "这一节把标题标成必须填写。它留在页面大纲和读屏里，不会画到画面上。"
-            : "标题可以留空。留空就不显示，也不会挡住这张图发布。"}
-        </p>
-      ) : null}
-      {imageCarriesCopy && field.slotType === "button" ? (
-        <p className="homepage-editor__properties-hint">
-          画在图片里的按钮图案不是链接。只有保存了真实跳转、并且这一处行动是打开的，整张主图才会成为这一处链接。行动关闭或没有目标时，不会生成链接。
-        </p>
-      ) : null}
-      {!imageCarriesCopy && field.slotType === "button" ? (
-        <p className="homepage-editor__properties-hint">
-          画在图片里的按钮图案不是链接。填好站内页面或已批准的网址后，这个按钮本身才是链接。
-        </p>
-      ) : null}
-      {hasPageValue && (!field.required || !field.editable) ? (
-        <div style={{ marginTop: 6 }}>
-          <Button
-            type="link"
-            size="small"
-            aria-label={resetLabel}
-            onClick={() => resetContent(slot.slotId)}
-            style={{ height: 24, paddingInline: 0 }}
-          >
-            {resetLabel}
-          </Button>
-          {field.controlKind === "image" ? (
-            <p className="homepage-editor__properties-hint">
-              {field.required
-                ? "恢复后如果当前设备没有页面图片，整个区块在前台会隐藏。模板默认图不会公开。可撤销。"
-                : "恢复后公开页面会收起这张图，有效文字仍保留。模板默认图不会公开。可撤销。"}
-            </p>
-          ) : (
-            <p className="homepage-editor__properties-hint">清除这项的页面内容。重新填写前，页面画布先收起，不会补上模板示例。可撤销。</p>
-          )}
-        </div>
-      ) : null}
-      {field.editable && ["image", "heading", "text", "richText", "badge"].includes(slot.type) ? (
-        <div style={{ marginTop: 6 }}>
-          <Button
-            type="link"
-            size="small"
-            aria-label="清空并隐藏"
-            onClick={() => editor.updateFromCurrent((current) => {
-              const nextContent = { ...asRecord(current.contentBySlotId) };
-              nextContent[slot.slotId] = slot.type === "image" ? { src: "", alt: "" } : "";
-              const currentHidden = Array.isArray(current.hiddenSlotIds)
-                ? current.hiddenSlotIds.filter((value): value is string => typeof value === "string")
-                : [];
-              return {
-                contentBySlotId: nextContent,
-                hiddenSlotIds: slot.hideable
-                  ? [...new Set([...currentHidden, slot.slotId])]
-                  : currentHidden,
-              };
-            })}
-            style={{ height: 24, paddingInline: 0 }}
-          >
-            清空并隐藏
-          </Button>
+      <fieldset
+        key={slot.slotId}
+        className="homepage-editor__instance-slot"
+        data-slot-id={slot.slotId}
+        data-slot-task={field.task}
+        data-inspector-field={slot.slotId}
+        data-inspector-object-id={nodeBySlotId.get(slot.slotId)?.nodeId}
+        data-page-field-selected={selectedPageField?.slotId === slot.slotId ? "true" : undefined}
+        tabIndex={-1}
+        {...getDynamicTemplatePageFieldDataAttributes(field, "page")}
+      >
+        <legend>
+          <strong>{fieldDisplayLabel(field)}</strong>
+          {hiddenAcrossDevices && field.hideable && !field.required ? (
+            <small className="homepage-editor__properties-hint"> · 已隐藏</small>
+          ) : null}
+          {field.required ? (
+            <Tag color="red" style={{ marginLeft: 8 }}>{publicationPromiseLabel(field, definition.schemaVersion)}</Tag>
+          ) : null}
+        </legend>
+        {renderSlotControl(field)}
+        {(previousWork || nextWork) && hasPageFieldValue(content[slot.slotId]) ? (
+          <div className="homepage-editor__instance-inline-actions">
+            <Button size="small" disabled={!previousWork || pendingWorkUploads > 0 || editor.historyTransactionPending}
+              aria-label={`${field.label}前移`} onClick={() => previousWork && moveWork(field, previousWork)}>前移</Button>
+            <Button size="small" disabled={!nextWork || pendingWorkUploads > 0 || editor.historyTransactionPending}
+              aria-label={`${field.label}后移`} onClick={() => nextWork && moveWork(field, nextWork)}>后移</Button>
+          </div>
+        ) : null}
+        {field === primaryImage && imageCarriesCopy ? imageCarriesCopyControl : null}
+        {imageCarriesCopy && field.slotType === "button" ? (
           <p className="homepage-editor__properties-hint">
-            {field.required
-              ? "保留明确清空，不会自动填回模板文案。这项是公开必须内容，清空后不能发布。可撤销。"
-              : "保留明确清空，不会自动填回模板文案。可撤销。"}
+            设置跳转后，整张主图可点击。
           </p>
-        </div>
-      ) : null}
-      {field.hideable && !field.required ? (
-        <SwitchField
-          label={`${field.label}可见`}
-          value={!hidden.includes(slot.slotId)}
-          onChange={(checked) => toggleHidden(slot.slotId, !checked)}
-        />
-      ) : null}
-      {field.editable && ["heading", "text", "richText", "badge"].includes(slot.type) && nodeBySlotId.get(slot.slotId) ? (
-        <SwitchField
-          label="这一端不显示这段文字"
-          value={layoutOverrides[nodeBySlotId.get(slot.slotId)!.nodeId]?.[editor.device]?.visuallyCollapsed === true}
-          hint="这一节里的这段文字都不显示，包括旁边不含这些字的图片。原文仍留给读屏。这不是清空内容。"
-          onChange={(checked) => {
-            const node = nodeBySlotId.get(slot.slotId);
-            if (!node) return;
-            updateMediaPresentation(node.nodeId, editor.device, { visuallyCollapsed: checked ? true : undefined });
-          }}
-        />
-      ) : null}
-    </fieldset>
+        ) : null}
+        {textNode && !hiddenAcrossDevices && (visuallyCollapsed || (hasImageOnDevice && hasPageFieldValue(content[slot.slotId]))) ? (
+          <SwitchField
+            label={editor.device === "mobile" ? "在手机端收起这段文字" : "在桌面端收起这段文字"}
+            hint={visuallyCollapsed ? "原文仍可被读屏读取。" : undefined}
+            value={Boolean(visuallyCollapsed)}
+            onChange={(checked) => updateMediaPresentation(textNode.nodeId, breakpoint, { visuallyCollapsed: checked ? true : undefined })}
+          />
+        ) : null}
+      </fieldset>
     );
   };
 
+  const imageCarriesCopyControl = (
+    <div className="homepage-editor__instance-inline-actions">
+      <span>标题已隐藏</span>
+      <Button
+        size="small"
+        disabled={editor.historyTransactionPending}
+        onClick={() => editor.updateHistoryTransaction({ imageCarriesCopy: false })}
+      >
+        恢复标题显示
+      </Button>
+    </div>
+  );
+
   return (
-    <section className="homepage-editor__properties" aria-label="模板实例属性">
-      <div className="homepage-editor__properties-scroll" ref={propertyScrollRef}>
+    <section ref={inspectorRef} className="homepage-editor__properties homepage-editor__instance-inspector" aria-label="模板实例属性">
+      <div className="homepage-editor__properties-scroll">
         <div className="homepage-editor__dynamic-instance-overview">
-          <strong>{catalogCardName(
-            definition.metadata.sectionRole
-              ?? definition.templateRecipe?.sectionRole
-              ?? (props.templateId ? catalogRoles[props.templateId] : undefined),
-            definition.name || props.moduleName,
-          )}</strong>
-          {definition.description?.trim() ? (
-            <p className="homepage-editor__properties-hint">{definition.description.trim()}</p>
-          ) : null}
-          <SwitchField
-            label="在页面显示"
-            value={props.isVisible !== false}
-            disabled={editor.historyTransactionPending}
-            hint={editor.historyTransactionPending ? "正在记录本次显隐操作，完成后可继续修改或撤销。" : undefined}
-            onChange={(checked) => editor.updateHistoryTransaction({ isVisible: checked })}
-          />
-          {hasImageSlot ? (
-            <div data-image-carries-copy-control="true">
-              <SwitchField
-                label="图片已含标题"
-                value={imageCarriesCopy}
-                disabled={editor.historyTransactionPending}
-                hint={imageCarriesCopy
-                  ? headingMustBeFilled
-                    ? "完成稿。标成必须填写的标题仍要填写，只是不再画到画面上。"
-                    : "完成稿。没有标成必须填写的标题可以留空，留空就不显示。"
-                  : "照片。标题由这一节的模板排在画面上。"}
-                onChange={(checked) => editor.updateHistoryTransaction({ imageCarriesCopy: checked })}
-              />
-            </div>
-          ) : null}
-          {mediaSideDeclaration ? (
-            <div data-media-side-control="true">
-              <SegmentedField
-                label="图片位置"
-                hint={mediaSideEffective
-                  ? "只换桌面与平板的左右；手机仍是图在上、文在下。"
-                  : "这一节的模板在桌面不是左右排列，暂时无法换边；请到模板设计里调整。"}
-                value={selectedMediaSide}
-                disabled={!mediaSideEffective}
-                options={[
-                  { label: "图在左", value: "start", diagram: "imageLeftTextRight" },
-                  { label: "图在右", value: "end", diagram: "textLeftImageRight" },
-                ]}
-                onChange={(value) => {
-                  if (editor.historyTransactionPending || value === selectedMediaSide) return;
-                  editor.updateHistoryTransaction({
-                    pageSettings: { ...props.pageSettings, mediaSide: value === "end" ? "end" : "start" },
-                  });
-                }}
-              />
-            </div>
-          ) : null}
-          {lockedLeftoverCount > 0 ? (
-            <div className="homepage-editor__dynamic-instance-locked-leftover" role="status">
-              <p className="homepage-editor__properties-hint">
-                {lockedLeftoverCount} 个锁定字段仍保留页面覆盖，发布前需要移除。
-              </p>
-              <Button
-                size="small"
-                aria-label="移除锁定字段的页面覆盖"
-                onClick={stripLockedPageValues}
-              >
-                移除锁定字段的页面覆盖
-              </Button>
-            </div>
-          ) : null}
-          <div
-            className="homepage-editor__dynamic-instance-public-status"
-            data-state={publicVisibilityState}
-            role="status"
-            aria-label="前台展示状态"
-          >
-            <strong>{publicVisibilityState === "hidden"
-              ? "前台已关闭"
-              : publicVisibilityState === "blocked"
-                ? instancePublishErrorCount > 0
-                  ? `当前实例有 ${instancePublishErrorCount} 项发布阻断`
-                  : `页面有 ${currentPublishErrorCount} 项发布阻断`
-              : publicVisibilityState === "ready"
-                ? publicDecision.summary
-                : publicDecision.summary}</strong>
-            <span>{publicVisibilityState === "hidden"
-              ? "重新开启后仍需点击页面“发布”，前台才会更新。"
-              : publicVisibilityState === "blocked"
-                ? "请打开下方发布检查定位问题。保存草稿不会更新客户前台。"
-                : publicDecision.detail}</span>
-          </div>
-          <div className="homepage-editor__inspector-field">
-            <span id={`dynamic-instance-property-scope-${props.instanceId}`} className="homepage-editor__sr-only">页面实例属性范围</span>
-            <div
-              className="homepage-editor__dynamic-instance-scope-list"
-              role="group"
-              aria-labelledby={`dynamic-instance-property-scope-${props.instanceId}`}
-            >
-              <button
-                type="button"
-                className={selectedPropertyNodeId === "" ? "is-active" : ""}
-                aria-pressed={selectedPropertyNodeId === ""}
-                onClick={() => selectInstancePropertyScope("")}
-              >
-                全部内容
-              </button>
-              {instancePropertyNodes.map((candidate) => (
-                <button
-                  key={candidate.nodeId}
-                  type="button"
-                  className={selectedPropertyNodeId === candidate.nodeId ? "is-active" : ""}
-                  aria-pressed={selectedPropertyNodeId === candidate.nodeId}
-                  title={candidate.name}
-                  onClick={() => selectInstancePropertyScope(candidate.nodeId)}
-                >
-                  {candidate.name}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-        {selectedNode && selectedPolicy ? (
-          <div style={{ borderTop: "1px solid var(--adm-line)", padding: 14 }}>
-            <div style={{ display: "grid", gap: 10 }}>
-              {selectedPolicy.position ? (
-                <>
-                  <NumberField
-                    inspectorField="offsetXPercent"
-                    inspectorDevice={editor.device}
-                    label="水平偏移"
-                    unit="%"
-                    min={-selectedPolicy.maxOffsetPercent}
-                    max={selectedPolicy.maxOffsetPercent}
-                    value={selectedLayout.offsetXPercent ?? 0}
-                    onChange={(offsetXPercent) => updateSelectedPresentation({ offsetXPercent })}
-                    onClear={() => updateSelectedPresentation({ offsetXPercent: undefined })}
-                  />
-                  <NumberField
-                    inspectorField="offsetYPercent"
-                    inspectorDevice={editor.device}
-                    label="垂直偏移"
-                    unit="%"
-                    min={-selectedPolicy.maxOffsetPercent}
-                    max={selectedPolicy.maxOffsetPercent}
-                    value={selectedLayout.offsetYPercent ?? 0}
-                    onChange={(offsetYPercent) => updateSelectedPresentation({ offsetYPercent })}
-                    onClear={() => updateSelectedPresentation({ offsetYPercent: undefined })}
-                  />
-                </>
-              ) : null}
-              {selectedPolicy.size ? (
-                <NumberField
-                  inspectorField="widthPercent"
-                  inspectorDevice={editor.device}
-                  label="区域宽度"
-                  unit="%"
-                  min={selectedPolicy.minWidthPercent}
-                  max={selectedPolicy.maxWidthPercent}
-                  value={selectedLayout.widthPercent ?? 100}
-                  onChange={(widthPercent) => updateSelectedPresentation({ widthPercent })}
-                  onClear={() => updateSelectedPresentation({ widthPercent: undefined })}
-                />
-              ) : null}
-              {selectedPolicy.zIndex ? (
-                <NumberField
-                  inspectorField="zIndex"
-                  inspectorDevice={editor.device}
-                  label="层级"
-                  min={-10}
-                  max={10}
-                  value={selectedLayout.zIndex ?? 0}
-                  onChange={(zIndex) => updateSelectedPresentation({ zIndex: Math.round(zIndex) })}
-                  onClear={() => updateSelectedPresentation({ zIndex: undefined })}
-                />
-              ) : null}
-              {selectedPolicy.typography && selectedTextSlot ? (
-                <>
-                  <NumberField
-                    inspectorField="fontSizePx"
-                    inspectorDevice={editor.device}
-                    label={`${selectedNode.name}字号`}
-                    unit="px"
-                    min={selectedPolicy.minFontSizePx ?? 12}
-                    max={selectedPolicy.maxFontSizePx ?? 96}
-                    value={selectedLayout.fontSizePx}
-                    onChange={(fontSizePx) => updateSelectedPresentation({ fontSizePx })}
-                    onClear={() => updateSelectedPresentation({ fontSizePx: undefined })}
-                  />
-                  <label
-                    className="homepage-editor__inspector-field"
-                    data-inspector-field="textAlign"
-                    data-inspector-device={editor.device}
-                  >
-                    <span className="homepage-editor__properties-hint">文字对齐</span>
-                    <Select
-                      aria-label={`${selectedNode.name}文字对齐`}
-                      value={selectedLayout.textAlign}
-                      placeholder="跟随模板"
-                      allowClear
-                      options={[
-                        { value: "left", label: "左对齐" },
-                        { value: "center", label: "居中" },
-                        { value: "right", label: "右对齐" },
-                      ]}
-                      onChange={(textAlign) => updateSelectedPresentation({ textAlign })}
-                    />
-                  </label>
-                </>
-              ) : null}
-              {selectedPolicy.spacing && selectedTextSlot ? (
-                <>
-                  <NumberField
-                    inspectorField="marginTopPx"
-                    inspectorDevice={editor.device}
-                    label={`${selectedNode.name}上间距`}
-                    unit="px"
-                    min={0}
-                    max={selectedPolicy.maxSpacingPx ?? 120}
-                    value={selectedLayout.marginTopPx ?? 0}
-                    onChange={(marginTopPx) => updateSelectedPresentation({ marginTopPx })}
-                    onClear={() => updateSelectedPresentation({ marginTopPx: undefined })}
-                  />
-                  <NumberField
-                    inspectorField="marginBottomPx"
-                    inspectorDevice={editor.device}
-                    label={`${selectedNode.name}下间距`}
-                    unit="px"
-                    min={0}
-                    max={selectedPolicy.maxSpacingPx ?? 120}
-                    value={selectedLayout.marginBottomPx ?? 0}
-                    onChange={(marginBottomPx) => updateSelectedPresentation({ marginBottomPx })}
-                    onClear={() => updateSelectedPresentation({ marginBottomPx: undefined })}
-                  />
-                </>
-              ) : null}
-              <p className="homepage-editor__properties-hint">字号、对齐、间距和位置回到模板，文字内容保留。</p>
-              <RestoreDefaultButton
-                label="清除这一端的排版"
-                disabled={Object.keys(selectedLayout).length === 0}
-                onClick={resetSelectedPresentation}
-              />
-            </div>
-          </div>
-        ) : (
-          <span className="homepage-editor__sr-only">页面实例编辑边界</span>
-        )}
-        {slotGroups.sections.map((section) => {
-          const fields = imageCarriesCopy
-            ? section.fields.filter((field) => {
-              const slot = definition.slots[field.slotId];
-              return field.stableKey !== "subtitle" && slot?.semanticRole !== "subtitle";
-            })
-            : section.fields;
-          if (fields.length === 0) return null;
-          return (
-          <section
-            key={`${section.group}:${section.fields[0]?.slotId ?? section.label}`}
-            aria-label={section.label}
-          >
-            <div className="homepage-editor__inspector-section-head">
-              <strong>{section.label}</strong>
-              <span className="homepage-editor__properties-hint">
-                {section.group === "image"
-                  ? (imageCarriesCopy
-                    ? "当前这一端的完成稿。手机没有单独的图时，沿用桌面图。"
-                    : "当前这一端的图片和构图。手机没有单独的图时，沿用桌面图。")
-                  : "两端共用"}
-              </span>
-            </div>
-            {fields.map(renderSlotFieldset)}
-          </section>
-          );
-        })}
-        <section className="homepage-editor__inspector-section homepage-editor__dynamic-instance-management" aria-label="实例管理">
-          <div className="homepage-editor__inspector-section-head">
-            <strong>版本</strong>
-          </div>
-          <div className="homepage-editor__inspector-section-body">
-            <span className="homepage-editor__properties-hint">固定版本 {props.templateId} v{props.templateVersion}</span>
-            <div aria-label="当前字段来源" className="homepage-editor__dynamic-instance-sources">
-              <span>模板基线 · 固定版本</span>
-              <span>页面内容覆盖 {contentOverrideCount}</span>
-              <span>页面设计覆盖 {designOverrideCount}</span>
-            </div>
-            {designOverrideCount > 0 && promotionPreview.promoted.length > 0 ? (
-              <div className="homepage-editor__dynamic-instance-promote">
-                <Button
-                  type="default"
-                  loading={promotingToTemplate}
-                  disabled={!canPromoteToTemplate || !onPromoteToTemplate || promotionPreview.promoted.length === 0}
-                  onClick={() => { void promoteToTemplate(); }}
-                >
-                  应用设计覆盖到母模板草稿
-                </Button>
-                <span className="homepage-editor__properties-hint">
-                  {!canPromoteToTemplate
-                    ? "只有超级管理员可以把页面设计覆盖应用到母模板草稿。"
-                    : (
-                      <>可安全应用 {promotionPreview.promoted.length} 项；{promotionPreview.skipped.length > 0
-                        ? `${promotionPreview.skipped.length} 项需在模板设计中确认。`
-                        : "不会带入文字、图片、商品或链接内容。"}</>
-                    )}
-                </span>
-              </div>
-            ) : null}
+          <div className="homepage-editor__instance-heading">
+            <strong>{catalogCardName(displayRole, definition.name || props.moduleName)}</strong>
             <DynamicTemplateUpgradePanel
+              key={editorBlockId}
+              fieldActions={fieldActions}
+              onRestoreStyle={styleOverrideCount > 0 ? restoreInstanceStyle : undefined}
+              restoreStyleDisabled={editor.historyTransactionPending}
+              onCorrectImageDescription={canCorrectImageDescription && selection ? () => {
+                useVisualEditorSession.getState().requestContentAction(selection, "alt");
+              } : undefined}
               definition={definition}
               instance={props}
               currentSchemaVersion={resolved.schemaVersion}
@@ -1323,40 +998,94 @@ export default function DynamicTemplateInstanceInspector({
                 }));
               }}
             />
-            <p className="homepage-editor__properties-hint">文字、图片、商品和链接会保留。</p>
-            <RestoreDefaultButton
-              label="恢复模板样式"
-              disabled={designOverrideCount === 0}
-              onClick={() => modal.confirm({
-                title: "恢复模板样式？",
-                content: `将清除当前实例的字号、颜色、位置和缩放等设计覆盖，并继续读取锁定版本 ${props.templateId} v${props.templateVersion}。文字、图片、商品、链接和显隐会完整保留；母模板、其他实例与其他页面不会改变，可立即使用页面撤销恢复。`,
-                okText: "恢复模板样式",
-                cancelText: "取消",
-                onOk: () => editor.updateHistoryTransaction({
-                  layoutOverridesByNodeId: {},
-                }),
-              })}
-            />
           </div>
-        </section>
-      </div>
-      <InspectorFooterBar
-        hasUnsavedChanges={hasUnsavedChanges}
-        hasPersistedDraft={hasPersistedDraft}
-        saving={saving}
-        errorCount={currentPublishErrorCount}
-        warningCount={currentPublishWarningCount}
-        issues={currentPublishIssues}
-        validationStatus={validationStatus}
-        onRetryValidation={onRetryValidation}
-        onReviewIssues={resolvePublishIssueReviewAction({
-          errorCount: currentPublishErrorCount,
-          warningCount: currentPublishWarningCount,
-          issues: currentPublishIssues,
-          onOpenPublishReview,
-          modal,
+          {!primaryImage && imageCarriesCopy ? imageCarriesCopyControl : null}
+          {lockedLeftoverCount > 0 ? (
+            <div className="homepage-editor__dynamic-instance-locked-leftover" role="status">
+              <p className="homepage-editor__properties-hint">
+                {lockedLeftoverCount} 个锁定字段仍保留页面覆盖，发布前需要移除。
+              </p>
+              <Button
+                size="small"
+                aria-label="移除锁定字段的页面覆盖"
+                onClick={stripLockedPageValues}
+              >
+                移除锁定字段的页面覆盖
+              </Button>
+            </div>
+          ) : null}
+          {publicVisibilityState !== "ready" ? <div
+            className="homepage-editor__dynamic-instance-public-status"
+            data-state={publicVisibilityState}
+            role="status"
+            aria-label="前台展示状态"
+          >
+            <strong>{publicVisibilityState === "hidden"
+              ? "此区块已隐藏，可在图层面板恢复"
+              : publicVisibilityState === "blocked"
+                ? `本节有 ${instancePublishErrorCount} 项发布阻断`
+                : publicDecision.summary}</strong>
+            {publicVisibilityState === "blocked" && onOpenPublishReview ? (
+              <Button size="small" type="link" onClick={onOpenPublishReview}>查看发布检查</Button>
+            ) : null}
+          </div> : null}
+        </div>
+        {breakpoint === "desktop" && mediaSideEffective ? (
+          <PageLayoutPresetCards
+            value={selectedMediaSide}
+            disabled={editor.historyTransactionPending}
+            onChange={(mediaSide) => {
+              if (mediaSide === selectedMediaSide || editor.historyTransactionPending) return;
+              editor.updateHistoryTransaction({
+                pageSettings: { ...props.pageSettings, mediaSide },
+              });
+            }}
+          />
+        ) : null}
+        {slotGroups.sections.map(({ group, label, fields }) => {
+          const isWorkSection = group === "image" && fields.some((field) => workSlotIds.has(field.slotId));
+          const title = isWorkSection ? "作品" : label;
+          return (
+            <section
+              key={`${group}:${fields[0].slotId}`}
+              aria-label={title}
+            >
+              {fields.length > 1 ? (
+                <div className="homepage-editor__inspector-section-head">
+                  <strong>{title}</strong>
+                  {isWorkSection ? <span role="status">
+                    {missingWorkCount > 0 ? `还缺 ${missingWorkCount} 张作品图` : `已填齐 ${workFields.length} 张作品图`}
+                  </span> : null}
+                </div>
+              ) : null}
+              {isWorkSection && availableWorkFields.length > 0 ? (
+                <div className="homepage-editor__instance-subgroup">
+                  <ProductReferencesField
+                    key={editorBlockId}
+                    batchPicker={{ label: "批量选作品", onConfirm: linkWorkBatch }}
+                    minProducts={1}
+                    maxProducts={availableWorkFields.length}
+                    readOnly={pendingWorkUploads > 0 || editor.historyTransactionPending}
+                  />
+                  <p className="homepage-editor__properties-hint">按选择顺序填入未关联作品的卡位。空卡位自动带入主图，已选图片可以单独更换。</p>
+                </div>
+              ) : null}
+              {fields.map(renderSlotFieldset)}
+            </section>
+          );
         })}
-      />
+        {heroCopyFields.length > 0 ? (
+          <section aria-label="标题与说明">
+            <div className="homepage-editor__inspector-section-head"><strong>标题与说明</strong></div>
+            {heroCopyFields.every((field) => !field.required) ? (
+              <p className="homepage-editor__properties-hint">图片已带文案时，可将对应文字留空。</p>
+            ) : null}
+            {heroCopyFields.map(renderSlotFieldset)}
+          </section>
+        ) : null}
+        {supplementalFields.map(renderSlotFieldset)}
+      </div>
+
     </section>
   );
 }

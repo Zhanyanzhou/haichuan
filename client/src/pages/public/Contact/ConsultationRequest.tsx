@@ -86,7 +86,7 @@ type InquirySourceProduct = {
   id: number;
   code?: string | null;
   name: string;
-  /** 演示款只带名称和货号，不提交数据库作品 ID。 */
+  /** 演示款只带名称和款号，不提交数据库作品 ID。 */
   virtual?: boolean;
 };
 
@@ -201,6 +201,7 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
   const sourceType = searchParams.get("type") || "";
   const preselectedConsultationType = SOURCE_TYPE_TO_CONSULTATION[sourceType] || "";
   const isPrivacyRequest = sourceType === "privacy";
+  const taskHeading = isPrivacyRequest ? "提交隐私请求" : "提交咨询需求";
   const rawProductRef = editorPreview ? null : searchParams.get("productRef");
   const hasProductReference = rawProductRef !== null;
   const productRef = normalizePublicProductReference(rawProductRef);
@@ -817,6 +818,7 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
           </p>
         </div>
       ) : null}
+      {hasPageDecoration && !embedded ? <h1 className="sr-only">{taskHeading}</h1> : null}
       {/* ═══ 标题区（紧凑） ═══ */}
       {!hasPageDecoration && !embedded && <section
         style={{
@@ -844,7 +846,7 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
               letterSpacing: "0.04em",
             }}
           >
-            提交咨询需求
+            {taskHeading}
           </h1>
           <p style={{ fontSize: 14, color: T.sec, margin: 0, maxWidth: 480 }}>
             您可提交选款、定制或旧款相关需求；具体服务内容与安排以实际沟通为准。
@@ -917,7 +919,7 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
                       {clampProductTitle(sourceProduct.name)}
                     </strong>
                     <p style={{ margin: "4px 0 12px", color: T.sec, fontSize: 12 }}>
-                      货号：{sourceProduct.code || "未提供"}
+                      款号：{sourceProduct.code || "未提供"}
                     </p>
                     {sourceProduct.virtual ? (
                       <p style={{ margin: "0 0 12px", color: T.sec, fontSize: 13, lineHeight: 1.7 }}>

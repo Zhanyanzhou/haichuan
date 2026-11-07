@@ -1,4 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
+import { findLaunchTemplateMaster } from "../src/page-builder/template-creation/launchTemplateSet";
+import { installNewTemplateServer, makeResource, openTemplateDesignWithoutDraft, readSession } from "./fixtures/template-authoring-main-route";
 
 test.use({ channel: process.env.TEMPLATE_BROWSER_CHANNEL });
 
@@ -9,7 +11,7 @@ async function mountInspector(page: Page) {
   await expect(page.getByRole("tabpanel", { name: "页面开放范围", exact: true })).toBeVisible();
 }
 
-test("确定性 UI：空白模板先显示整体尺寸与比例，模板设置按需展开且职责可撤销", async ({ page }) => {
+test("确定性 UI：空白模板直接显示模板设置，职责修改可撤销", async ({ page }) => {
   await mountInspector(page);
   await page.evaluate(async () => {
     const moduleUrl = "/src/page-builder/template-editor/dynamicTemplateDraftRepository.ts";
@@ -34,11 +36,10 @@ test("确定性 UI：空白模板先显示整体尺寸与比例，模板设置�
   const templateName = page.getByRole("textbox", { name: "模板名称", exact: true });
   const usage = page.getByRole("region", { name: "模板名称与页面职责", exact: true });
   await expect(templateName).toHaveValue("空白职责测试");
-  await expect(usage).toBeHidden();
-  await page.getByText("模板设置", { exact: true }).click();
   await expect(usage).toBeVisible();
+  await expect(usage.locator("summary")).toHaveCount(0);
   await expect(usage.getByText("辅助区用于说明、补充图文或配套内容，不占用页面的主舞台名额。", { exact: true })).toBeVisible();
-  await expect(page.locator('[data-template-inspector-field="metadata.category"]')).toHaveCount(0);
+  await expect(page.locator('[data-template-inspector-field="metadata.category"]')).toBeVisible();
   const before = await page.evaluate(() => {
     const state = window.__templateScopeSession.getState();
     return { role: state.draft!.definition.metadata.visualRole, history: state.historyPast.length };
@@ -48,9 +49,7 @@ test("确定性 UI：空白模板先显示整体尺寸与比例，模板设置�
   expect(await page.evaluate(() => window.__templateScopeSession.getState().historyPast.length)).toBe(before.history + 1);
   await page.evaluate(() => window.__templateScopeSession.getState().undo());
   expect(await page.evaluate(() => window.__templateScopeSession.getState().draft!.definition.metadata.visualRole)).toBe(before.role);
-  await usage.getByText("首屏导航兼容", { exact: true }).click();
   await expect(usage.getByText(/页面首个可见内容位置/)).toBeVisible();
-  await usage.getByRole("button", { name: "模板资料与使用限制", exact: true }).click();
   await expect(page.getByText(/仅用于目录推荐，不限制其他页面使用/)).toBeVisible();
   await expect(page.locator('[data-template-inspector-field="metadata.visualRole"]')).toHaveCount(1);
   await expect(page.locator('[data-template-inspector-field="metadata.headerCompatibility"]')).toHaveCount(1);
@@ -88,6 +87,104 @@ test("确定性 UI：切换当前设备不改变完整定义的制作检查结�
     const state = window.__templateScopeSession.getState();
     return { definition: state.draft!.definition, history: state.historyPast.length, dirty: state.dirty };
   })).toEqual(before);
+});
+
+test("页面首屏：现有模板只展示常用画幅与排列，预览取消和撤销保留草稿（自有 API Mock）", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  const server = await installNewTemplateServer(page);
+  const definition = findLaunchTemplateMaster("page-hero")!;
+  server.persisted = makeResource(definition, 3);
+  await openTemplateDesignWithoutDraft(page);
+  await page.getByRole("textbox", { name: "搜索模板" }).fill("单图海报");
+  await page.getByRole("button", { name: /^打开单图海报模板/ }).click();
+  await expect.poll(async () => (await readSession(page)).definition?.templateId).toBe(definition.templateId);
+  const structure = page.getByRole("complementary", { name: "模板结构", exact: true });
+  const inspector = page.getByRole("complementary", { name: "模板属性", exact: true });
+  await structure.getByRole("button", { name: "模板整体", exact: true }).click();
+  const common = inspector.getByRole("region", { name: "首屏常用属性", exact: true });
+  await expect(common).toBeVisible();
+  const committed = async () => {
+    const state = await readSession(page);
+    return { definition: state.definition, history: state.historyPast.length, dirty: state.dirty };
+  };
+  const before = await committed();
+  const frames = common.getByRole("group", { name: "模板整体比例预设", exact: true });
+  await expect(frames).toBeVisible();
+  await expect(frames.getByRole("button")).toHaveCount(3);
+  for (const name of ["16:9", "2:1", "3:2"]) {
+    await expect(frames.getByRole("button", { name, exact: true })).toBeVisible();
+  }
+  await expect(common.getByRole("group", { name: "标题与说明", exact: true })).toBeVisible();
+  await expect(inspector.getByRole("combobox", { name: /高度方式|修改作用域/ })).toHaveCount(0);
+  await expect(inspector.getByRole("spinbutton", { name: /比例宽|比例高|设计宽度|字号/ })).toHaveCount(0);
+  await expect(inspector.getByText(/^(比例来源|尺寸与预览规则|整体留白|背景与边框|断点显示与继承|字体与换行)$/)).toHaveCount(0);
+
+  const mobile = page.getByRole("button", { name: /^移动端模板布局/ });
+  await mobile.click();
+  await expect(mobile).toHaveAttribute("aria-pressed", "true");
+  await expect(frames.getByRole("button")).toHaveCount(3);
+  for (const name of ["9:16", "1:2", "2:3"]) {
+    await expect(frames.getByRole("button", { name, exact: true })).toBeVisible();
+  }
+  expect(await committed()).toEqual(before);
+  const desktop = page.getByRole("button", { name: /^桌面端模板布局/ });
+  await desktop.click();
+  await expect(desktop).toHaveAttribute("aria-pressed", "true");
+  expect(await committed()).toEqual(before);
+
+  const frame = frames.getByRole("button", { name: "2:1", exact: true });
+  await frame.click();
+  const cancelFrame = common.getByRole("button", { name: "取消比例预览", exact: true });
+  await expect(cancelFrame).toBeVisible();
+  expect(await committed()).toEqual(before);
+  await cancelFrame.click();
+  await expect(cancelFrame).toHaveCount(0);
+  expect(await committed()).toEqual(before);
+  await frame.click();
+  await common.getByRole("button", { name: "确认对象比例", exact: true }).click();
+  await expect(frame).toHaveAttribute("aria-pressed", "true");
+  const applied = await committed();
+  expect(applied.definition).not.toEqual(before.definition);
+  expect(applied.history).toBe(before.history + 1);
+  await page.getByRole("button", { name: "撤销", exact: true }).click();
+  await expect.poll(committed).toEqual(before);
+
+  const tree = structure.getByRole("tree", { name: "模板区域与槽位", exact: true });
+  const title = Object.values(definition.nodes).find((node) => node.type === "HeadingSlot")!;
+  await tree.locator(`[role="treeitem"][data-selection-target-id="${title.nodeId}"]`).click();
+  await expect.poll(async () => (await readSession(page)).selectedObjectId).toBe(title.nodeId);
+  await expect(inspector.getByRole("spinbutton", { name: "字号", exact: true })).toHaveCount(0);
+  await expect(inspector.getByRole("group", { name: "字重", exact: true })).toHaveCount(0);
+  await expect(inspector.getByRole("combobox", { name: /^(字重|字体)$/ })).toHaveCount(0);
+  await expect(inspector.getByRole("region", { name: "模板默认内容", exact: true })).toHaveCount(0);
+
+  const foreground = Object.values(definition.nodes).find((node) => node.name === "前景")!;
+  await tree.locator(`[role="treeitem"][data-selection-target-id="${foreground.nodeId}"]`).click();
+  await expect.poll(async () => (await readSession(page)).selectedObjectId).toBe(foreground.nodeId);
+  const layouts = inspector.getByRole("group", { name: "选择容器排列方式", exact: true });
+  await expect(layouts.getByRole("button")).toHaveCount(2);
+  await expect(layouts.getByRole("button", { name: "预览左右排列", exact: true })).toBeVisible();
+  await expect(layouts.getByRole("button", { name: "预览上下排列", exact: true })).toBeVisible();
+  await expect(inspector.getByText("网格列比例", { exact: true })).toHaveCount(0);
+  await expect(inspector.getByRole("spinbutton", { name: /列比例|网格列数/ })).toHaveCount(0);
+  await layouts.getByRole("button", { name: "预览左右排列", exact: true }).click();
+  await expect(inspector.getByRole("button", { name: "确认排列转换", exact: true })).toBeVisible();
+  await expect(inspector.getByRole("table", { name: "布局转换断点影响", exact: true })).toHaveCount(0);
+  expect(await committed()).toEqual(before);
+  await inspector.getByRole("button", { name: "取消排列转换", exact: true }).click();
+  expect(await committed()).toEqual(before);
+  await layouts.getByRole("button", { name: "预览左右排列", exact: true }).click();
+  await inspector.getByRole("button", { name: "确认排列转换", exact: true }).click();
+  expect((await committed()).definition?.nodes[foreground.nodeId].responsive.desktop.direction).toBe("row");
+  expect((await committed()).history).toBe(before.history + 1);
+  await page.getByRole("button", { name: "撤销", exact: true }).click();
+  await expect.poll(committed).toEqual(before);
+  const check = page.getByRole("button", { name: /^模板检查/ });
+  await expect(check).toBeVisible();
+  await check.click();
+  await expect(inspector.getByRole("region", { name: "模板制作检查", exact: true })).toBeVisible();
+  expect(await committed()).toEqual(before);
+  expect(server.writes).toEqual([]);
 });
 
 test("确定性 UI：页面表单顺序和填写规则来自现有字段，查看与定位不修改模板", async ({ page }) => {

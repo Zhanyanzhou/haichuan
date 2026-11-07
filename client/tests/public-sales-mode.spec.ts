@@ -226,25 +226,28 @@ async function mockPublicSales(
   await installCustomerSession(page, { id: 1, name: "测试客户" });
 }
 
-test("Catalog 消费服务端销售模式、派生价格和售罄状态", async ({ page }) => {
+test("Catalog 展示价格和选款入口，售罄状态在详情显示", async ({ page }) => {
   await mockPublicSales(page, {
     products: [
       product(1, "DIRECT_PURCHASE", { available: false }),
       product(2, "SELECTION"),
-      product(3, "DISPLAY_ONLY"),
+      { ...product(3, "DISPLAY_ONLY"), name: "HC-2 不动明王背面（ATP1873）" },
     ],
   });
   await page.goto("/catalog");
 
   await expect(page.getByText("¥ 12,800 起")).toBeVisible();
-  await expect(page.getByText("已售罄", { exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "查看作品" }).first()).toHaveAttribute("href", "/products/HC-1?from=%2Fcatalog");
+  const soldOutCard = page.locator('[data-catalog-product-id="1"]');
+  const soldOutDetail = soldOutCard.getByRole("heading").getByRole("link");
+  await expect(soldOutCard.getByText("已售罄", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "查看作品", exact: true })).toHaveCount(0);
+  await expect(soldOutDetail).toHaveAttribute("href", "/products/HC-1?from=%2Fcatalog");
   await expect(page.getByRole("button", { name: "+ 加入选款" })).toBeVisible();
-  const displayOnlyCard = page.locator(".catalog-cell").filter({
-    has: page.getByRole("heading", { name: "销售模式作品 3" }),
-  });
+  const displayOnlyCard = page.locator('[data-catalog-product-id="3"]');
+  await expect(displayOnlyCard.getByRole("heading")).toHaveText("不动明王背面");
+  await expect(displayOnlyCard.locator(".catalog-product-card__facts")).toHaveText("款号 HC-3");
   await expect(displayOnlyCard.getByText("仅展示", { exact: true })).toHaveCount(0);
-  await expect(displayOnlyCard.getByRole("link", { name: "查看作品" }))
+  await expect(displayOnlyCard.locator("[data-catalog-detail-entry]"))
     .toHaveAttribute("href", "/products/HC-3?from=%2Fcatalog");
   const placeholderImage = page.locator('img[src="/images/system/product-placeholder.svg"]').first();
   await expect(placeholderImage).toBeVisible();
@@ -254,9 +257,11 @@ test("Catalog 消费服务端销售模式、派生价格和售罄状态", async 
       const rect = image.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0 && image.naturalWidth === 0;
     }).length)).toBe(0);
+  await soldOutDetail.click();
+  await expect(page.getByRole("button", { name: "已售罄", exact: true })).toBeDisabled();
 });
 
-test("Catalog 在交易能力加载中先降级为查看作品，明确开放后再显示购买", async ({ page }) => {
+test("Catalog 在交易能力加载前后都通过商品名称进入详情", async ({ page }) => {
   const flagsBarrier = createRouteBarrier();
   await mockPublicSales(page, {
     products: [product(4, "DIRECT_PURCHASE", { available: true })],
@@ -265,13 +270,15 @@ test("Catalog 在交易能力加载中先降级为查看作品，明确开放后
   await page.goto("/catalog");
   await flagsBarrier.reached;
 
-  await expect(page.getByRole("link", { name: "查看作品" }).first())
-    .toHaveAttribute("href", "/products/HC-4?from=%2Fcatalog");
+  const detail = page.locator("[data-catalog-detail-entry]");
+  await expect(detail).toHaveAttribute("href", "/products/HC-4?from=%2Fcatalog");
   await expect(page.getByRole("link", { name: "查看并购买" })).toHaveCount(0);
 
+  const flagsResponse = page.waitForResponse("**/api/settings/flags");
   flagsBarrier.release();
-  await expect(page.getByRole("link", { name: "查看并购买" }).first())
-    .toHaveAttribute("href", "/products/HC-4?from=%2Fcatalog");
+  expect((await flagsResponse).ok()).toBe(true);
+  await expect(detail).toHaveAttribute("href", "/products/HC-4?from=%2Fcatalog");
+  await expect(page.locator(".catalog-product-card__action")).toHaveCount(0);
 });
 
 test("Catalog 在交易能力读取失败时不承诺购买", async ({ page }) => {
@@ -281,7 +288,7 @@ test("Catalog 在交易能力读取失败时不承诺购买", async ({ page }) =
   });
   await page.goto("/catalog");
 
-  await expect(page.getByRole("link", { name: "查看作品" }).first())
+  await expect(page.locator("[data-catalog-detail-entry]"))
     .toHaveAttribute("href", "/products/HC-5?from=%2Fcatalog");
   await expect(page.getByRole("link", { name: "查看并购买" })).toHaveCount(0);
 });
@@ -310,9 +317,10 @@ for (const viewport of [
     const retryBox = await retry.boundingBox();
     expect(retryBox?.height ?? 0).toBeGreaterThanOrEqual(44);
     await retry.click();
-    await expect(page.getByRole("link", { name: "查看并购买" }).first())
+    await expect(page.locator("[data-catalog-detail-entry]"))
       .toHaveAttribute("href", "/products/HC-6?from=%2Fcatalog");
     await expect(recovery).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "查看并购买" })).toHaveCount(0);
     expect(flagsRequestCount.value).toBe(2);
     await expect.poll(() => page.evaluate(
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
@@ -337,7 +345,7 @@ for (const viewport of [
     expect(flagsRequestCount.value).toBe(1);
 
     await recovery.getByRole("button", { name: "重新检查购买状态" }).click();
-    await page.getByRole("button", { name: /18K金/ }).click();
+    await page.getByRole("combobox", { name: "选择作品规格" }).selectOption({ index: 1 });
     await expect(page.getByRole("button", { name: /加入购物车/ })).toBeEnabled();
     await expect(recovery).toHaveCount(0);
     expect(flagsRequestCount.value).toBe(2);
@@ -356,7 +364,7 @@ test("DIRECT_PURCHASE 有货时使用 SKU 价格且重复点击只提交一次",
   });
   await page.goto("/products/10");
 
-  await page.getByRole("button", { name: /18K金/ }).click();
+  await page.getByRole("combobox", { name: "选择作品规格" }).selectOption({ index: 1 });
   await expect(page.getByText("¥12,800", { exact: true })).toBeVisible();
   const addButton = page.getByRole("button", { name: /加入购物车/ });
   await expect(addButton).toBeEnabled();
@@ -402,7 +410,7 @@ test("SINGLE_UNIT 在详情和购物车都固定数量上限 1", async ({ page }
   });
 
   await page.goto("/products/12");
-  await page.getByRole("button", { name: /18K金/ }).click();
+  await page.getByRole("combobox", { name: "选择作品规格" }).selectOption({ index: 1 });
   await expect(page.getByRole("button", { name: "增加数量" })).toBeDisabled();
   await expect(page.getByText("一物一件，每位顾客的购物车最多保留 1 件。")).toBeVisible();
 
@@ -416,7 +424,7 @@ test("四种非直购模式只提供真实可达的浏览、选款、预约或�
     { id: 20, mode: "DISPLAY_ONLY" as const, text: "咨询此款作品", href: "/contact?type=product&productRef=HC-20" },
     { id: 21, mode: "SELECTION" as const, text: "加入选款", href: null },
     { id: 22, mode: "APPOINTMENT" as const, text: "预约鉴赏此款", href: "/contact?type=appointment&productRef=HC-22" },
-    { id: 23, mode: "CUSTOM_INQUIRY" as const, text: "咨询此款定制", href: "/custom?type=custom&productRef=HC-23" },
+    { id: 23, mode: "CUSTOM_INQUIRY" as const, text: "预约定制", href: "/custom?type=custom&productRef=HC-23" },
   ];
   await mockPublicSales(page, { products: cases.map((item) => product(item.id, item.mode)) });
 
@@ -444,7 +452,7 @@ test("详情加购 409 显示服务端原因且不伪造成功", async ({ page }
     requestCounts,
   });
   await page.goto("/products/30");
-  await page.getByRole("button", { name: /18K金/ }).click();
+  await page.getByRole("combobox", { name: "选择作品规格" }).selectOption({ index: 1 });
   await page.getByRole("button", { name: /加入购物车/ }).click();
 
   await expect(page.getByRole("alert")).toContainText("一物一件商品在购物车中最多保留 1 件");
@@ -557,7 +565,7 @@ test("购物车与支付开关关闭时不能进入交易或创建订单", async
     requestCounts,
   });
   await page.goto("/catalog");
-  await expect(page.getByRole("link", { name: "查看作品" }).first())
+  await expect(page.locator("[data-catalog-detail-entry]"))
     .toHaveAttribute("href", "/products/HC-40?from=%2Fcatalog");
   await expect(page.getByRole("link", { name: "查看并购买" })).toHaveCount(0);
 
@@ -627,14 +635,14 @@ for (const viewport of [
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
 
     const checks = [
-      { path: "/catalog", role: "link" as const, name: "查看并购买" },
+      { path: "/catalog", role: "link" as const, name: single.name },
       { path: "/products/50", role: "button" as const, name: "加入购物车" },
       { path: "/cart", role: "link" as const, name: /去结算/ },
     ];
     for (const check of checks) {
       await page.goto(check.path);
       if (check.path.startsWith("/products/")) {
-        await page.getByRole("button", { name: /18K金/ }).click();
+        await page.getByRole("combobox", { name: "选择作品规格" }).selectOption({ index: 1 });
       }
       const target = page.getByRole(check.role, { name: check.name }).first();
       await target.focus();

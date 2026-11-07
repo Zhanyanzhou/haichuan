@@ -358,43 +358,15 @@ test("隔离画布：Alt循环重叠对象，框选只包含当前层可见未�
   expect((await snapshot(page)).history).toBe(0);
 });
 
-test("隔离画布：加号向明确当前层添加，新增节点可一步撤销", async ({ page }) => {
-  await mountCanvas(page, true); await enterStack(page);
+test("隔离画布：进入既有容器后不提供点击或拖入新增槽位", async ({ page }) => {
+  await mountCanvas(page, true);
+  await enterStack(page);
   const before = await snapshot(page);
-  await page.getByText("＋ 添加内容", { exact: true }).click();
-  await page.getByRole("button", { name: "添加标题槽位", exact: true }).click();
-  const after = await snapshot(page);
-  expect(after.childIds.length).toBe(before.childIds.length + 1); expect(after.scope).toBe(before.ids.stack);
-  expect(after.history).toBe(1);
-  await page.getByRole("button", { name: "撤销", exact: true }).click();
+  await expect(page.getByText("＋ 添加内容", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "添加标题槽位", exact: true })).toHaveCount(0);
+  await expect(page.locator("[data-canvas-insert-target], [data-canvas-insert-line]")).toHaveCount(0);
   expect((await snapshot(page)).childIds).toEqual(before.childIds);
-});
-
-test("隔离画布：拖入显示容器和插入线，取消零写入，提交一次添加", async ({ page }) => {
-  await mountCanvas(page, true); await enterStack(page);
-  const before = await snapshot(page);
-  await page.getByText("＋ 添加内容", { exact: true }).click();
-  const button = await page.getByRole("button", { name: "添加标题槽位", exact: true }).boundingBox();
-  const target = await page.frameLocator("iframe").locator(`[data-template-node-id="${before.ids.second}"]`).boundingBox();
-  if (!button || !target) throw new Error("缺少拖入源或目标");
-  const start = { x: button.x + button.width / 2, y: button.y + button.height / 2 };
-  await page.mouse.move(start.x, start.y); await page.mouse.down();
-  await page.keyboard.press("Escape"); await page.mouse.up();
-  expect((await snapshot(page)).history).toBe(0); expect((await snapshot(page)).scope).toBe(before.scope);
-  await page.mouse.move(start.x, start.y); await page.mouse.down();
-  await page.mouse.move(target.x + target.width * .75, target.y + target.height * .75);
-  await expect(page.locator("[data-canvas-insert-target]")).toBeVisible();
-  await expect(page.locator("[data-canvas-insert-line]")).toBeVisible();
-  expect((await snapshot(page)).history).toBe(0);
-  await page.keyboard.press("Escape"); await page.mouse.up();
-  expect((await snapshot(page)).childIds).toEqual(before.childIds);
-  await page.mouse.move(start.x, start.y); await page.mouse.down();
-  await page.mouse.move(target.x + target.width * .75, target.y + target.height * .75); await page.mouse.up();
-  const after = await snapshot(page);
-  expect(after.history).toBe(1); expect(after.childIds.length).toBe(before.childIds.length + 1);
-  expect(after.childIds[2]).toBe(after.selected[0].targetId);
-  await page.getByRole("button", { name: "撤销", exact: true }).click();
-  expect((await snapshot(page)).childIds).toEqual(before.childIds);
+  expect((await snapshot(page)).history).toBe(before.history);
 });
 
 test("隔离画布：带内边距的锚定对象移动写偏移，缩放不改变父子顺序", async ({ page }) => {

@@ -9,6 +9,12 @@ export type CustomerProductAccess = {
   partnerStatus?: string | null;
 } | null | undefined;
 
+/** 后台商品工作列表与分类预览统一排除回收站和已删除记录。 */
+export const staffWorkingProductWhere = {
+  deletedAt: null,
+  status: { not: "ARCHIVED" },
+} satisfies Prisma.ProductWhereInput;
+
 /**
  * 客户可见范围的唯一业务判断：普通客户可见 PUBLIC/MEMBER，
  * 只有审核通过的合作客户额外可见 PARTNER；游客仅可见 PUBLIC。
@@ -46,6 +52,38 @@ export function customerFacingProductWhereForVisibilities(
     publicationQualityStatus: "READY",
     visibility: { in: visibilities },
     ...customerFacingReleaseWhere(),
+  };
+}
+
+export function publicMediaAssetWhere(now: Date): Prisma.MediaAssetWhereInput {
+  return {
+    status: "READY",
+    accessLevel: "PUBLIC",
+    authorization: {
+      is: {
+        reviewStatus: "APPROVED",
+        revocationStatus: "ACTIVE",
+        publicWebUseAllowed: true,
+        AND: [
+          { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
+          { OR: [{ validUntil: null }, { validUntil: { gt: now } }] },
+        ],
+      },
+    },
+  };
+}
+
+/** 公开媒体失效时按商品公开入口的同一规则收起整件作品。 */
+export function withPublicMediaEligibility(
+  base: Prisma.ProductWhereInput,
+  now: Date = new Date(),
+): Prisma.ProductWhereInput {
+  const eligibleImage: Prisma.ProductImageWhereInput = { mediaAsset: { is: publicMediaAssetWhere(now) } };
+  return {
+    ...base,
+    primaryImage: { is: eligibleImage },
+    listingImage: { is: eligibleImage },
+    images: { every: eligibleImage },
   };
 }
 

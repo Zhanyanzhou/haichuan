@@ -16,7 +16,6 @@ import DynamicTemplateInspectorPanel from "./DynamicTemplateInspectorPanel";
 import { TemplateTrialPreviewControls } from "./TemplateTrialContentControls";
 import DynamicTemplateStructurePanel from "./DynamicTemplateStructurePanel";
 import TemplateEditorToolbar from "./TemplateEditorToolbar";
-import NewTemplateRecipeModal from "../template-creation/NewTemplateRecipeModal";
 import {
   exportDynamicTemplateDraftJson,
 } from "./dynamicTemplateDraftRepository";
@@ -33,10 +32,13 @@ import TemplateEditorLibrary, {
   type TemplateEditorLibraryTarget,
 } from "./TemplateEditorLibrary";
 import type { TemplateWorkspaceController } from "./TemplateWorkspaceController";
-import type { TemplateInspectorIssueTarget } from "./templateInspectorCapabilities";
 import type { TemplateEditorDraft } from "./types";
 import DynamicTemplateRenderer from "../template-definition/DynamicTemplateRenderer";
-import type { TemplateDefinitionV2 } from "../template-definition";
+import {
+  isRetiredTabletContentPath,
+  validateDynamicTemplatePublishDefinition,
+  type TemplateDefinitionV2,
+} from "../template-definition";
 import type { TemplateBreakpoint } from "../template-definition/responsive";
 import { catalogCardName, catalogStoredName } from "./catalogCardName";
 import { editingGeometryDiverged, previewExitGeometry } from "./templateEditingGeometry";
@@ -274,7 +276,6 @@ export default function TemplateWorkspace({
   controller: TemplateWorkspaceController;
 }) {
   const { message, modal } = AntdApp.useApp();
-  const [newTemplateSizeOpen, setNewTemplateSizeOpen] = useState(false);
   const [trialTargetNodeId, setTrialTargetNodeId] = useState<string | undefined>();
   const [rename, setRename] = useState<{ templateId: string; name: string } | null>(null);
   const {
@@ -299,6 +300,26 @@ export default function TemplateWorkspace({
   const previewFillSamples = useTemplateEditorSession((state) => state.previewFillSamples);
   const geometryDiverged = !previewMode && editingGeometryDiverged(device, editingBreakpoint);
   const activeTemplateId = draft?.definition.templateId;
+  const definition = draft?.definition;
+  const templateValidation = useMemo(
+    () => definition ? validateDynamicTemplatePublishDefinition(definition) : undefined,
+    [definition],
+  );
+  const templateCheck = useMemo(() => {
+    if (!templateValidation) return undefined;
+    let errorCount = 0;
+    let warningCount = 0;
+    for (const issue of templateValidation.issues) {
+      if (isRetiredTabletContentPath(issue.path)) continue;
+      if (issue.level === "error") errorCount += 1;
+      if (issue.level === "warning") warningCount += 1;
+    }
+    return { errorCount, warningCount };
+  }, [templateValidation]);
+  const [templateCheckRequest, setTemplateCheckRequest] = useState<{
+    sessionId: string;
+    count: number;
+  } | null>(null);
   const [structureCollapsed, setStructureCollapsed] = useState(() => {
     try {
       if (window.matchMedia(DOCKED_WORKSPACE_QUERY).matches) return false;
@@ -753,6 +774,18 @@ export default function TemplateWorkspace({
       window.removeEventListener("template-editor:open-settings", openMetadataPanel);
     };
   }, [inspectorOverlay, updateInspectorCollapsed]);
+  const openTemplateCheck = () => {
+    const state = useTemplateEditorSession.getState();
+    if (!state.sessionId || !state.draft || state.previewMode || state.activeInteraction
+      || focusFirstInvalidNumberField()) return;
+    const owner = state.sessionId;
+    setTemplateCheckRequest((current) => ({
+      sessionId: owner,
+      count: (current?.count ?? 0) + 1,
+    }));
+    if (inspectorOverlay.compact) inspectorOverlay.requestOpen();
+    else updateInspectorCollapsed(false);
+  };
   useEffect(() => {
     if (!previewMode) setTrialTargetNodeId(undefined);
   }, [previewMode]);
@@ -789,13 +822,6 @@ export default function TemplateWorkspace({
       window.removeEventListener("template-editor:open-trial-content", openContent);
     };
   }, [enterStressPreview, inspectorOverlay, updateInspectorCollapsed]);
-  const prepareIssueTarget = (target: TemplateInspectorIssueTarget) => {
-    if (target.destination === "structure-region" || target.destination === "structure-slot") {
-      if (inspectorOverlay.compact) structureOverlay.requestOpen();
-      else updateStructureCollapsed(false);
-    }
-  };
-
   const previousCompactLayoutRef = useRef<boolean | null>(null);
   useEffect(() => {
     const previousCompact = previousCompactLayoutRef.current;
@@ -914,10 +940,6 @@ export default function TemplateWorkspace({
     target: TemplateEditorLibraryTarget,
     onOpened?: (draft: TemplateEditorDraft) => void,
   ) => {
-    if (target.kind === "dynamic-new" && !target.definition) {
-      setNewTemplateSizeOpen(true);
-      return;
-    }
     const currentDraft = useTemplateEditorSession.getState().draft;
     if (target.kind === "dynamic-local" && currentDraft?.sourceType === "local"
       && currentDraft.localDraftId === target.localDraftId) {
@@ -1334,14 +1356,9 @@ export default function TemplateWorkspace({
         <Input id="template-rename-input" autoFocus maxLength={100} value={rename.name}
           onChange={(event) => setRename({ ...rename, name: event.target.value })} onPressEnter={applyTemplateName} />
       </Modal> : null}
-      {newTemplateSizeOpen ? <NewTemplateRecipeModal
-        onCancel={() => setNewTemplateSizeOpen(false)}
-        onCreate={(definition) => {
-          controller.openTarget({ kind: "dynamic-new", definition }, () => setNewTemplateSizeOpen(false));
-        }}
-      /> : null}
       <TemplateEditorToolbar
-        onCreate={previewMode ? undefined : () => openTemplateTarget({ kind: "dynamic-new" })}
+        templateCheck={templateCheck}
+        onOpenTemplateCheck={openTemplateCheck}
         onSave={previewMode ? undefined : () => { void saveCurrentTemplate(); }}
         onPublish={!previewMode && draft && !localOnly ? publishWithFocusLifecycle : undefined}
         localOnly={localOnly}
@@ -1589,11 +1606,12 @@ export default function TemplateWorkspace({
               ) : draft ? <DynamicTemplateInspectorPanel
                 localOnly={localOnly}
                 workspaceVisible={!inspectorCollapsed}
+                checkedDefinition={templateValidation}
+                validationOpenRequest={templateCheckRequest?.sessionId === sessionId ? templateCheckRequest?.count : undefined}
                 publishReview={controller.publishIssueEditing ? null : publishReview}
                 publishIssueEditing={controller.publishIssueEditing}
                 publishedDraftAvailability={publishedDraftAvailability}
                 onSelectPublishIssue={controller.selectPublishIssue}
-                onPrepareIssueTarget={prepareIssueTarget}
                 onEditPublishIssue={controller.editPublishIssue}
                 onOpenPublishReview={openPublishReviewWithFocusLifecycle}
                 onConfirmPublish={controller.confirmPublish}
@@ -1604,6 +1622,7 @@ export default function TemplateWorkspace({
                 onRetryCatalogRefresh={controller.retryCatalogRefresh}
                 onReloadPublishedDraft={controller.reloadPublishedDraft}
                 onUsePublishedTemplate={controller.usePublishedTemplateInPage}
+                onStartCanvasEdit={inspectorOverlay.compact ? () => setInspectorCollapsed(true) : undefined}
               /> : (
                 <aside className="homepage-editor__inspector template-editor__inspector template-editor__empty-panel" aria-label="模板属性">
                   <p>选择模板后，可在这里调整整体比例、设备规则以及当前槽位的精确位置和大小。</p>

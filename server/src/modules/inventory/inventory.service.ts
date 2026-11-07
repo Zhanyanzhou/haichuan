@@ -155,7 +155,8 @@ export class InventoryService {
       if (!inv) throw new NotFoundException("库存记录不存在");
       const productId = inv.sku.productId;
       changedProductId = productId;
-      await this.productsService.lockProductForTradeMutation(productId, tx);
+      // 已永久移出目录的商品仍可能有实物库存，允许授权人员继续核对库存。
+      await this.productsService.lockProductForTradeMutation(productId, tx, true);
 
       const changed = await tx.inventory.updateMany({
         where: { id, quantity: data.expectedQuantity },

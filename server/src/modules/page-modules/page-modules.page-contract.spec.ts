@@ -566,7 +566,7 @@ function makeCatalogDocument() {
   };
 }
 
-function makeContactDocument(content: Array<Record<string, unknown>>) {
+function makePageDocument(content: Array<Record<string, unknown>>) {
   return {
     content,
     zones: {},
@@ -583,70 +583,47 @@ const contactBusinessRegion = {
   },
 };
 
-test("联系页只保留固定业务区时可以直接发布", async () => {
-  const result = await createService().validatePageDocument(
-    "contact",
-    makeContactDocument([contactBusinessRegion]),
-    makeFormalMetadata(),
-  );
-  assert.equal(result.valid, true, result.errors.join("\n"));
-});
+for (const [pageKey, region] of [
+  ["catalog", makeCatalogDocument().content[2]],
+  ["contact", contactBusinessRegion],
+] as const) {
+  test(`${pageKey} 可以只发布业务区，也可以在任意根内容位置保留业务区`, async () => {
+    const service = createService();
+    const [hero] = makeHomeDocument().content;
+    const secondHero = { ...hero, props: { ...hero.props, id: "page-contract-second-hero" } };
+    for (const content of [
+      [region],
+      [region, hero, secondHero],
+      [hero, region, secondHero],
+      [hero, secondHero, region],
+    ]) {
+      const result = await service.validatePageDocument(pageKey, makePageDocument(content), makeFormalMetadata());
+      assert.equal(result.valid, true, result.errors.join("\n"));
+    }
+  });
 
-test("联系页已有品牌模块时，固定业务区仍须紧随其后", async () => {
-  const result = await createService().validatePageDocument(
-    "contact",
-    makeContactDocument([
-      contactBusinessRegion,
-      {
-        type: "首屏主视觉",
-        props: {
-          id: "contact-brand-stage",
-          title: "联系海川",
-          desktopImage: "/images/hero-desktop.jpg",
-          mobileImage: "/images/hero-mobile.jpg",
-          altText: "联系海川",
-          actionText: "",
-          targetType: "none",
-        },
-      },
-    ]),
-    makeFormalMetadata(),
-  );
-  assert.equal(result.valid, false);
-  assert.ok(result.errors.some((message) => message.includes("必须紧随首个品牌框架模块之后")));
-});
+  test(`${pageKey} 仍需要一个属于当前页面的锁定业务区`, async () => {
+    const service = createService();
+    const missing = await service.validatePageDocument(pageKey, makePageDocument([]), makeFormalMetadata());
+    assert.equal(missing.valid, false);
+    assert.ok(missing.errors.some((message) => message.includes("要求固定业务区数量为 1")));
 
-test("选款中心不能只靠固定业务区通过发布检查", async () => {
-  const result = await createService().validatePageDocument(
-    "catalog",
-    {
-      content: [
-        {
-          type: "业务功能区",
-          props: {
-            id: "catalog-business-region-only",
-            pageKey: "catalog",
-            locked: true,
-          },
-        },
-      ],
-      zones: {},
-      root: { props: {} },
-    },
-    makeFormalMetadata(),
-  );
-  assert.equal(result.valid, false);
-  assert.ok(result.errors.some((message) => message.includes("至少需要 1 个可见的前台内容模块")));
-  assert.ok(result.errors.some((message) => message.includes("必须紧随首个品牌框架模块之后")));
-});
+    const unlocked = { ...region, props: { ...region.props, locked: false } };
+    const wrongPage = { ...region, props: { ...region.props, pageKey: "home" } };
+    for (const block of [unlocked, wrongPage]) {
+      const result = await service.validatePageDocument(pageKey, makePageDocument([block]), makeFormalMetadata());
+      assert.equal(result.valid, false);
+      assert.ok(result.errors.some((message) => message.includes("必须属于当前页面且保持锁定")));
+    }
+  });
+}
 
-test("固定业务区按首个可见品牌模块定位，隐藏备选块不改变语义顺序", async () => {
-  const result = await createService().validatePageDocument(
-    "catalog",
-    makeCatalogDocument(),
-    makeFormalMetadata(),
-  );
-  assert.equal(result.valid, true, result.errors.join("\n"));
+test("不需要固定业务区的页面允许零个可见装修模块", async () => {
+  const service = createService();
+  for (const pageKey of ["home", "products", "custom", "about"]) {
+    const result = await service.validatePageDocument(pageKey, makePageDocument([]), makeFormalMetadata());
+    assert.equal(result.valid, true, `${pageKey}: ${result.errors.join("\n")}`);
+  }
 });
 
 test("zones 中的固定业务区不能绕过页面角色数量与根内容位置规则", async () => {
@@ -672,7 +649,7 @@ test("zones 中的固定业务区不能绕过页面角色数量与根内容位�
   assert.ok(result.errors.some((message) => message.includes("不能放入插槽 zones")));
 });
 
-test("普通 zones 内容不能被计为可发布内容或绕过公开 Renderer 的根内容位置", async () => {
+test("普通 zones 内容不能绕过公开 Renderer 的根内容位置", async () => {
   const document: any = makeHomeDocument();
   document.zones = {
     sidebar: [

@@ -168,18 +168,32 @@ export function commitPageModuleStructureTransaction(
     },
     recordHistory: false,
   });
+  const committedState = getPuck().appState;
   const sealedHistories = [
     ...historyPrefix,
-    { state: getPuck().appState },
+    { state: committedState },
   ];
   pendingStructureHistorySeal = {
     setHistories: puck.history.setHistories,
     histories: sealedHistories,
-    data: nextData,
+    // Puck 会归一化数据并移除顶层扩展字段；延迟记录使用的是归一化后的快照。
+    data: committedState.data as PageModuleDocument,
     navigationIndex: sealedHistories.length - 1,
   };
   puck.history.setHistories(sealedHistories);
   return true;
+}
+
+export function clonePageModule(source: PageModuleData): PageModuleData {
+  const duplicated = structuredClone(source);
+  duplicated.props = {
+    ...duplicated.props,
+    id: createCopyId("homepage-block"),
+    ...(typeof duplicated.props.instanceId === "string"
+      ? { instanceId: createCopyId("instance") }
+      : {}),
+  };
+  return duplicated;
 }
 
 export function duplicatePageModule(
@@ -188,15 +202,7 @@ export function duplicatePageModule(
 ) {
   const source = (getPuck().appState.data.content as PageModuleData[])[sourceIndex];
   if (!source) return sourceIndex;
-  const duplicatedId = createCopyId("homepage-block");
-  const duplicated = structuredClone(source);
-  duplicated.props = {
-    ...duplicated.props,
-    id: duplicatedId,
-    ...(typeof duplicated.props.instanceId === "string"
-      ? { instanceId: createCopyId("instance") }
-      : {}),
-  };
+  const duplicated = clonePageModule(source);
   const destinationIndex = sourceIndex + 1;
   commitPageModuleStructureTransaction(
     getPuck,
@@ -208,9 +214,18 @@ export function duplicatePageModule(
         ...data.content.slice(destinationIndex),
       ],
     }),
-    { blockId: duplicatedId },
+    { blockId: duplicated.props.id },
   );
   return destinationIndex;
+}
+
+export function canReorderPageModule(
+  source: PageModuleData | undefined,
+  destination: PageModuleData | undefined,
+) {
+  // 固定业务区本身保持锁定，已有装修模块可以移动到它的另一侧。
+  return Boolean(source && destination && source !== destination && !source.props.locked
+    && (!destination.props.locked || destination.type === "业务功能区"));
 }
 
 export function reorderPageModules(
@@ -219,8 +234,9 @@ export function reorderPageModules(
   destinationIndex: number,
 ) {
   const content = getPuck().appState.data.content as PageModuleData[];
-  const movedBlockId = content[sourceIndex]?.props.id;
-  if (!movedBlockId || sourceIndex === destinationIndex) return false;
+  const source = content[sourceIndex];
+  const movedBlockId = source?.props.id;
+  if (!movedBlockId || !canReorderPageModule(source, content[destinationIndex])) return false;
   return commitPageModuleStructureTransaction(
     getPuck,
     (data) => {

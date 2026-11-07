@@ -54,7 +54,6 @@ test("默认内容精修不受试排覆盖，试排只在预览可达且退出�
   await page.screenshot({ path: testInfo.outputPath("refinement-desktop-default.png"), fullPage: true });
   const before = stableAuthoringFacts(await readSession(page));
   await page.getByRole("button", { name: "预览模板", exact: true }).click();
-  await page.getByText("自定义试排内容", { exact: true }).click();
   await page.getByRole("combobox", { name: "试排对象", exact: true }).selectOption(ids.title);
   await expect(page.getByRole("textbox", { name: "试排标题", exact: true })).toHaveValue("之前的临时试排");
   await page.getByRole("textbox", { name: "试排标题", exact: true }).fill("只在预览显示的标题");
@@ -83,11 +82,13 @@ for (const width of [1600, 390]) test(`${width}px 空图片双击定位默认图
   await page.setViewportSize({ width, height: 1000 });
   const { ids, server } = await prepare(page);
   await selectNode(page, ids.empty);
+  const defaults = page.locator(`[data-template-default-content="${ids.imageSlot}"]`);
+  if (width !== 390) await expect(defaults.getByRole("textbox", { name: "默认图片说明", exact: true })).toBeVisible();
   const before = stableAuthoringFacts(await readSession(page));
   const hit = page.locator(`[data-overlay-hit-for="node:${ids.empty}"]`);
   await hit.dblclick();
-  const defaults = page.locator(`[data-template-default-content="${ids.imageSlot}"]`);
   await expect(defaults).toBeVisible();
+  await expect(defaults.getByRole("textbox", { name: "默认图片说明", exact: true })).toBeVisible();
   await expect.poll(() => defaults.evaluate((element) => element.contains(document.activeElement))).toBe(true);
   await page.screenshot({ path: testInfo.outputPath(`refinement-image-properties-${width}.png`), fullPage: true });
   await expect(page.getByRole("group", { name: "图片取景编辑", exact: true })).toHaveCount(0);
@@ -103,6 +104,14 @@ for (const width of [1600, 390]) test(`${width}px 空图片双击定位默认图
   await fullImage.dblclick({ position: { x: imageBox.width * .75, y: imageBox.height * .25 } });
   await expect(page.getByRole("group", { name: "图片取景编辑", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "取消取景", exact: true }).click();
+  if (width === 390) {
+    await page.getByRole("button", { name: "展开模板属性面板", exact: true }).click();
+    const inspector = page.getByRole("dialog", { name: "模板属性工作区", exact: true });
+    await inspector.getByRole("button", { name: "在画布上拖动调整", exact: true }).click();
+    await expect(inspector).toBeHidden();
+    await expect(page.getByRole("group", { name: "图片取景编辑", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "取消取景", exact: true }).click();
+  }
   expect(stableAuthoringFacts(await readSession(page))).toEqual(before);
   expect(server.writes).toEqual([]);
 });

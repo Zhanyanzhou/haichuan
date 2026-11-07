@@ -87,14 +87,11 @@ test("背景预设覆盖生成颜色，手机选择只改手机且恢复继承�
   const { ids } = await openGenerated(page);
   await select(page, ids.root, "mobile");
   const before = (await readSession(page)).definition!;
-  const group = page.locator('[data-template-property-group="外观"]');
-  await group.locator("summary").first().click();
   await page.getByRole("combobox", { name: "背景预设", exact: true }).selectOption("brand-ink");
   const node = page.frameLocator("iframe.template-editor__viewport-frame").locator(`[data-template-node-id="${ids.root}"]`);
   await expect(node).toHaveCSS("background-color", "rgb(24, 26, 27)");
   expect((await readSession(page)).definition!.nodes[ids.root].responsive.desktop).toEqual(before.nodes[ids.root].responsive.desktop);
   const property = page.locator('[data-template-design-property="node.backgroundToken"]');
-  await property.locator("summary").click();
   await property.getByRole("button", { name: /恢复.*继承/ }).click();
   expect((await readSession(page)).definition!.nodes[ids.root].responsive.mobile.backgroundColor).toBeUndefined();
   await undo(page);
@@ -199,7 +196,6 @@ test("新增颜色字体共用修改范围；内容共享；关闭替换后裁�
   await expect(page.getByRole("combobox", { name: "修改作用域" })).toHaveValue("base");
   const beforeMobile = (await readSession(page)).definition!.slots[ids.titleSlot].mobileRules;
   await fill(page, "文字颜色", "#123456");
-  await page.locator('details[data-template-property-group="文字细节"] > summary').click();
   await page.getByRole("combobox", { name: "字体", exact: true }).selectOption("serif");
   await fill(page, "默认文字", "各端共享的精修文字");
   let definition = (await readSession(page)).definition!;
@@ -232,9 +228,7 @@ test("schema 3 外观与文字设计组复制和恢复包含新字段，不改�
   const { ids } = await openGenerated(page);
   await select(page, ids.title);
   await fill(page, "文字颜色", "#123456");
-  await page.locator('details[data-template-property-group="文字细节"] > summary').click();
   await page.getByRole("combobox", { name: "字体", exact: true }).selectOption("serif");
-  await page.locator('details[data-template-property-group="外观"] > summary').click();
   await fill(page, "背景颜色", "#EEEEEE");
   const before = (await readSession(page)).definition!;
   const result = await page.evaluate(async ({ nodeId }) => {
@@ -274,10 +268,11 @@ test("背景图片槽位保留唯一默认图片入口，容器仍可配置 CSS 
   await expect(defaults.getByRole("button", { name: "或粘贴图片链接" })).toHaveCount(1);
   await expect(defaults.getByRole("button", { name: "本页图片", exact: true })).toBeVisible();
   await expect(defaults.locator("[data-media-field]")).toHaveAttribute("data-has-page-media", "true");
-  await expect(page.getByRole("region", { name: "模板颜色与背景" }).getByRole("button", { name: "或粘贴图片链接" })).toHaveCount(0);
+  const appearance = page.locator('[data-template-property-group="外观"]');
+  await expect(appearance.locator("[data-media-field]")).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("image-properties-1600.png"), fullPage: true });
   await select(page, ids.root);
-  await expect(page.getByRole("region", { name: "模板颜色与背景" }).getByRole("button", { name: "或粘贴图片链接" })).toHaveCount(1);
+  await expect(appearance.getByRole("button", { name: "或粘贴图片链接" })).toHaveCount(1);
   await page.screenshot({ path: testInfo.outputPath("root-size-first-1600.png"), fullPage: true });
 });
 
@@ -697,20 +692,18 @@ for (const type of ["heading", "button"] as const) {
     const defaultText = page.getByRole("textbox", { name: type === "button" ? "默认按钮文字" : "默认文字", exact: true });
     const fontSize = page.getByRole("spinbutton", { name: "字号", exact: true });
     const color = page.getByRole("textbox", { name: "文字颜色", exact: true });
-    const appearance = page.locator('details[data-template-property-group="外观"]');
+    const appearance = page.locator('[data-template-property-group="外观"]');
     await expect(fontSize).toBeInViewport();
     const contentBox = (await defaultText.boundingBox())!;
     const sizeBox = (await fontSize.boundingBox())!;
     const colorBox = (await color.boundingBox())!;
     expect(contentBox.y + contentBox.height).toBeLessThan(sizeBox.y);
     expect(sizeBox.y + sizeBox.height).toBeLessThan(colorBox.y);
-    await expect(appearance).not.toHaveAttribute("open", "");
-    await expect(page.getByRole("spinbutton", { name: "不透明度", exact: true })).toBeHidden();
+    await expect(appearance.getByRole("spinbutton", { name: "不透明度", exact: true })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath(`primary-properties-${type}.png`), fullPage: true });
     const before = await readSession(page);
     await fontSize.fill("64"); await fontSize.press("Enter");
     await expect.poll(async () => (await readSession(page)).definition!.slots[node.slotId!].desktopRules.fontSize).toEqual({ value: 64, unit: "px" });
-    await appearance.locator(":scope > summary").click();
     const background = page.getByRole("textbox", { name: type === "button" ? "按钮背景颜色" : "背景颜色", exact: true });
     await background.fill("#112233"); await background.press("Tab");
     expect((await readSession(page)).definition!.nodes[node.nodeId].responsive.desktop.backgroundColor).toBe("#112233");

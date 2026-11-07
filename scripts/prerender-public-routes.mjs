@@ -69,13 +69,19 @@ const HOME_SNAPSHOT_SHELL_CSS = `
     .hc-prerendered-home{min-height:max(620px,100svh);background:#181A1B}
   </style>`;
 
+// SPA 壳在 React 启动前显示 H。预渲染只能替换空挂载点或单独的静态加载层。
+const PRERENDER_ROOT = new RegExp([
+  String.raw`<div\b(?=[^>]*\sid\s*=\s*["']root["'])[^>]*>\s*`,
+  String.raw`(?:<div\b(?=[^>]*\sclass\s*=\s*["']site-route-loading["'])(?=[^>]*\srole\s*=\s*["']status["'])[^>]*>`,
+  String.raw`(?:(?!<\/?div\b)[\s\S])*<\/div\s*>\s*)?<\/div\s*>`,
+].join(""), "i");
+
 export function renderPrerenderedHtml(baseHtml, snapshot, route) {
   if (typeof baseHtml !== "string" || !/<html\b/i.test(baseHtml) || !/<head\b/i.test(baseHtml) || !/<\/head\s*>/i.test(baseHtml)) {
     fail("Base HTML must contain html and head elements.");
   }
-  const rootPattern = /<div\b(?=[^>]*\bid\s*=\s*["']root["'])[^>]*>\s*<\/div\s*>/i;
-  if (!rootPattern.test(baseHtml)) {
-    fail('Base HTML must contain an empty <div id="root"></div> mount point.');
+  if (!PRERENDER_ROOT.test(baseHtml)) {
+    fail('Base HTML must contain a <div id="root"> mount point that is empty or contains only the static route loader.');
   }
 
   const canonicalUrl = new URL(route.canonicalPath, snapshot.origin).href;
@@ -119,7 +125,7 @@ export function renderPrerenderedHtml(baseHtml, snapshot, route) {
   });
   html = html.replace(/<\/head\s*>/i, `${managedHead}\n</head>`);
   html = html.replace(
-    rootPattern,
+    PRERENDER_ROOT,
     `<div id="root" data-prerendered="true" data-prerendered-path="${escapeHtml(route.path)}" data-published-content-hash="${route.contentHash}">${homeSnapshot ? renderHomeSnapshotShell() : route.renderedBodyHtml}${route.bootstrapPageDocument ? `<script id="hc-published-page-document" type="application/json">${safeJson(route.bootstrapPageDocument)}</script>` : ""}</div>`,
   );
   return html;

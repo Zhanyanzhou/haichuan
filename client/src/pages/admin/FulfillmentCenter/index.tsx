@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { App, Button, Drawer, Form, Input, Modal, Select, Space, Table, Tag, Tooltip } from 'antd';
 import { ExportOutlined, EyeOutlined, TruckOutlined } from '@ant-design/icons';
+import { AdminLoadingState } from '@/components/common/AdminDataStates';
 import { fulfillmentApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
 import { csvRow } from '@/utils/csv';
@@ -117,7 +118,7 @@ export default function FulfillmentCenter() {
   const { message, modal } = App.useApp();
   const [list, setList] = useState<FulfillmentListItem[]>([]);
   const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [listLoading, setListLoading] = useState<'initial' | 'refreshing' | 'idle'>('initial');
   const [loadError, setLoadError] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -168,7 +169,7 @@ export default function FulfillmentCenter() {
 
   const load = useCallback(async () => {
     const requestId = ++listRequestIdRef.current;
-    setLoading(true);
+    setListLoading((current) => current === 'initial' ? current : 'refreshing');
     setLoadError(false);
     try {
       const res = await fulfillmentApi.getList({
@@ -186,7 +187,7 @@ export default function FulfillmentCenter() {
       setLoadError(true);
       setList([]);
     } finally {
-      if (requestId === listRequestIdRef.current) setLoading(false);
+      if (requestId === listRequestIdRef.current) setListLoading('idle');
     }
   }, [page, pageSize, statusFilter, keyword]);
 
@@ -428,7 +429,9 @@ export default function FulfillmentCenter() {
         ))}
       </div>
 
-      {loadError ? (
+      {listLoading === 'initial' ? (
+        <AdminLoadingState subject="履约数据" allowInteraction />
+      ) : loadError ? (
         <div className="text-center py-16">
           <p className="text-brand-muted mb-4">履约数据暂时无法加载</p>
           <Button type="primary" onClick={() => void load()}>重新加载</Button>
@@ -436,7 +439,7 @@ export default function FulfillmentCenter() {
       ) : (
         <Table
           rowKey="id"
-          loading={loading}
+          loading={listLoading === 'refreshing'}
           dataSource={list}
           size="middle"
           pagination={{

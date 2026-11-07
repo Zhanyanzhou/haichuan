@@ -3,7 +3,6 @@ async function mount(page: Page) {
   await page.route("**/__template-native-responsive", (route) => route.fulfill({ contentType: "text/html", body: `<!doctype html><html><head><script type="module">import RefreshRuntime from '/@react-refresh'; RefreshRuntime.injectIntoGlobalHook(window); window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type; window.__vite_plugin_react_preamble_installed__ = true;</script></head><body><div id="root"></div><script type="module" src="/tests/fixtures/template-native-responsive.tsx"></script></body></html>` }));
   await page.route("**/api/**", (route) => route.abort());
   await page.goto("/__template-native-responsive");
-  await page.getByText("复制与恢复设计组", { exact: true }).click();
 }
 const snapshot = async (page: Page) => JSON.parse(await page.getByTestId("state").textContent() ?? "{}");
 

@@ -76,7 +76,7 @@ async function mockCatalogApi(page: Page) {
       contentType: "application/json",
       body: JSON.stringify(
         wrapped([
-          { key: "material", name: "材质", values: [{ id: 1, value: "足金999", sortOrder: 1 }] },
+          { key: "material", name: "材质", values: [{ id: 1, value: "足金999", sortOrder: 1 }, { id: 3, value: "18K金", sortOrder: 2 }] },
           { key: "craft", name: "工艺", values: [{ id: 2, value: "古法金", sortOrder: 1 }] },
         ]),
       ),
@@ -257,7 +257,7 @@ test("Catalog 在公开商品响应畸形时过滤无效记录而不污染目录
   );
 
   await page.goto("/catalog");
-  await expect(page.getByRole("heading", { name: "作品 01" })).toBeVisible();
+  await expect(page.getByText("款号 HC-TEST-001", { exact: true })).toBeVisible();
   await expect(page.getByText("非法商品 ID")).toHaveCount(0);
   await expect(page.getByText("非法分类 ID")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: /暂时无法加载/ })).toHaveCount(0);
@@ -271,7 +271,7 @@ test("Catalog 使用服务端分页并保持 URL、作品页与跨页选款盘",
   });
   await page.goto("/catalog");
   expect(new URL((await firstRequest).url()).searchParams.get("page")).toBe("1");
-  await expect(page.getByRole("heading", { name: "作品 01" })).toBeVisible();
+  await expect(page.getByText("款号 HC-TEST-001", { exact: true })).toBeVisible();
   const pagination = page.getByRole("navigation", { name: "作品分页" });
   await expect(pagination.getByRole("button", { name: "1", exact: true }))
     .toHaveAttribute("aria-current", "page");
@@ -283,8 +283,8 @@ test("Catalog 使用服务端分页并保持 URL、作品页与跨页选款盘",
   await openLink.press("Enter");
   await expect(page).toHaveURL(/\/products\/HC-TEST-001\?from=/);
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "作品 01" })).toBeVisible();
-  await expect(page.getByText("HC-TEST-001", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "作品", exact: true })).toBeVisible();
+  await expect(page.getByText("款号 HC-TEST-001", { exact: true })).toBeVisible();
   await page.getByRole("navigation", { name: "面包屑" }).getByRole("link", { name: "选款中心" }).click();
   await expect(page).toHaveURL(/\/catalog$/);
   await expect(openLink).toBeFocused();
@@ -302,7 +302,7 @@ test("Catalog 使用服务端分页并保持 URL、作品页与跨页选款盘",
   await page.getByRole("button", { name: "2", exact: true }).click();
   await secondRequest;
   await expect(page).toHaveURL(/page=2/);
-  await expect(page.getByRole("heading", { name: "作品 33" })).toBeVisible();
+  await expect(page.getByText("款号 HC-TEST-033", { exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "作品结果" })).toBeFocused();
   await expect(pagination.getByRole("button", { name: "2", exact: true }))
     .toHaveAttribute("aria-current", "page");
@@ -338,11 +338,11 @@ test("Catalog 加载状态可被辅助技术识别，越界页替换当前历史
   await expect(page.getByRole("region", { name: "作品结果" }))
     .toHaveAttribute("aria-busy", "true");
   releaseProducts?.();
-  await expect(page.getByRole("heading", { name: "作品 01" })).toBeVisible();
+  await expect(page.getByText("款号 HC-TEST-001", { exact: true })).toBeVisible();
 
   await page.goto("/catalog?page=99");
   await expect(page).toHaveURL(/\/catalog\?page=2$/);
-  await expect(page.getByRole("heading", { name: "作品 33" })).toBeVisible();
+  await expect(page.getByText("款号 HC-TEST-033", { exact: true })).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/\/catalog$/);
 });
@@ -363,7 +363,7 @@ test("Catalog 将现有 URL 筛选翻译为服务端参数而不复用商品 ids
   expect(url.searchParams.get("weightRanges")).toBe("0:5");
   expect(url.searchParams.get("sizes")).toBe("标准");
 
-  await page.getByRole("button", { name: /^材质/ }).click();
+  await page.getByRole("button", { name: /^筛选(?: · \d+)?$/ }).click();
   const materialRequest = page.waitForRequest((request) => {
     const requestUrl = new URL(request.url());
     return (
@@ -372,7 +372,7 @@ test("Catalog 将现有 URL 筛选翻译为服务端参数而不复用商品 ids
       requestUrl.searchParams.get("craftTechniques") === "古法金"
     );
   });
-  await page.getByRole("checkbox", { name: "足金999" }).click();
+  await page.getByRole("group", { name: "材质筛选", exact: true }).getByRole("button", { name: "不限", exact: true }).click();
   await materialRequest;
   await expect(page).not.toHaveURL(/material=/);
 });
@@ -391,14 +391,14 @@ test("Catalog 接受行动目标保存的分类 slug 并展开全部后代", asy
 test("Catalog 搜索的空态、错误态与 390px 溢出状态完整", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/catalog");
-  const input = page.getByRole("search").getByRole("combobox", { name: "关键词或货号" });
+  const input = page.getByRole("search").getByRole("combobox", { name: "关键词或款号" });
   await input.fill("作品 01");
-  await expect(page.getByRole("heading", { name: "作品 01", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "作品 02", exact: true })).toHaveCount(0);
+  await expect(page.getByText("款号 HC-TEST-001", { exact: true })).toBeVisible();
+  await expect(page.getByText("款号 HC-TEST-002", { exact: true })).toHaveCount(0);
   await input.press("ControlOrMeta+a");
   await input.press("Backspace");
   await expect(page).not.toHaveURL(/query=/);
-  await expect(page.getByRole("heading", { name: "作品 02", exact: true })).toBeVisible();
+  await expect(page.getByText("款号 HC-TEST-002", { exact: true })).toBeVisible();
   await input.fill("无结果");
   await expect(page.getByText("没有找到「无结果」")).toBeVisible();
   await expect(page.getByRole("button", { name: "查看全部作品" })).toBeVisible();
@@ -1015,7 +1015,7 @@ test("Catalog 在 390px 保持正方形作品格、可用对话框宽度并恢�
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/catalog");
 
-  const search = page.getByRole("combobox", { name: "关键词或货号" });
+  const search = page.getByRole("combobox", { name: "关键词或款号" });
   await search.fill("作品");
   await expect(search).toHaveAttribute("aria-expanded", "true");
   await expect(search).toHaveAttribute("aria-controls");
@@ -1026,6 +1026,7 @@ test("Catalog 在 390px 保持正方形作品格、可用对话框宽度并恢�
   await search.blur();
 
   const productCell = page.locator("[data-catalog-product-media]").first();
+  await expect(productCell).toBeVisible();
   const productCellBox = await productCell.boundingBox();
   expect(productCellBox).not.toBeNull();
   expect(productCellBox!.width / productCellBox!.height).toBeCloseTo(1, 1);
@@ -1044,9 +1045,9 @@ test("Catalog 在 390px 保持正方形作品格、可用对话框宽度并恢�
   await expect(page).toHaveURL(/\/catalog$/);
   await expect(openLink).toBeFocused();
 
-  const filterTrigger = page.getByRole("button", { name: "更多筛选" });
+  const filterTrigger = page.getByRole("region", { name: "筛选与排序", exact: true }).getByRole("button", { name: "筛选", exact: true });
   await filterTrigger.click();
-  const filterDialog = page.getByRole("dialog", { name: "更多筛选" });
+  const filterDialog = page.getByRole("dialog", { name: "筛选作品" });
   await expect(filterDialog).toBeVisible();
   await expect(filterDialog.getByRole("button", { name: "关闭筛选" })).toBeFocused();
   const filterDialogBox = await filterDialog.boundingBox();
@@ -1061,4 +1062,143 @@ test("Catalog 在 390px 保持正方形作品格、可用对话框宽度并恢�
     expect(box).not.toBeNull();
     expect(box!.height).toBeGreaterThanOrEqual(44);
   }
+});
+
+// 以下采用自有 API route Mock，验证确定性筛选交互及请求契约。
+test("折叠筛选支持多选暂存确认，取消保留原条件且清空保留品类关键词", async ({ page }) => {
+  await page.goto("/catalog?category=1&query=作品&page=2");
+  const filterTrigger = page.getByRole("button", { name: /^筛选(?: · \d+)?$/ });
+  const material = page.getByRole("group", { name: "材质筛选", exact: true });
+  await expect(filterTrigger).toHaveAttribute("aria-expanded", "false");
+  await expect(material).toBeHidden();
+  await expect(page.getByRole("form", { name: "价格区间", exact: true })).toBeHidden();
+  await filterTrigger.click();
+  await expect(filterTrigger).toHaveAttribute("aria-expanded", "true");
+  await material.getByRole("button", { name: "多选", exact: true }).click();
+  await material.getByRole("checkbox", { name: "足金999", exact: true }).check();
+  await expect(page).toHaveURL(/page=2/);
+  await expect(page).not.toHaveURL(/material=/);
+  await material.getByRole("button", { name: "取消", exact: true }).click();
+  await expect(material.getByRole("button", { name: "不限", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await material.getByRole("button", { name: "多选", exact: true }).click();
+  await material.getByRole("checkbox", { name: "足金999", exact: true }).check();
+  await material.getByRole("checkbox", { name: "18K金", exact: true }).check();
+  const request = page.waitForRequest((req) => {
+    const url = new URL(req.url());
+    return url.pathname.endsWith("/products/public") && url.searchParams.get("materialTypes") === "GOLD_999,AU750";
+  });
+  await material.getByRole("button", { name: "确定", exact: true }).click();
+  expect(new URL((await request).url()).searchParams.get("page")).toBe("1");
+  await expect(page).not.toHaveURL(/page=2/);
+  await expect(page.getByRole("button", { name: "移除筛选 材质 · 足金999", exact: true })).toBeVisible();
+  await page.reload();
+  await filterTrigger.click();
+  await expect(material.getByRole("button", { name: "18K金", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "清除筛选", exact: true }).click();
+  const query = new URL(page.url()).searchParams;
+  expect(query.get("category")).toBe("1");
+  expect(query.get("query")).toBe("作品");
+  expect(query.has("material")).toBe(false);
+});
+
+test("排序与折叠价格区间发送全量查询参数并复位分页", async ({ page }) => {
+  const requests: URL[] = [];
+  await page.route("**/api/products/public?**", (route) => {
+    const url = new URL(route.request().url());
+    requests.push(url);
+    let list = products.map((product) => ({ ...product, salesMode: "DIRECT_PURCHASE", price: product.id * 100 }));
+    const min = url.searchParams.get("minPrice");
+    const max = url.searchParams.get("maxPrice");
+    if (min !== null) list = list.filter((product) => product.price >= Number(min));
+    if (max !== null) list = list.filter((product) => product.price <= Number(max));
+    const sort = url.searchParams.get("sortBy");
+    if (sort === "price_asc") list.sort((a, b) => a.price - b.price);
+    if (sort === "price_desc") list.sort((a, b) => b.price - a.price);
+    const pageNumber = Number(url.searchParams.get("page") || 1);
+    const pageSize = Number(url.searchParams.get("pageSize") || 32);
+    return route.fulfill({ json: wrapped({ list: list.slice((pageNumber - 1) * pageSize, pageNumber * pageSize), total: list.length, facets: { sizes: [] } }) });
+  });
+  await page.goto("/catalog?page=2");
+  const sort = page.getByRole("combobox", { name: "作品排序", exact: true });
+  await sort.selectOption("price_asc");
+  await expect(page).toHaveURL(/sort=price_asc/);
+  await expect(page).not.toHaveURL(/page=2/);
+  await expect.poll(() => requests.some((url) => url.searchParams.get("sortBy") === "price_asc")).toBe(true);
+  await expect(page.getByRole("button", { name: "移除筛选 仅看已标价作品", exact: true })).toBeVisible();
+  await sort.selectOption("price_desc");
+  await expect(page).toHaveURL(/sort=price_desc/);
+  await expect.poll(() => requests.some((url) => url.searchParams.get("sortBy") === "price_desc")).toBe(true);
+  await page.getByRole("button", { name: /^筛选(?: · \d+)?$/ }).click();
+  const price = page.getByRole("form", { name: "价格区间", exact: true });
+  await price.getByRole("textbox", { name: "最低价", exact: true }).fill("500");
+  await price.getByRole("textbox", { name: "最高价", exact: true }).fill("100");
+  await price.getByRole("button", { name: "确定", exact: true }).click();
+  await expect(price.getByRole("alert")).toBeVisible();
+  await expect(page).not.toHaveURL(/minPrice=/);
+  await price.getByRole("textbox", { name: "最高价", exact: true }).fill("900");
+  await price.getByRole("button", { name: "确定", exact: true }).click();
+  await expect.poll(() => requests.some((url) => url.searchParams.get("minPrice") === "500" && url.searchParams.get("maxPrice") === "900" && url.searchParams.get("page") === "1")).toBe(true);
+  await expect(page.locator("[data-catalog-product-focus]")).toHaveCount(5);
+  const from = new URL(page.url()).search;
+  await page.locator("[data-catalog-product-focus]").first().click();
+  await page.getByRole("navigation", { name: "面包屑" }).getByRole("link", { name: "选款中心", exact: true }).click();
+  await expect.poll(() => new URL(page.url()).search).toBe(from);
+  await expect(sort.getByRole("option", { name: "销量（暂未开放）", exact: true })).toHaveJSProperty("disabled", true);
+  await sort.selectOption("newest");
+  await expect.poll(() => requests.some((url) => url.searchParams.get("sortBy") === "published_desc")).toBe(true);
+});
+
+test("手机筛选预览数量，关闭弃选，应用后保留URL与条件", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/catalog?category=1");
+  const trigger = page.getByRole("button", { name: "筛选", exact: true });
+  await trigger.click();
+  const drawer = page.getByRole("dialog", { name: "筛选作品", exact: true });
+  await drawer.getByRole("checkbox", { name: "足金999", exact: true }).check();
+  await expect(drawer.getByRole("button", { name: "查看 20 款作品", exact: true })).toBeEnabled();
+  await expect(page).not.toHaveURL(/material=/);
+  await drawer.getByRole("button", { name: "关闭筛选", exact: true }).click();
+  await expect(drawer).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await expect(drawer.getByRole("checkbox", { name: "足金999", exact: true })).not.toBeChecked();
+  await drawer.getByRole("checkbox", { name: "足金999", exact: true }).check();
+  await drawer.getByRole("button", { name: "查看 20 款作品", exact: true }).click();
+  await expect(drawer).toHaveCount(0);
+  await expect(page).toHaveURL(/material=/);
+  await expect(page.getByRole("button", { name: "移除筛选 材质 · 足金999", exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+
+test("手机演示目录清空价格暂选预览与应用数量一致", async ({ page }) => {
+  await page.route("**/api/products/public?**", (route) => route.fulfill({
+    json: wrapped({ list: [], total: 0, facets: { sizes: [] } }),
+  }));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/catalog?minPrice=100");
+  await page.getByRole("button", { name: /^筛选/ }).click();
+  const drawer = page.getByRole("dialog", { name: "筛选作品", exact: true });
+  await drawer.getByRole("button", { name: "重置", exact: true }).click();
+  await expect(drawer.getByRole("button", { name: "查看 6 款作品", exact: true })).toBeEnabled();
+  await expect(page).toHaveURL(/minPrice=100/);
+  await drawer.getByRole("button", { name: "查看 6 款作品", exact: true }).click();
+  await expect(page).not.toHaveURL(/minPrice=/);
+  await expect(page.locator("[data-catalog-product-focus]")).toHaveCount(6);
+});
+
+test("完整款号后新选属性保留服务端条件而不被精确直达吞掉", async ({ page }) => {
+  await page.goto("/catalog?category=1&query=HC-TEST-001");
+  await expect(page.getByText("款号 HC-TEST-001", { exact: true })).toBeVisible();
+  const request = page.waitForRequest((req) => {
+    const url = new URL(req.url());
+    return url.pathname.endsWith("/products/public") && url.searchParams.get("materialTypes") === "AU750";
+  });
+  await page.getByRole("button", { name: /^筛选(?: · \d+)?$/ }).click();
+  await page.getByRole("group", { name: "材质筛选", exact: true }).getByRole("button", { name: "18K金", exact: true }).click();
+  const query = new URL((await request).url()).searchParams;
+  expect(query.get("keyword")).toBe("HC-TEST-001");
+  expect(query.has("exactCode")).toBe(false);
+  expect(query.get("categoryIds")).toBe("1,2");
+  await expect(page.getByText("款号 HC-TEST-001", { exact: true })).toHaveCount(0);
 });

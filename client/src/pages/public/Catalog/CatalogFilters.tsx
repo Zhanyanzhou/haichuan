@@ -2,6 +2,12 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { RealCategory } from "@/hooks/useProductData";
 import { catalogTokens as T } from "./catalogTokens";
 import { getPrimaryCats, getRealSubs } from "./catalogCategories";
+import { WEIGHT_RANGES } from "@/data/catalogData";
+import {
+  CatalogPriceInputs,
+  getCatalogPriceError,
+} from "./CatalogFilterDrawer";
+import "./catalogFilters.css";
 
 export { default as FilterDrawer } from "./CatalogFilterDrawer";
 /* ══════════════════════════════════════
@@ -20,8 +26,8 @@ export function PrimaryNav({
   if (!primaryCats.length) return null;
   return (
     <nav className="catalog-category-nav" aria-label="作品品类">
-        <div className="catalog-category-nav__inner">
-          <div className="catalog-category-nav__items">
+      <div className="catalog-category-nav__inner">
+        <div className="catalog-category-nav__items">
           <button
             type="button"
             className="catalog-category-nav__item"
@@ -153,256 +159,381 @@ function L2Btn({
   );
 }
 
-/* ══════════════════════════════════════
-   组件：工具栏（极简风格）
-   ══════════════════════════════════════ */
-export function Toolbar({
-  total,
-  materials,
-  materialOptions,
-  sort,
-  selCount,
-  onToggleMaterial,
-  onSort,
-  onOpenFilter,
-}: {
-  total: number;
-  materials: string[];
-  materialOptions: string[];
-  sort: string;
-  selCount: number;
-  onToggleMaterial: (m: string) => void;
-  onSort: (s: string) => void;
-  onOpenFilter: (trigger: HTMLButtonElement) => void;
-}) {
-  const [openDD, setOpenDD] = useState<string | null>(null);
-  const materialTriggerRef = useRef<HTMLButtonElement>(null);
-  const materialPopoverId = useId();
-
-  useEffect(() => {
-    if (openDD !== "material") return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      setOpenDD(null);
-      materialTriggerRef.current?.focus();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [openDD]);
-
-  return (
-    <>
-      <div style={{ borderBottom: `1px solid ${T.line}` }}>
-        <div
-          className="catalog-toolbar__inner"
-          style={{
-            maxWidth: 1600,
-            marginInline: "auto",
-            height: 52,
-            display: "flex",
-            alignItems: "center",
-            fontSize: 12,
-            color: T.sec,
-          }}
-        >
-          <button
-            onClick={(event) => onOpenFilter(event.currentTarget)}
-            style={{
-              background: "none",
-              border: 0,
-              cursor: "pointer",
-              fontSize: 12,
-              color: T.txt,
-              padding: "0 8px 0 0",
-              minHeight: 44,
-              display: "inline-flex",
-              alignItems: "center",
-              whiteSpace: "nowrap",
-              flexShrink: 0,
-            }}
-          >
-            更多筛选
-          </button>
-          <div
-            className="catalog-toolbar__material"
-            style={{ position: "relative" }}
-            onBlur={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpenDD(null);
-            }}
-          >
-            <button
-              type="button"
-              ref={materialTriggerRef}
-              aria-expanded={openDD === "material"}
-              aria-controls={openDD === "material" ? materialPopoverId : undefined}
-              onClick={() =>
-                setOpenDD(openDD === "material" ? null : "material")
-              }
-              style={{
-                background: "none",
-                border: 0,
-                cursor: "pointer",
-                fontSize: 12,
-                color: T.sec,
-                padding: "0 8px",
-                minHeight: 44,
-                display: "inline-flex",
-                alignItems: "center",
-                whiteSpace: "nowrap",
-                flexShrink: 0,
-              }}
-            >
-              材质{materials.length > 0 ? ` ${materials.length}` : ""}
-            </button>
-            {openDD === "material" && (
-              <>
-                <div
-                  style={{ position: "fixed", inset: 0, zIndex: 10 }}
-                  onClick={() => setOpenDD(null)}
-                />
-                <div
-                  id={materialPopoverId}
-                  role="group"
-                  aria-label="材质筛选"
-                  style={{
-                    position: "absolute",
-                    top: "100%",
-                    left: 0,
-                    zIndex: 20,
-                    minWidth: 180,
-                    background: T.bg,
-                    border: `1px solid ${T.line}`,
-                    padding: "14px 16px",
-                  }}
-                >
-                  {materialOptions.map((o) => (
-                    <label
-                      key={o}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        cursor: "pointer",
-                        fontSize: 12,
-                        color: T.txt,
-                        paddingBlock: 3,
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={materials.includes(o)}
-                        onChange={() => onToggleMaterial(o)}
-                        style={{ width: 13, height: 13, accentColor: T.txt }}
-                      />
-                      {o}
-                    </label>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-          {total > 0 ? (
-            <span style={{ color: T.sec, fontSize: 12, whiteSpace: "nowrap", flexShrink: 0 }}>{total} 件</span>
-          ) : null}
-          <div className="catalog-toolbar__spacer" style={{ flex: 1 }} />
-          <span style={{ color: T.txt, fontSize: 12, whiteSpace: "nowrap" }}>排序</span>
-          <select
-            aria-label="作品排序方式"
-            value={sort}
-            onChange={(e) => onSort(e.target.value)}
-            style={{
-              background: "none",
-              border: 0,
-              fontSize: 12,
-              color: T.txt,
-              cursor: "pointer",
-              outline: "none",
-              minHeight: 44,
-              whiteSpace: "nowrap",
-              flexShrink: 0,
-            }}
-          >
-            <option value="recommended">推荐</option>
-            <option value="newest">最新</option>
-            <option value="sku">货号</option>
-          </select>
-          {selCount > 0 && (
-            <span style={{ color: T.txt, whiteSpace: "nowrap", flexShrink: 0 }}>已选 {selCount}</span>
-          )}
-        </div>
-      </div>
-    </>
-  );
-}
-
-/* ══════════════════════════════════════
-   组件：当前筛选标签
-   ══════════════════════════════════════ */
-export function ActiveFilters({
-  materials,
-  crafts,
-  weights,
-  sizes,
-  onClearMat,
-  onClearCraft,
-  onClearWeight,
-  onClearSize,
-  onClearAll,
-}: {
+export type CatalogFilterValues = {
   materials: string[];
   crafts: string[];
   weights: string[];
   sizes: string[];
-  onClearMat: (m: string) => void;
-  onClearCraft: (c: string) => void;
-  onClearWeight: (w: string) => void;
-  onClearSize: (s: string) => void;
-  onClearAll: () => void;
+  minPrice: string;
+  maxPrice: string;
+};
+
+export function Toolbar({
+  values,
+  materialOptions,
+  craftOptions,
+  sizeOptions,
+  sort,
+  total,
+  selCount,
+  loading,
+  onChange,
+  onSort,
+  onOpenFilter,
+}: {
+  values: CatalogFilterValues;
+  materialOptions: string[];
+  craftOptions: string[];
+  sizeOptions: string[];
+  sort: string;
+  total: number;
+  selCount: number;
+  loading: boolean;
+  onChange: (changes: Partial<CatalogFilterValues>) => void;
+  onSort: (sort: string) => void;
+  onOpenFilter: (trigger: HTMLButtonElement) => void;
 }) {
-  const all = [...materials, ...crafts, ...weights, ...sizes];
-  if (!all.length) return null;
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filtersId = useId();
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [minPrice, setMinPrice] = useState(values.minPrice);
+  const [maxPrice, setMaxPrice] = useState(values.maxPrice);
+  const [priceError, setPriceError] = useState("");
+  const moreId = useId();
+  const priceErrorId = useId();
+  useEffect(() => {
+    setMinPrice(values.minPrice);
+    setMaxPrice(values.maxPrice);
+    setPriceError("");
+  }, [values.minPrice, values.maxPrice]);
+  const filterCount =
+    values.materials.length +
+    values.crafts.length +
+    values.weights.length +
+    values.sizes.length +
+    Number(Boolean(values.minPrice || values.maxPrice));
+  const priceSelected = sort === "price_asc" || sort === "price_desc";
+
   return (
-    <div style={{ borderBottom: `1px solid ${T.line}` }}>
-      <div
-        className="catalog-active-filters__inner"
-        style={{
-          maxWidth: 1560,
-          marginInline: "auto",
-          paddingInline: "clamp(48px,5vw,80px)",
-          paddingBlock: 10,
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "center",
-          gap: 6,
+    <section className="catalog-filter-tools" aria-label="筛选与排序">
+      <div className="catalog-filter-tools__inner">
+        <div className="catalog-sort-bar">
+          <div
+            className="catalog-sort-bar__summary"
+            role="status"
+            aria-live="polite"
+            aria-busy={loading}
+          >
+            {loading ? "正在查找作品…" : `共 ${total} 款作品`}
+            {selCount > 0 && <span>已选 {selCount}</span>}
+          </div>
+          <div className="catalog-sort-bar__controls">
+            <button
+              type="button"
+              className="catalog-sort-bar__filter catalog-sort-bar__desktop-filter"
+              aria-expanded={filtersOpen}
+              aria-controls={filtersId}
+              onClick={() => setFiltersOpen(!filtersOpen)}
+            >
+              <FilterIcon />
+              筛选{filterCount > 0 ? ` · ${filterCount}` : ""}
+              <span aria-hidden="true">{filtersOpen ? "−" : "+"}</span>
+            </button>
+            <button
+              type="button"
+              className="catalog-sort-bar__filter catalog-sort-bar__mobile-filter"
+              onClick={(event) => onOpenFilter(event.currentTarget)}
+            >
+              <FilterIcon />
+              筛选{filterCount > 0 ? ` · ${filterCount}` : ""}
+            </button>
+            <label className="catalog-sort-bar__sort">
+              <span className="catalog-visually-hidden">作品排序</span>
+              <select value={sort} onChange={(event) => onSort(event.target.value)}>
+                <option value="recommended">综合排序</option>
+                <option value="newest">新品优先</option>
+                <option value="sku">款号升序</option>
+                <option value="price_asc">价格从低到高</option>
+                <option value="price_desc">价格从高到低</option>
+                <option value="sales" disabled>销量（暂未开放）</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        {priceSelected && (
+          <p className="catalog-price-note catalog-price-note--scope">
+            按公开售价或定制参考起价排序，定制最终金额以确认方案后的报价为准
+          </p>
+        )}
+        <div id={filtersId} className="catalog-filter-panel" hidden={!filtersOpen}>
+          <div className="catalog-attribute-rows">
+            <AttributeRow
+              title="材质"
+              options={materialOptions}
+              selected={values.materials}
+              onChange={(materials) => onChange({ materials })}
+            />
+            <AttributeRow
+              title="工艺"
+              options={craftOptions}
+              selected={values.crafts}
+              onChange={(crafts) => onChange({ crafts })}
+            />
+            <AttributeRow
+              title="重量"
+              options={WEIGHT_RANGES}
+              selected={values.weights}
+              onChange={(weights) => onChange({ weights })}
+            />
+            <div id={moreId} hidden={!moreOpen}>
+              <AttributeRow
+                title="规格"
+                options={sizeOptions}
+                selected={values.sizes}
+                onChange={(sizes) => onChange({ sizes })}
+              />
+            </div>
+            <div className="catalog-filter-tools__extras">
+              {sizeOptions.length > 0 && (
+                <button
+                  type="button"
+                  className="catalog-filter-tools__more"
+                  aria-expanded={moreOpen}
+                  aria-controls={moreId}
+                  onClick={() => setMoreOpen(!moreOpen)}
+                >
+                  {moreOpen ? "收起条件" : "更多条件"}{" "}
+                  <span aria-hidden="true">{moreOpen ? "−" : "+"}</span>
+                </button>
+              )}
+              <button
+                type="button"
+                className="catalog-filter-tools__more"
+                onClick={(event) => onOpenFilter(event.currentTarget)}
+              >
+                全部筛选
+              </button>
+            </div>
+          </div>
+          <form
+            className="catalog-sort-bar__price"
+            aria-label="价格区间"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const error = getCatalogPriceError(minPrice, maxPrice);
+              setPriceError(error);
+              if (!error)
+                onChange({
+                  minPrice: minPrice.trim(),
+                  maxPrice: maxPrice.trim(),
+                });
+            }}
+          >
+            <span className="catalog-attribute-row__title">价格</span>
+            <CatalogPriceInputs
+              minPrice={minPrice}
+              maxPrice={maxPrice}
+              errorId={priceError ? priceErrorId : undefined}
+              onMinPrice={setMinPrice}
+              onMaxPrice={setMaxPrice}
+            />
+            <button type="submit">确定</button>
+            {priceError && (
+              <span
+                id={priceErrorId}
+                className="catalog-filter-error"
+                role="alert"
+              >
+                {priceError}
+              </span>
+            )}
+          </form>
+          <p className="catalog-price-note">
+            按公开售价或定制参考起价筛选，定制最终金额以确认方案后的报价为准
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function FilterIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
+      <path d="M3 7h7m4 0h7M3 17h11m4 0h3M10 4v6m4 4v6" />
+    </svg>
+  );
+}
+
+function AttributeRow({
+  title,
+  options,
+  selected,
+  onChange,
+}: {
+  title: string;
+  options: string[];
+  selected: string[];
+  onChange: (values: string[]) => void;
+}) {
+  const [multiple, setMultiple] = useState(false);
+  const [draft, setDraft] = useState<string[]>([]);
+  const multiTriggerRef = useRef<HTMLButtonElement>(null);
+  const multiOptionsId = useId();
+  const closeMultiple = () => {
+    setMultiple(false);
+    multiTriggerRef.current?.ownerDocument.defaultView?.requestAnimationFrame(() => {
+      multiTriggerRef.current?.focus({ preventScroll: true });
+    });
+  };
+  const selectionKey = JSON.stringify([selected, options]);
+  useEffect(() => {
+    setMultiple(false);
+  }, [selectionKey]);
+  const available = Array.from(new Set([...options, ...selected]));
+  if (!available.length) return null;
+  const current = multiple ? draft : selected;
+  return (
+    <div
+      className="catalog-attribute-row"
+      role="group"
+      aria-label={`${title}筛选`}
+      onKeyDown={(event) => {
+        if (!multiple || event.key !== "Escape") return;
+        event.preventDefault();
+        event.stopPropagation();
+        closeMultiple();
+      }}
+    >
+      <span className="catalog-attribute-row__title">{title}</span>
+      <div id={multiOptionsId} className="catalog-attribute-row__body">
+        <div className="catalog-attribute-row__values">
+          <button
+            type="button"
+            aria-pressed={!current.length}
+            onClick={() => (multiple ? setDraft([]) : onChange([]))}
+          >
+            不限
+          </button>
+          {available.map((option) =>
+            multiple ? (
+              <label key={option} className="catalog-filter-check">
+                <input
+                  type="checkbox"
+                  checked={draft.includes(option)}
+                  onChange={() =>
+                    setDraft(
+                      draft.includes(option)
+                        ? draft.filter((value) => value !== option)
+                        : [...draft, option],
+                    )
+                  }
+                />
+                {option}
+              </label>
+            ) : (
+              <button
+                type="button"
+                key={option}
+                aria-pressed={selected.includes(option)}
+                onClick={() => onChange([option])}
+              >
+                {option}
+              </button>
+            ),
+          )}
+        </div>
+        {multiple && (
+          <div className="catalog-attribute-row__actions">
+            <button
+              type="button"
+              className="catalog-filter-apply"
+              onClick={() => {
+                onChange(draft);
+                closeMultiple();
+              }}
+            >
+              确定
+            </button>
+            <button type="button" onClick={closeMultiple}>
+              取消
+            </button>
+          </div>
+        )}
+      </div>
+      <button
+        ref={multiTriggerRef}
+        type="button"
+        className="catalog-attribute-row__multi"
+        aria-expanded={multiple}
+        aria-controls={multiOptionsId}
+        onClick={() => {
+          if (multiple) {
+            closeMultiple();
+            return;
+          }
+          setDraft(selected);
+          setMultiple(true);
         }}
       >
-        {materials.map((m) => (
-          <Tag key={m} label={m} onRemove={() => onClearMat(m)} />
-        ))}
-        {crafts.map((c) => (
-          <Tag key={c} label={c} onRemove={() => onClearCraft(c)} />
-        ))}
-        {weights.map((w) => (
-          <Tag key={w} label={w} onRemove={() => onClearWeight(w)} />
-        ))}
-        {sizes.map((s) => (
-          <Tag key={s} label={s} onRemove={() => onClearSize(s)} />
-        ))}
+        多选
+      </button>
+    </div>
+  );
+}
+
+export function ActiveFilters({
+  values,
+  priceOnly,
+  onChange,
+  onClearAll,
+  onClearPriceScope,
+}: {
+  values: CatalogFilterValues;
+  priceOnly: boolean;
+  onChange: (changes: Partial<CatalogFilterValues>) => void;
+  onClearAll: () => void;
+  onClearPriceScope: () => void;
+}) {
+  const groups = [
+    { key: "materials" as const, label: "材质" },
+    { key: "crafts" as const, label: "工艺" },
+    { key: "weights" as const, label: "重量" },
+    { key: "sizes" as const, label: "规格" },
+  ];
+  const hasPrice = Boolean(values.minPrice || values.maxPrice);
+  if (!priceOnly && !hasPrice && !groups.some(({ key }) => values[key].length))
+    return null;
+  return (
+    <div className="catalog-filter-summary" aria-label="已选筛选条件">
+      <div className="catalog-filter-summary__inner">
+        <span className="catalog-filter-summary__title">已选条件</span>
+        {groups.flatMap(({ key, label }) =>
+          values[key].map((value) => (
+            <FilterTag
+              key={`${key}-${value}`}
+              label={`${label} · ${value}`}
+              onRemove={() =>
+                onChange({
+                  [key]: values[key].filter((item) => item !== value),
+                })
+              }
+            />
+          )),
+        )}
+        {hasPrice && (
+          <FilterTag
+            label={`价格 · ¥${values.minPrice || "0"}—${values.maxPrice ? `¥${values.maxPrice}` : "不限"}`}
+            onRemove={() => onChange({ minPrice: "", maxPrice: "" })}
+          />
+        )}
+        {priceOnly && (
+          <FilterTag label="仅看已标价作品" onRemove={onClearPriceScope} />
+        )}
         <button
+          type="button"
+          className="catalog-filter-summary__clear"
           onClick={onClearAll}
-          style={{
-            background: "none",
-            border: 0,
-            cursor: "pointer",
-            fontSize: 11,
-            color: T.sec,
-            textDecoration: "underline",
-            padding: "0 2px",
-            minHeight: 44,
-            display: "inline-flex",
-            alignItems: "center",
-          }}
         >
           清除筛选
         </button>
@@ -411,39 +542,22 @@ export function ActiveFilters({
   );
 }
 
-function Tag({ label, onRemove }: { label: string; onRemove: () => void }) {
+function FilterTag({
+  label,
+  onRemove,
+}: {
+  label: string;
+  onRemove: () => void;
+}) {
   return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 5,
-        paddingInline: 9,
-        minHeight: 44,
-        border: `1px solid ${T.line}`,
-        fontSize: 11,
-        color: T.txt,
-      }}
+    <button
+      type="button"
+      className="catalog-filter-tag"
+      aria-label={`移除筛选 ${label}`}
+      onClick={onRemove}
     >
-      {label}
-      <button
-        type="button"
-        aria-label={`移除筛选 ${label}`}
-        onClick={onRemove}
-        style={{
-          background: "none",
-          border: 0,
-          cursor: "pointer",
-          color: T.sec,
-          fontSize: 14,
-          lineHeight: 1,
-          minWidth: 44,
-          minHeight: 44,
-          padding: 0,
-        }}
-      >
-        ×
-      </button>
-    </span>
+      <span>{label}</span>
+      <span aria-hidden="true">×</span>
+    </button>
   );
 }

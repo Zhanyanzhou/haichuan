@@ -4,7 +4,9 @@ param(
   [string]$QaRunId = "20260901-05",
 
   [ValidateSet("Migrate", "SchemaPush")]
-  [string]$DatabaseBootstrap = "Migrate"
+  [string]$DatabaseBootstrap = "Migrate",
+
+  [switch]$PresetsOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -94,7 +96,7 @@ $phase1Cases = @(
   # 放在最后一条，前面用例通过后它失败时失败原因不会被误读成发布链路问题。
   [ordered]@{
     key = "acceptance-canvas-set"
-    grep = "真实网站从零创建并往返加载六种画布模板"
+    grep = "真实网站编辑并往返加载六种存量画布模板"
   },
   # 七块首发母版（M1～M7）的真实闭环：保存草稿、发布不可变版本、插入页面、
   # 页面发布、公开 Renderer 读回。此前这条链路只有内存与 Mock 覆盖。
@@ -105,6 +107,16 @@ $phase1Cases = @(
     grep = "七块首发母版经真实保存、发布、页面插入后由公开 Renderer 读回"
   }
 )
+$presetCase = [ordered]@{
+  key = "direct-presets"
+  grep = "从页面装修直接添加三块首页预设，双端预览并保存重开"
+}
+if ($PresetsOnly) {
+  if ($DatabaseBootstrap -ne "Migrate") { throw "预设验收必须在隔离库运行正式 migration" }
+  $phase1Cases = @($presetCase)
+} elseif ($DatabaseBootstrap -eq "Migrate") {
+  $phase1Cases += $presetCase
+}
 $handoffPath = Join-Path $playwrightOutputDirectory "phase-handoff.json"
 $clientBuildContext = Join-Path $playwrightOutputDirectory ".client-build-context"
 $seoInputPath = Join-Path $playwrightOutputDirectory "public-seo-snapshot-input.json"
@@ -298,6 +310,10 @@ foreach ($name in @($serverBuildImage, $serverImage, $bootstrapClientImage, $cli
 if (Test-Path -LiteralPath $playwrightOutputDirectory) {
   throw "拒绝覆盖已有 Playwright 验收证据：$playwrightOutputDirectory"
 }
+$workspaceRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
+if (-not $clientBuildContext.StartsWith("$workspaceRoot\", [StringComparison]::OrdinalIgnoreCase)) {
+  throw "隔离客户端构建目录超出当前工作区"
+}
 
 $mysqlRootPassword = "r" + (New-RandomHex 16)
 $mysqlPassword = "m" + (New-RandomHex 16)
@@ -383,7 +399,7 @@ try {
     $env:VITE_ANALYTICS_ENABLED = "false"
     Push-Location client
     try {
-      & npm run build
+      & npm run build -- --outDir (Join-Path $clientBuildContext "dist")
       Assert-ExternalSuccess "构建当前 React 客户端"
     } finally {
       Pop-Location
@@ -395,7 +411,6 @@ try {
   }
 
   Copy-Item -LiteralPath "client\Dockerfile", "client\nginx.conf", "client\nginx-main.conf" -Destination $clientBuildContext
-  Copy-Item -LiteralPath "client\dist" -Destination $clientBuildContext -Recurse
   Copy-Item -LiteralPath "scripts\export-public-seo-snapshot.mjs", "scripts\generate-public-seo-artifacts.mjs", "scripts\prerender-public-routes.mjs" `
     -Destination (Join-Path $clientBuildContext ".release-seo\tools")
   & node scripts/prerender-public-routes.mjs `
@@ -485,6 +500,19 @@ try {
   Wait-MySqlReady $mysqlContainer
 
   if ($DatabaseBootstrap -eq "Migrate") {
+    # 与真实 MySQL 门禁统一客户端连接排序规则，历史 migration 的触发器会读取它。
+    & docker exec --env "MYSQL_PWD=$mysqlRootPassword" $mysqlContainer `
+      mysql --protocol=TCP --host=127.0.0.1 --user=root `
+      --execute "SET GLOBAL init_connect = 'SET collation_connection = utf8mb4_unicode_ci'; ALTER DATABASE $databaseName CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" | Out-Null
+    Assert-ExternalSuccess "设置隔离库迁移连接排序规则"
+    $connectionCollation = (& docker exec --env "MYSQL_PWD=$mysqlPassword" $mysqlContainer `
+      mysql --batch --skip-column-names --protocol=TCP --host=127.0.0.1 --user=jewelry_user --database=$databaseName `
+      --execute "SELECT @@SESSION.collation_connection;").Trim()
+    Assert-ExternalSuccess "核对隔离库迁移连接排序规则"
+    if ($connectionCollation -ne "utf8mb4_unicode_ci") {
+      throw "隔离库迁移连接排序规则不匹配：$connectionCollation"
+    }
+
     & docker run --rm `
       --name $migrationContainer `
       --network $networkName `
@@ -623,6 +651,7 @@ try {
     Pop-Location
   }
 
+  if (-not $PresetsOnly) {
   if (-not (Test-Path -LiteralPath $handoffPath)) {
     throw "phase1 未生成重启交接清单：$handoffPath"
   }
@@ -787,6 +816,7 @@ try {
     Pop-Location
   }
 
+  }
   Write-Output "REAL_CLOSURE_RESULT=PASS"
   Write-Output "playwright_output=$playwrightOutputDirectory"
 } catch {
@@ -856,10 +886,11 @@ try {
 if (Test-Path -LiteralPath $playwrightOutputDirectory) {
   $manifest = [ordered]@{
     qaRunId = $QaRunId
+    scope = if ($PresetsOnly) { "PresetsOnly" } else { "Full" }
     result = if ($failed) { "FAIL" } else { "PASS" }
     phases = [ordered]@{
       phase1 = [ordered]@{
-        grep = "\[phase1\]"
+        grep = if ($PresetsOnly) { $presetCase.grep } else { "\[phase1\]" }
         testCount = $phase1Cases.Count
         exitCode = $phase1ExitCode
         cases = $phase1Results

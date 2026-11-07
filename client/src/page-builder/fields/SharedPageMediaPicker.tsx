@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Button } from "antd";
+import { Button, Input } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { uploadApi, type PageMediaAsset } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
@@ -99,9 +99,17 @@ export default function SharedPageMediaPicker({
   onSelect: (url: string) => void;
 }) {
   const { state, items, retry } = useSharedPageMedia(open);
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
   if (!open) return null;
 
   const selectable = state === "ready";
+  const keyword = query.trim().toLowerCase();
+  const visibleItems = keyword
+    ? items.filter((item) => item.name.toLowerCase().includes(keyword))
+    : items;
   const currentAvailable = Boolean(
     currentValue && items.some((item) => item.url === currentValue),
   );
@@ -114,8 +122,17 @@ export default function SharedPageMediaPicker({
     >
       <div className="homepage-editor__current-page-media-heading">
         <strong>共享页面素材</strong>
-        <span>{items.length} 张</span>
+        <span role="status">{keyword ? `${visibleItems.length} / ${items.length} 张` : `${items.length} 张`}</span>
       </div>
+      {selectable && items.length > 0 ? (
+        <Input
+          allowClear
+          aria-label="搜索素材文件名"
+          placeholder="搜索素材文件名"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      ) : null}
       {state === "loading" ? (
         <p className="homepage-editor__current-page-media-empty" role="status">
           正在同步共享素材库；缓存图片暂不可选择。
@@ -135,16 +152,17 @@ export default function SharedPageMediaPicker({
           <p>当前值已保留，但不在可用共享素材中，可能已归档或失效，不能重新选择。</p>
         </div>
       ) : null}
-      {state !== "error" && items.length > 0 ? (
+      {state !== "error" && visibleItems.length > 0 ? (
         <div className="homepage-editor__current-page-media-items">
-          {items.map((item) => (
+          {visibleItems.map((item) => (
             <button
               key={item.url}
               type="button"
-              className={item.url === currentValue ? "is-current" : ""}
+              className={`homepage-editor__page-media-option${item.url === currentValue ? " is-current" : ""}`}
               disabled={!selectable}
               onClick={() => onSelect(item.url)}
               aria-label={item.url === currentValue ? `当前素材：${item.name}` : `使用素材：${item.name}`}
+              title={item.name}
             >
               <img
                 src={resolveManagedTemplateMediaPreviewUrl(item.url, 480)}
@@ -158,12 +176,13 @@ export default function SharedPageMediaPicker({
                   }
                 }}
               />
+              <span>{item.name}</span>
             </button>
           ))}
         </div>
       ) : state === "ready" ? (
         <p className="homepage-editor__current-page-media-empty">
-          共享素材库暂无可用图片，可使用“更换图片”上传。
+          {items.length ? "没有匹配的素材，可修改文件名关键词。" : "共享素材库暂无可用图片，可上传新图。"}
         </p>
       ) : null}
     </div>

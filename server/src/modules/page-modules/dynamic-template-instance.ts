@@ -60,6 +60,7 @@ export interface DynamicTemplateActionReference {
   targetType: "page" | "external" | "product" | "category";
   value: string;
   index?: number;
+  sourceField?: "workProductCode";
 }
 
 export interface DynamicTemplateInstanceValidation {
@@ -284,6 +285,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+export function getWorkGridImageSlotIds(definition: TemplateDefinitionV2): Set<string> {
+  const role = definition.metadata.sectionRole ?? definition.templateRecipe?.sectionRole;
+  const slotIds = new Set<string>();
+  if (role !== "creation-grid") return slotIds;
+
+  for (const grid of Object.values(definition.nodes)) {
+    if (grid.type !== "Grid") continue;
+    const imageSlots = grid.childIds.flatMap((childId) => {
+      const child = definition.nodes[childId];
+      return child?.type === "ImageSlot" && child.slotId && definition.slots[child.slotId]?.type === "image"
+        ? [child.slotId]
+        : [];
+    });
+    if (imageSlots.length >= 3 && imageSlots.length <= 6) {
+      imageSlots.forEach((slotId) => slotIds.add(slotId));
+    }
+  }
+  return slotIds;
 }
 
 function isEmptyContent(value: unknown): boolean {
@@ -769,6 +790,7 @@ export function validateDynamicTemplateInstance(
     undefined,
     options.includeTemplateDefaults === true,
   );
+  const workGridImageSlotIds = getWorkGridImageSlotIds(definition);
   for (const slot of Object.values(definition.slots)) {
     const hasInstanceValue = Object.prototype.hasOwnProperty.call(contentBySlotId, slot.slotId);
     if (hasInstanceValue && !slot.editable) {
@@ -780,6 +802,24 @@ export function validateDynamicTemplateInstance(
       continue;
     }
     const instanceValue = contentBySlotId[slot.slotId];
+    const rawWorkProductCode = isRecord(instanceValue) ? instanceValue.workProductCode : undefined;
+    const workProductCode = typeof rawWorkProductCode === "string" ? rawWorkProductCode.trim() : "";
+    const hasInvalidCharacter = /[\u0000-\u001f\u007f\uD800-\uDFFF]/u.test(workProductCode);
+    const workProductPath = `.contentBySlotId.${slot.slotId}.workProductCode`;
+    if (
+      (rawWorkProductCode !== undefined && typeof rawWorkProductCode !== "string")
+      || workProductCode.length > 50
+      || hasInvalidCharacter
+      || workProductCode === "."
+      || workProductCode === ".."
+    ) {
+      issues.push({ message: `${slot.label}作品编号无效`, field: slot.slotId, pathSuffix: workProductPath });
+      continue;
+    }
+    if (workProductCode && !workGridImageSlotIds.has(slot.slotId)) {
+      issues.push({ message: `${slot.label}不是可关联作品的网格图片`, field: slot.slotId, pathSuffix: workProductPath });
+      continue;
+    }
     const useDefault = allowTemplateDefaults && (
       !slot.editable
       || (definition.schemaVersion >= 3 && slot.emptyPolicy === "use-default" && !hasRenderableSlotContent(slot, instanceValue))
@@ -838,6 +878,9 @@ export function validateDynamicTemplateInstance(
           issues.push({ message: `${slot.label}手机图地址无效`, field: slot.slotId, pathSuffix: `.contentBySlotId.${slot.slotId}.mobileSrc` });
         } else if (typeof image.mobileSrc === "string" && image.mobileSrc.trim()) {
           assets.push({ slotId: slot.slotId, url: image.mobileSrc.trim(), sourceField: "mobileSrc" });
+        }
+        if (value === instanceValue && workProductCode) {
+          actions.push({ slotId: slot.slotId, targetType: "product", value: workProductCode, sourceField: "workProductCode" });
         }
       }
       continue;

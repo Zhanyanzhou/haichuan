@@ -17,6 +17,7 @@ import {
 
 const exportScriptPath = fileURLToPath(new URL("./export-public-seo-snapshot.mjs", import.meta.url));
 const prerenderScriptPath = fileURLToPath(new URL("./prerender-public-routes.mjs", import.meta.url));
+const clientShellPath = fileURLToPath(new URL("../client/index.html", import.meta.url));
 
 test("pre-renders Chinese, legal, and product routes with full SEO metadata", async (t) => {
   const temporaryDirectory = mkdtempSync(join(tmpdir(), "haichuan-prerender-"));
@@ -61,6 +62,22 @@ test("pre-renders Chinese, legal, and product routes with full SEO metadata", as
   const onDiskManifest = JSON.parse(readFileSync(join(temporaryDirectory, "prerendered-routes.json"), "utf8"));
   assert.deepEqual(onDiskManifest, manifest);
   assert.equal(readFileSync(join(temporaryDirectory, "spa-shell.html"), "utf8"), BASE_HTML);
+});
+
+test("pre-renders the client shell and keeps its loading indicator on SPA fallback routes", async (t) => {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), "haichuan-prerender-loader-"));
+  t.after(() => rmSync(temporaryDirectory, { recursive: true, force: true }));
+  const baseHtml = readFileSync(clientShellPath, "utf8");
+  const snapshot = createPublicSeoSnapshot(makeSnapshotInput([makeRoute()]));
+
+  assert.match(baseHtml, /class="site-route-loading"/);
+  await prerenderPublicRoutes({ snapshot, baseHtml, outDir: temporaryDirectory });
+
+  const routeHtml = readFileSync(join(temporaryDirectory, "about", "index.html"), "utf8");
+  assert.match(routeHtml, /data-prerendered-path="\/about"/);
+  assert.match(routeHtml, /<main><h1>关于我们<\/h1><p>Published body\.<\/p><\/main>/);
+  assert.doesNotMatch(routeHtml, /class="site-route-loading"/);
+  assert.equal(readFileSync(join(temporaryDirectory, "spa-shell.html"), "utf8"), baseHtml);
 });
 
 test("home keeps the published document for fallback without painting its build-time hero", async (t) => {
@@ -188,6 +205,16 @@ test("missing mount points and document-level body markup fail before writing", 
     prerenderPublicRoutes({
       snapshot,
       baseHtml: '<!doctype html><html><head><meta name="robots" content="noindex, nofollow"></head><body></body></html>',
+      outDir: outputDirectory,
+    }),
+    /mount point/i,
+  );
+  assert.equal(existsSync(outputDirectory), false);
+
+  await assert.rejects(
+    prerenderPublicRoutes({
+      snapshot,
+      baseHtml: BASE_HTML.replace('<div id="root"></div>', '<div id="root"><main>Existing content</main></div>'),
       outDir: outputDirectory,
     }),
     /mount point/i,

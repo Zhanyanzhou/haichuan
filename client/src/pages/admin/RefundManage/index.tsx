@@ -5,6 +5,7 @@ import { CheckOutlined, CloseOutlined, EyeOutlined, PlusOutlined } from '@ant-de
 import { afterSalesApi, refundApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
 import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
+import { AdminLoadingState } from '@/components/common/AdminDataStates';
 import RouteLoading from '@/components/common/RouteLoading';
 import { useAuthStore } from '@/store/authStore';
 import type { AfterSalesCase, PaginatedResult, Refund, RefundStatus } from '@/types';
@@ -226,7 +227,7 @@ export default function RefundManage() {
   const isAdmin = role === 'SUPER_ADMIN' || role === 'ADMIN';
   const [list, setList] = useState<RefundListItem[]>([]);
   const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [listLoading, setListLoading] = useState<'initial' | 'refreshing' | 'idle'>('initial');
   const [loadError, setLoadError] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -264,7 +265,7 @@ export default function RefundManage() {
     : new Set<number>();
   const load = useCallback(async () => {
     const requestId = ++listRequestIdRef.current;
-    setLoading(true);
+    setListLoading((current) => current === 'initial' ? current : 'refreshing');
     setLoadError(false);
     try {
       const res = await refundApi.getList({
@@ -282,7 +283,7 @@ export default function RefundManage() {
       setList([]);
       setTotal(0);
     } finally {
-      if (requestId === listRequestIdRef.current) setLoading(false);
+      if (requestId === listRequestIdRef.current) setListLoading('idle');
     }
   }, [page, pageSize, statusFilter, keyword]);
 
@@ -818,7 +819,9 @@ export default function RefundManage() {
         />
       ) : null}
 
-      {loadError ? (
+      {listLoading === 'initial' ? (
+        <AdminLoadingState subject="退款数据" allowInteraction />
+      ) : loadError ? (
         <div className="text-center py-16">
           <p className="text-brand-muted mb-4">退款数据暂时无法加载</p>
           <Button type="primary" onClick={() => void load()}>重新加载</Button>
@@ -826,7 +829,7 @@ export default function RefundManage() {
       ) : (
         <Table
           rowKey="id"
-          loading={loading}
+          loading={listLoading === 'refreshing'}
           dataSource={list}
           size="middle"
           pagination={{

@@ -1,6 +1,8 @@
 import { SECTION_ROLES, type TemplateSectionRole } from "../template-creation/presets";
 
 const ROLE_LABELS = new Map<string, string>(SECTION_ROLES);
+ROLE_LABELS.set("page-hero", "单图海报");
+ROLE_LABELS.set("creation-grid", "宝贝推荐");
 
 /**
  * 目录卡片统一显示区块角色。
@@ -10,7 +12,7 @@ export function catalogCardName(sectionRole: string | undefined, storedName: str
   const fromRole = sectionRole ? ROLE_LABELS.get(sectionRole as TemplateSectionRole) : undefined;
   if (fromRole) return fromRole;
   const compact = storedName.toLowerCase().replace(/[\s_-]/g, "");
-  for (const [role, label] of SECTION_ROLES) {
+  for (const [role, label] of ROLE_LABELS) {
     if (compact.includes(role.replace(/-/g, ""))) return label;
   }
   const trimmed = storedName.trim();
@@ -21,6 +23,7 @@ export function catalogCardName(sectionRole: string | undefined, storedName: str
 export function catalogStoredName(sectionRole: string | undefined, storedName: string): string {
   const roleLabel = catalogCardName(sectionRole, storedName);
   const stored = storedName.trim();
-  if (!stored || stored === roleLabel || stored === "未命名模板") return "";
+  const originalRoleLabel = SECTION_ROLES.find(([role]) => role === sectionRole)?.[1];
+  if (!stored || stored === roleLabel || stored === originalRoleLabel || stored === "未命名模板") return "";
   return stored;
 }

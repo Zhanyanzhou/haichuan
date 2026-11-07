@@ -22,7 +22,7 @@ import {
   type VisualViewport,
 } from "../runtime/visualLayout";
 import { getTemplateContractNodeLabel } from "../runtime/contentTemplateRolePresentation";
-import InspectorDisclosure from "./InspectorDisclosure";
+import InspectorFieldGroup from "./InspectorFieldGroup";
 import type { PuckProps } from "../types";
 import { useVisualEditorSession } from "../visual-editor/visualEditorSession";
 
@@ -647,7 +647,7 @@ export default function InstanceOverridesPanel({
               <strong>限制在画框内 · 模板固定</strong>
             </div>
 
-            <InspectorDisclosure label="位置与间距">
+            <InspectorFieldGroup label="位置与间距">
               <div className="homepage-editor__geometry-position-fields">
                 {([
                   ["x", "横向位置", bounds.x, bounds.x + bounds.width - rect.width],
@@ -675,7 +675,7 @@ export default function InstanceOverridesPanel({
                   </label>
                 ))}
               </div>
-            </InspectorDisclosure>
+            </InspectorFieldGroup>
           </>
         ) : (
           <p className="homepage-editor__inspector-hint">
@@ -953,7 +953,7 @@ export default function InstanceOverridesPanel({
           </div>
           {capabilities.frameRatioRange ||
           (viewport === "mobile" && frameAspectRatios.mobile !== undefined) ? (
-            <InspectorDisclosure label="自定义比例与移动端覆盖">
+            <InspectorFieldGroup label="自定义比例与移动端覆盖">
               <div className="homepage-editor__advanced-settings-grid">
                 {capabilities.frameRatioRange ? (
                   <CustomFrameRatioInput
@@ -990,7 +990,7 @@ export default function InstanceOverridesPanel({
                   </button>
                 ) : null}
               </div>
-            </InspectorDisclosure>
+            </InspectorFieldGroup>
           ) : null}
         </div>
       ) : null}
@@ -1446,7 +1446,7 @@ export default function InstanceOverridesPanel({
                 ) : null}
                 {!usesManagedFlow ? renderSelectedNodeGeometry(role.roleId) : null}
                 {role.placementPresets?.length || role.maxLines || role.requiresSafeBand ? (
-                  <InspectorDisclosure label="精确位置与文字限制">
+                  <InspectorFieldGroup label="精确位置与文字限制">
                     <div className="homepage-editor__advanced-settings-grid">
                       {!usesManagedFlow && role.placementPresets?.length ? (
                         <div className="homepage-editor__visual-preset-group" role="group" aria-label={`${getRoleLabel(role.roleId)}位置`}>
@@ -1485,7 +1485,7 @@ export default function InstanceOverridesPanel({
                         ? renderVisualChoices("安全文字带", ["nodes", role.roleId, "typography", "safeBand"], typography.safeBand, ["light", "dark"], "safe-band")
                         : null}
                     </div>
-                  </InspectorDisclosure>
+                  </InspectorFieldGroup>
                 ) : null}
               </>
             ) : null}

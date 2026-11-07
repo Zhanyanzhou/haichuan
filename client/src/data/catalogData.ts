@@ -7,7 +7,7 @@ export interface CatalogProduct {
   id: number;
   /** 稳定公开引用，来自 Product.code。 */
   code?: string;
-  /** 目录展示用货号别名；历史命名保留，值同 Product.code。 */
+  /** 目录展示用款号别名；历史命名保留，值同 Product.code。 */
   sku: string;
   name: string;
   shortDescription?: string;
@@ -22,6 +22,8 @@ export interface CatalogProduct {
   images: string[];
   categoryName?: string;
   price?: number;
+  /** 定制参考起价，来自商品管理。 */
+  priceMin?: number;
   salesMode?: import("@/types").SalesMode;
   inventoryPolicy?: import("@/types").InventoryPolicy;
   isAvailableForPurchase?: boolean;

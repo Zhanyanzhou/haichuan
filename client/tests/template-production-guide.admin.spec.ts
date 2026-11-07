@@ -70,6 +70,105 @@ test.describe("结构审查的双端有效显隐", () => {
 });
 
 test.describe("模板编辑简化（隔离接口 Mock）", () => {
+  for (const width of [1600, 390]) test(`${width}px 模板检查从问题摘要定位名称，修正后返回实时检查且零写入`, async ({ page }) => {
+    const server = await installNewTemplateServer(page);
+    await page.setViewportSize({ width, height: 1000 });
+    const before = await createBlankTemplate(page);
+    const check = page.getByRole("button", { name: /^模板检查/ });
+    const overview = page.getByRole("region", { name: "模板制作检查", exact: true });
+    const nameIssue = overview.locator('[data-template-issue-field="name"]');
+    const issueMessage = "请打开“模板设置”，填写模板名称后再发布。";
+
+    await expect(check).toHaveAccessibleName(/^模板检查，3 项需修正，\d+ 项提醒$/);
+    await check.click();
+    await expect(overview).toBeVisible();
+    await expect(nameIssue).toContainText(issueMessage);
+    await expect(overview).toContainText("发布前至少需要一个区域或容器。");
+    await expect(overview).toContainText("发布前至少需要一个内容槽位。");
+
+    const locate = nameIssue.getByRole("button", { name: "定位", exact: true });
+    await locate.click();
+    const name = page.getByRole("textbox", { name: "模板名称", exact: true });
+    const returnToCheck = page.getByRole("button", { name: "返回模板检查", exact: true });
+    await expect(name).toBeFocused();
+    await returnToCheck.click();
+    await expect(locate).toBeFocused();
+    expect((await readSession(page)).definition).toEqual(before.definition);
+    expect(server.writes).toEqual([]);
+
+    await locate.press("Enter");
+    await expect(name).toBeFocused();
+    await name.fill("现有模板检查验收");
+    await name.press("Tab");
+    await returnToCheck.click();
+
+    await expect(overview).toBeFocused();
+    await expect(overview.getByText(`已修正：${issueMessage}`, { exact: true })).toBeVisible();
+    await expect(nameIssue).toHaveCount(0);
+    await expect(overview).toContainText("发布前至少需要一个区域或容器。");
+    await expect(overview).toContainText("发布前至少需要一个内容槽位。");
+    await expect(page.getByRole("region", { name: "本次发布检查", exact: true })).toHaveCount(0);
+    expect((await readSession(page)).definition?.name).toBe("现有模板检查验收");
+    expect(server.writes).toEqual([]);
+    if (width === 390) {
+      await page.getByRole("button", { name: "收起模板属性面板", exact: true }).click();
+    }
+    await expect(check).toHaveAccessibleName(/^模板检查，2 项需修正，\d+ 项提醒$/);
+  });
+
+  test("模板检查定位移动端隐藏的必填槽位上级，恢复显示后可返回复核", async ({ page }) => {
+    const server = await installNewTemplateServer(page);
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await createBlankTemplate(page);
+    const regionId = await page.evaluate(async () => {
+      const definitionPath = "/src/page-builder/template-definition/index.ts";
+      const sessionPath = "/src/page-builder/template-editor/templateEditorSession.ts";
+      const [{ addDynamicTemplateNode }, { useTemplateEditorSession }] = await Promise.all([
+        import(/* @vite-ignore */ definitionPath), import(/* @vite-ignore */ sessionPath),
+      ]);
+      const state = useTemplateEditorSession.getState();
+      const definition = state.draft.definition;
+      const region = addDynamicTemplateNode(definition, definition.rootNodeId, "Container");
+      const text = addDynamicTemplateNode(region.definition, region.nodeId, "TextSlot");
+      const next = text.definition;
+      next.name = "移动端检查夹具";
+      next.nodes[region.nodeId].name = "内容区域";
+      next.nodes[region.nodeId].responsive.mobile = { hidden: true };
+      Object.assign(next.slots[text.slotId], { required: true, editable: true, hideable: false });
+      state.setDynamicDefinition(next);
+      return region.nodeId;
+    });
+    const desktop = page.getByRole("button", { name: /^桌面端模板布局/ });
+    const mobile = page.getByRole("button", { name: /^移动端模板布局/ });
+    const check = page.getByRole("button", { name: /^模板检查/ });
+    const overview = page.getByRole("region", { name: "模板制作检查", exact: true });
+    const issue = overview.locator('[data-template-check-issue*="PUBLISH_REQUIRED_SLOT_DEVICE_HIDDEN"]');
+    const locate = issue.getByRole("button", { name: "定位", exact: true });
+    const returnToCheck = page.getByRole("button", { name: "返回模板检查", exact: true });
+
+    await expect(desktop).toHaveAttribute("aria-pressed", "true");
+    await check.click();
+    await expect(issue.getByText("内容区域 · 移动端", { exact: true })).toBeVisible();
+    await locate.click();
+    await expect(mobile).toHaveAttribute("aria-pressed", "true");
+    const inspector = page.getByRole("complementary", { name: "模板属性", exact: true });
+    await expect(inspector).toHaveAttribute("data-template-inspector-object-id", regionId);
+    const restore = inspector.getByRole("button", { name: "在当前设备显示", exact: true });
+    await expect(restore).toBeFocused();
+
+    await returnToCheck.click();
+    await expect(locate).toBeFocused();
+    await locate.press("Enter");
+    await expect(restore).toBeFocused();
+    await restore.click();
+    await returnToCheck.click();
+    await expect(overview).toBeFocused();
+    await expect(overview.getByText(/^已修正：必填槽位.*在移动端布局中因上级“内容区域”隐藏/)).toBeVisible();
+    await expect(issue).toHaveCount(0);
+    await expect(mobile).toHaveAttribute("aria-pressed", "true");
+    expect(server.writes).toEqual([]);
+  });
+
   test("图片建议默认收起且可发布，未命名错误定位保留草稿", async ({ page }, testInfo) => {
     const server = await installNewTemplateServer(page);
     await page.setViewportSize({ width: 1600, height: 1000 });
@@ -122,15 +221,14 @@ test.describe("模板编辑简化（隔离接口 Mock）", () => {
     expect(server.writes.filter((write) => write.path.endsWith("/publish"))).toHaveLength(1);
   });
 
-  test("旧空模板只保留轻量恢复入口，没有第二套任务链且可保存草稿", async ({ page }) => {
+  test("旧空模板没有结构新增入口，仍可保存草稿", async ({ page }) => {
     const server = await installNewTemplateServer(page);
     await page.setViewportSize({ width: 1600, height: 1000 });
     await createBlankTemplate(page);
     await expect(guide(page)).toHaveCount(0);
     await expect(page.getByRole("region", { name: "空白模板制作起点", exact: true })).toHaveCount(0);
     const empty = blankTemplateStart(page);
-    await expect(empty.getByRole("button")).toHaveCount(1);
-    await expect(empty.getByRole("button", { name: "添加区域", exact: true })).toBeVisible();
+    await expect(empty.getByRole("button")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "使用双图文骨架", exact: true })).toHaveCount(0);
     const before = await readSession(page);
     expect(server.writes).toEqual([]);
@@ -142,13 +240,7 @@ test.describe("模板编辑简化（隔离接口 Mock）", () => {
     expect(after.productionReviewFacts).toEqual(before.productionReviewFacts);
     expect(after.historyPast).toEqual(before.historyPast);
     expect(server.published).toBeNull();
-    await empty.getByRole("button", { name: "添加区域", exact: true }).click();
-    const added = await readSession(page);
-    expect(added.definition?.nodes[added.definition.rootNodeId].childIds).toHaveLength(1);
-    expect(added.historyPast.length).toBe(after.historyPast.length + 1);
-    await page.getByRole("button", { name: "撤销", exact: true }).click();
-    await expect(empty.getByRole("button", { name: "添加区域", exact: true })).toBeVisible();
-    expect((await readSession(page)).definition).toEqual(after.definition);
+    await expect(empty).toBeVisible();
     expect(server.saveResults).toHaveLength(1);
   });
 
@@ -173,7 +265,6 @@ test.describe("模板编辑简化（隔离接口 Mock）", () => {
     expect(after.dirty).toEqual(before.dirty);
     expect(after.productionReviewFacts).toEqual(before.productionReviewFacts);
     expect(server.writes).toEqual([]);
-    await validation.locator("summary", { hasText: "预览与核对（可选）" }).click();
     await validation.getByRole("button", { name: "确认已核对桌面端布局", exact: true }).click();
     expect((await readSession(page)).productionReviewFacts.desktop).toBe(true);
     await validation.getByRole("button", { name: "发布检查移动端模板布局", exact: true }).click();

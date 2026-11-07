@@ -9,11 +9,12 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
-import { App as AntdApp, Upload, Button, Input, type InputRef } from "antd";
+import { App as AntdApp, Upload, Button, Dropdown, Input, type InputRef } from "antd";
 import {
   InboxOutlined,
   LinkOutlined,
   DeleteOutlined,
+  DownOutlined,
   ExclamationCircleOutlined,
   PictureOutlined,
   SwapOutlined,
@@ -232,6 +233,16 @@ interface MediaPickerFieldProps {
   pageMediaOpen?: boolean;
   /** 参考图对应的媒体任务布局：保留真实上传链路，只改变信息层级。 */
   taskPresentation?: boolean;
+  /** 已有图片时，将复用和移除收在同一个次要操作里。 */
+  compactActions?: boolean;
+  /** 页面装修用简洁的图片状态行，避免打断图片编辑。 */
+  imageInfo?: "full" | "compact" | "warnings";
+  /** 页面运营只通过上传或本页素材选图，保留对已有图片的读取。 */
+  uploadOnly?: boolean;
+  /** 图片引用只从当前设备移除时，按实际影响命名。 */
+  clearImageLabel?: string;
+  clearImageWarning?: string;
+  onUploadingChange?: (uploading: boolean) => void;
   /** 仅把本地图片读入当前内存会话，不上传、不登记到页面素材库。 */
   sessionOnly?: boolean;
 }
@@ -257,14 +268,26 @@ export default function MediaPickerField({
   onOpenPageMedia,
   pageMediaOpen = false,
   taskPresentation = false,
+  compactActions = false,
+  imageInfo = "full",
+  uploadOnly = false,
+  clearImageLabel = "删除图片",
+  onUploadingChange,
+  clearImageWarning,
   sessionOnly = false,
 }: MediaPickerFieldProps) {
   const { message, modal } = AntdApp.useApp();
   /** 上传区比例后缀：一律由规格派生,schema 的 placeholder 只写人话不写比例 */
-  const ratioSuffix = spec ? `（${ratioLabelOf(spec)}）` : "";
+  const compactImageInfo = imageInfo !== "full";
+  const warningsOnly = imageInfo === "warnings";
+  const imageAddressPrompt = "输入图片链接";
+  const ratioSuffix = spec && !warningsOnly ? `（${ratioLabelOf(spec)}）` : "";
   /** URL 输入态：可从更换面板或空态进入 */
-  const [urlMode, setUrlMode] = useState(false);
-  const [urlInput, setUrlInput] = useState(value || "");
+  const [urlDrafts, setUrlDrafts] = useState<Partial<Record<typeof device, { source: string; input: string }>>>({});
+  const savedUrl = value ?? "";
+  const currentUrlDraft = urlDrafts[device];
+  const urlMode = currentUrlDraft?.source === savedUrl;
+  const urlInput = urlMode ? currentUrlDraft.input : savedUrl;
   const [uploading, setUploading] = useState(false);
   const [builtinPageMediaOpen, setBuiltinPageMediaOpen] = useState(false);
   const usesBuiltinPageMedia = !sessionOnly && !onOpenPageMedia;
@@ -309,6 +332,9 @@ export default function MediaPickerField({
     inherited: usingInherited,
   });
   const hasQualityWarning = Boolean(displayValue && (advice.pixelsLow || advice.cropHeavy));
+  const canRetryFacts = !measuredSource
+    && (factsFetchState === "error" || (factsFetchState === "unknown" && isManagedPageAssetUrl(displayValue)));
+  const showSourcePixels = !warningsOnly || canRetryFacts;
   const qualityState = previewError
     ? "error"
     : factsFetchState === "error"
@@ -336,11 +362,13 @@ export default function MediaPickerField({
   const focusX = Math.min(100, Math.max(0, previewFocus?.x ?? 50));
   const focusY = Math.min(100, Math.max(0, previewFocus?.y ?? 50));
 
-  /* value 外部变化（上传成功 / URL 确认 / 撤销 / 预设 / 载入方案）→ 收起全部临时面板 */
-  useEffect(() => {
-    setUrlMode(false);
-    setUrlInput(value || "");
-  }, [value]);
+  const setUrlInput = (input: string) => {
+    setUrlDrafts((current) => ({ ...current, [device]: { source: savedUrl, input } }));
+  };
+  const openUrlEditor = () => setUrlInput(urlInput);
+  const closeUrlEditor = () => {
+    setUrlDrafts((current) => ({ ...current, [device]: undefined }));
+  };
 
   const selectPageMedia = (nextValue: string) => {
     setBuiltinPageMediaOpen(false);
@@ -360,6 +388,7 @@ export default function MediaPickerField({
     }
 
     setUploading(true);
+    onUploadingChange?.(true);
     try {
       if (sessionOnly) {
         const dataUrl = await new Promise<string>((resolve, reject) => {
@@ -407,6 +436,7 @@ export default function MediaPickerField({
       message.error(sessionOnly ? "图片读取失败，请重试" : "上传失败，请重试");
     } finally {
       setUploading(false);
+      onUploadingChange?.(false);
     }
     return false;
   };
@@ -425,7 +455,12 @@ export default function MediaPickerField({
   const confirmUrl = () => {
     const trimmed = urlInput.trim();
     if (!trimmed) {
-      onChange?.("");
+      if (compactImageInfo) {
+        message.error(`请${imageAddressPrompt}`);
+      } else {
+        onChange?.("");
+        closeUrlEditor();
+      }
       return;
     }
     const isManagedPath = trimmed.startsWith("/")
@@ -444,6 +479,7 @@ export default function MediaPickerField({
       return;
     }
     onChange?.(trimmed);
+    closeUrlEditor();
     if (isHttpsUrl) {
       message.warning(sessionOnly
         ? "外链图片只用于本次试排，刷新或重开后消失"
@@ -458,11 +494,14 @@ export default function MediaPickerField({
   /* ── 清除 ── */
   const handleClear = () => {
     const doClear = () => onChange?.("");
-    if (required) {
+    if (required || clearImageWarning) {
       modal.confirm({
-        title: "删除这张图片？",
-        content: "该图片为必填项，删除后请重新上传或填写链接。",
-        okText: "删除",
+        title: compactImageInfo ? `${clearImageLabel}？` : "删除这张图片？",
+        content: [
+          clearImageWarning,
+          required ? (uploadOnly ? "该图片为必填项，移除后请重新选图。" : "该图片为必填项，移除后请重新上传或填写链接。") : "",
+        ].filter(Boolean).join(""),
+        okText: compactImageInfo ? "确认移除" : "删除",
         okButtonProps: { danger: true },
         cancelText: "取消",
         onOk: doClear,
@@ -471,6 +510,51 @@ export default function MediaPickerField({
       doClear();
     }
   };
+
+  const sourcePixels = (
+    <>
+      {warningsOnly ? "暂未读取到原图像素。" : sourcePixelsLabel}
+      {canRetryFacts && !readOnly ? (
+        <>
+          {" "}
+          <button
+            type="button"
+            className="homepage-editor__media-facts-retry"
+            onClick={retryFacts}
+          >
+            重试
+          </button>
+        </>
+      ) : null}
+    </>
+  );
+  const imageFacts = (
+    <dl
+      className="homepage-editor__media-facts"
+      data-media-quality={qualityState}
+      aria-label="图片信息"
+      role="status"
+    >
+      <div>
+        <dt>设计画框</dt>
+        <dd data-image-design="true">{advice.design}</dd>
+      </div>
+      <div>
+        <dt>原图像素</dt>
+        <dd data-image-source-pixels="true" data-media-facts-state={factsFetchState}>
+          {sourcePixels}
+        </dd>
+      </div>
+      <div>
+        <dt>清晰度</dt>
+        <dd data-image-sharpness="true">{advice.sharpness}</dd>
+      </div>
+      <div>
+        <dt>构图</dt>
+        <dd data-image-crop="true">{advice.crop}</dd>
+      </div>
+    </dl>
+  );
 
   return (
     <div
@@ -510,7 +594,9 @@ export default function MediaPickerField({
                 ariaLabel={focusAriaLabel ?? "拖动调整画面焦点"}
                 onChange={onFocusChange}
               />
-              <p className="image-focus-pad__hint">拖动画面中的点调整构图；更换图片请用下方按钮。</p>
+              <p className="image-focus-pad__hint">
+                {uploadOnly ? "拖动圆点或用方向键调整取景。" : compactImageInfo ? "拖动焦点或使用方向键调整取景。" : "拖动画面中的点调整构图；更换图片请用下方按钮。"}
+              </p>
             </>
           ) : (
           <button
@@ -546,7 +632,7 @@ export default function MediaPickerField({
                 >
                   <ExclamationCircleOutlined />
                   <strong>当前图片暂不可用</strong>
-                  <span>请替换图片，或检查图片链接是否仍然有效。</span>
+                  <span>{uploadOnly ? "请重新选择图片。" : "请替换图片，或检查图片链接是否仍然有效。"}</span>
                 </div>
               ) : null}
             </div>
@@ -560,10 +646,11 @@ export default function MediaPickerField({
           {!readOnly && (
             <div
               className="homepage-editor__media-preview-actions"
-              data-has-page-media={!taskPresentation && openPageMedia ? "true" : "false"}
+              data-has-page-media={!compactActions && !taskPresentation && openPageMedia ? "true" : "false"}
             >
               <Button
                 size="small"
+                type={compactImageInfo ? "primary" : "default"}
                 icon={<SwapOutlined />}
                 disabled={uploading}
                 onClick={openFilePicker}
@@ -571,7 +658,30 @@ export default function MediaPickerField({
               >
                 {taskPresentation ? "更换图片" : "替换图片"}
               </Button>
-              {taskPresentation || openPageMedia ? (
+              {compactActions && (openPageMedia || hasOwnValue) ? (
+                <Dropdown
+                  trigger={["click"]}
+                  disabled={uploading}
+                  menu={{
+                    items: [
+                      ...(openPageMedia ? [{
+                        key: "reuse",
+                        label: pageMediaExpanded ? "收起本页图片" : "复用本页图片",
+                        onClick: openPageMedia,
+                      }] : []),
+                      ...(hasOwnValue ? [{
+                        key: "remove",
+                        label: clearImageLabel,
+                        danger: true,
+                        onClick: handleClear,
+                      }] : []),
+                    ],
+                  }}
+                >
+                  <Button size="small" icon={<DownOutlined />} aria-haspopup="menu">图片操作</Button>
+                </Dropdown>
+              ) : null}
+              {!compactActions && (taskPresentation || openPageMedia) ? (
                 <Button
                   size="small"
                   icon={<PictureOutlined />}
@@ -584,76 +694,60 @@ export default function MediaPickerField({
                   {taskPresentation ? "选择本页图片" : "本页图片"}
                 </Button>
               ) : null}
-              <Button
+              {!uploadOnly ? <Button
                 size="small"
                 icon={<LinkOutlined />}
                 className={taskPresentation ? "is-secondary-media-action" : undefined}
-                onClick={() => {
-                  setUrlMode(true);
-                }}
-                title="输入或清除图片链接"
+                onClick={openUrlEditor}
+                title={compactImageInfo ? "输入图片链接" : "输入或清除图片链接"}
               >
                 图片链接
-              </Button>
-              {hasOwnValue ? (
-                <details className="homepage-editor__media-more-actions">
-                  <summary aria-label="更多图片操作">更多</summary>
-                  <div>
-                    <Button
-                      size="small"
-                      danger
-                      icon={<DeleteOutlined />}
-                      onClick={handleClear}
-                    >
-                      删除图片
-                    </Button>
-                  </div>
-                </details>
+              </Button> : null}
+              {hasOwnValue && compactImageInfo && !compactActions ? (
+                <Button size="small" onClick={handleClear} disabled={uploading}>
+                  {clearImageLabel}
+                </Button>
+              ) : null}
+              {hasOwnValue && !compactImageInfo && !uploadOnly && !compactActions ? (
+                <Dropdown
+                  trigger={["click"]}
+                  menu={{
+                    items: [{
+                      key: "remove",
+                      label: clearImageLabel,
+                      icon: <DeleteOutlined />,
+                      danger: true,
+                      onClick: handleClear,
+                    }],
+                  }}
+                >
+                  <Button size="small" icon={<DownOutlined />} aria-haspopup="menu" aria-label="更多图片操作">
+                    图片操作
+                  </Button>
+                </Dropdown>
               ) : null}
             </div>
           )}
-          <dl
-            className="homepage-editor__media-facts"
-            data-media-quality={qualityState}
-            aria-label="图片信息"
-            role="status"
-          >
-            <div>
-              <dt>设计画框</dt>
-              <dd data-image-design="true">{advice.design}</dd>
-            </div>
-            <div>
-              <dt>原图像素</dt>
-              <dd data-image-source-pixels="true" data-media-facts-state={factsFetchState}>
-                {sourcePixelsLabel}
-                {(factsFetchState === "error" || (factsFetchState === "unknown" && isManagedPageAssetUrl(displayValue))) && !measuredSource && !readOnly ? (
-                  <>
-                    {" "}
-                    <button
-                      type="button"
-                      className="homepage-editor__media-facts-retry"
-                      onClick={retryFacts}
-                    >
-                      重试
-                    </button>
-                  </>
+          {compactImageInfo ? (
+            (showSourcePixels || hasQualityWarning) ? (
+              <div className="homepage-editor__instance-image-status" role="status" aria-label="图片信息">
+                {showSourcePixels ? (
+                  <span data-image-source-pixels="true" data-media-facts-state={factsFetchState}>{sourcePixels}</span>
                 ) : null}
-              </dd>
-            </div>
-            <div>
-              <dt>清晰度</dt>
-              <dd data-image-sharpness="true">{advice.sharpness}</dd>
-            </div>
-            <div>
-              <dt>构图</dt>
-              <dd data-image-crop="true">{advice.crop}</dd>
-            </div>
-          </dl>
+                {advice.pixelsLow ? <span data-image-sharpness="true">
+                  {uploadOnly ? "预览可能模糊，建议换一张更清晰的图。" : advice.sharpness}
+                </span> : null}
+                {advice.cropHeavy && (!uploadOnly || !advice.pixelsLow) ? <span data-image-crop="true">
+                  {uploadOnly ? "画面可能裁掉重要内容，请检查取景。" : advice.crop}
+                </span> : null}
+              </div>
+            ) : null
+          ) : imageFacts}
         </div>
       )}
 
       {/* ═══ URL 输入态（可来自更换面板或空态） ═══ */}
-      {urlMode && !readOnly && (
+      {urlMode && !readOnly && !uploadOnly && (
         <div style={{ display: "grid", gap: 8, marginTop: hasValue ? 8 : 0 }}>
           <Input
             ref={inputRef}
@@ -662,7 +756,7 @@ export default function MediaPickerField({
               setUrlInput(e.target.value)
             }
             onKeyDown={handleKeyDown}
-            placeholder="输入图片 URL；清空后确认 = 删除图片"
+            placeholder={compactImageInfo ? imageAddressPrompt : "输入图片 URL；清空后确认 = 删除图片"}
             size="small"
             allowClear
           />
@@ -677,10 +771,7 @@ export default function MediaPickerField({
             </Button>
             <Button
               size="small"
-              onClick={() => {
-                setUrlMode(false);
-                setUrlInput(value || "");
-              }}
+              onClick={closeUrlEditor}
             >
               取消
             </Button>
@@ -689,7 +780,7 @@ export default function MediaPickerField({
       )}
 
       {/* ═══ 空态上传（无图且不在 URL 态） ═══ */}
-      {isEmpty && !readOnly && !urlMode && (
+      {isEmpty && !readOnly && (!urlMode || uploadOnly) && (
         <>
           <Upload.Dragger
             accept="image/*"
@@ -750,13 +841,13 @@ export default function MediaPickerField({
               >
                 选择本页图片
               </Button>
-              <button
+              {!uploadOnly ? <button
                 type="button"
                 className="homepage-editor__media-link-entry"
-                onClick={() => setUrlMode(true)}
+                onClick={openUrlEditor}
               >
                 粘贴图片链接
-              </button>
+              </button> : null}
             </div>
           ) : (
             <div
@@ -775,9 +866,9 @@ export default function MediaPickerField({
                   本页图片
                 </Button>
               ) : null}
-              <button
+              {!uploadOnly ? <button
                 type="button"
-                onClick={() => setUrlMode(true)}
+                onClick={openUrlEditor}
                 style={{
                   border: 0,
                   background: "transparent",
@@ -789,22 +880,18 @@ export default function MediaPickerField({
                 }}
               >
                 或粘贴图片链接
-              </button>
+              </button> : null}
             </div>
           )}
         </>
       )}
 
-      {displayValue && hasQualityWarning && !previewError ? (
+      {!compactImageInfo && displayValue && hasQualityWarning && !previewError ? (
         <div className="homepage-editor__media-warning" role="alert">
           <ExclamationCircleOutlined aria-hidden="true" />
           <span>
             {advice.pixelsLow ? advice.sharpness : advice.crop}
           </span>
-          <details>
-            <summary>查看图片信息</summary>
-            <p>{advice.source}{advice.design}</p>
-          </details>
         </div>
       ) : null}
       {usesBuiltinPageMedia && !readOnly ? (

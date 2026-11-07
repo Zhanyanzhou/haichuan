@@ -1,7 +1,6 @@
 import { Link } from "react-router-dom";
 import { RightOutlined } from "@ant-design/icons";
 import { formatNumber, type DashboardStats } from "./dashboardModel";
-import RouteLoading from "@/components/common/RouteLoading";
 
 interface DashboardAlert {
   key: string;
@@ -132,8 +131,8 @@ export function DashboardAlertsSection({
           ))}
         </div>
       ) : (
-        <div className="admin-dashboard__empty-list">
-          {loading ? <RouteLoading scope="inline" label="正在加载提醒…" /> : "暂无异常提醒"}
+        <div className="admin-dashboard__empty-list" role={loading ? "status" : undefined}>
+          {loading ? "正在加载提醒…" : "暂无异常提醒"}
         </div>
       )}
     </section>

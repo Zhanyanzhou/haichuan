@@ -198,20 +198,19 @@ test.describe("TD-2 模板结构 typed operations", () => {
     expect(() => ungroupDynamicTemplateNode(lockedGroup, grouped.nodeId)).toThrow(/已锁定/);
   });
 
-  test("添加、菜单与拖拽只消费 operations 的结构落点真源", () => {
-    const toolboxSource = readFileSync(
-      resolve(clientRoot, "src/page-builder/template-editor/DynamicTemplateToolbox.tsx"),
-      "utf8",
-    );
+  test("移动与拖拽只消费 operations 的结构落点真源，且不再挂载已退役添加入口", () => {
     const structureSource = readFileSync(
       resolve(clientRoot, "src/page-builder/template-editor/DynamicTemplateStructurePanel.tsx"),
       "utf8",
     );
-    expect(toolboxSource).toContain("getDynamicTemplateInsertionLandings");
-    expect(toolboxSource).not.toContain("getDynamicTemplateAllowedInsertionParentIds");
-    expect(toolboxSource).not.toContain("findDynamicTemplateInsertionParentId");
-    expect(toolboxSource).not.toContain("resolveInsertionIndex");
-    expect(toolboxSource).not.toMatch(/type:\s*"(?:Stack|Row|Grid)"/);
+    expect(structureSource).not.toContain("DynamicTemplateToolbox");
+    expect(structureSource).not.toContain("添加区域");
+    expect(structureSource).not.toContain("添加槽位");
+    expect(structureSource).not.toContain("尚未创建内容区域");
+    expect(structureSource).not.toContain("尚未添加内容槽位");
+    expect(structureSource).not.toContain("getDynamicTemplateAllowedInsertionParentIds");
+    expect(structureSource).not.toContain("findDynamicTemplateInsertionParentId");
+    expect(structureSource).not.toContain("resolveInsertionIndex");
     expect(structureSource.match(/resolveDynamicTemplateMoveLanding/g)?.length).toBeGreaterThanOrEqual(3);
     expect(structureSource).toContain("resolveDynamicTemplateMoveShortcutLanding");
     expect(structureSource).not.toContain("reorderDynamicTemplateNode");

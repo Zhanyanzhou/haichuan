@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import {
   expect,
@@ -9,7 +10,9 @@ import {
   type Request,
 } from "@playwright/test";
 import { addDynamicTemplateNode } from "../src/page-builder/template-definition/operations";
-import type { TemplateDefinitionV2 } from "../src/page-builder/template-definition/generated/templateDefinition.generated";
+import type { TemplateDefinitionV2, TemplateRecipe } from "../src/page-builder/template-definition/generated/templateDefinition.generated";
+import { generateTemplateFromRecipe } from "../src/page-builder/template-creation/generateTemplateFromRecipe";
+import { createContentSlot, createMediaSlots, createRecommendedRecipe } from "../src/page-builder/template-creation/presets";
 import { createNewDynamicTemplateDraft } from "../src/page-builder/template-editor/dynamicTemplateDraftRepository";
 import { productionStageAction } from "./fixtures/template-authoring-main-route";
 
@@ -470,121 +473,6 @@ const TEMPLATE_STRESS_SCENARIOS = [
   "media-ratios",
 ] as const;
 
-type RealRecipeOptions = {
-  width?: number;
-  height?: number;
-  /** 用向导的“随内容增长”画幅预置，而不是自定义尺寸；此时 width/height 只用于断言。 */
-  contentHeight?: boolean;
-  layout?: string;
-  media?: string;
-  content?: string[];
-  arrangement?: "图片并排" | "图片上下排列";
-  imageRatio?: "1:1" | "4:5" | "3:4" | "16:9" | "适应区域";
-  name?: string;
-};
-
-/**
- * 只通过生产 UI 完成七步创建。这里故意不导入 Vite 源模块，也不调用 Repository API；
- * 第七步结束前必须保持零模板写入，生成结果仍是未保存的内存草稿。
- */
-async function createTemplateThroughSevenStepRecipe(
-  page: Page,
-  options: RealRecipeOptions = {},
-) {
-  const {
-    width = 1080,
-    height = 1080,
-    contentHeight = false,
-    layout = "上图下文",
-    media = "无图片",
-    content = ["主标题"],
-    arrangement,
-    imageRatio,
-    name = "未命名模板",
-  } = options;
-  const creator = page.getByRole("dialog", { name: "创建模板", exact: true });
-  const next = () => creator.getByRole("button", { name: "下一步", exact: true }).click();
-  const choose = async (button: Locator) => {
-    if (await button.getAttribute("aria-pressed") !== "true") await button.click();
-  };
-  await expect(creator).toBeVisible();
-  await expect(creator.getByRole("heading", { name: "这一节在页面里承担什么角色？" }))
-    .toBeVisible();
-  // 创建向导第 1 步已按区块角色组织（D.40：创建类型即区块角色），不再有中性的"通用模板"。
-  // 角色只决定后面几步的推荐：画幅、布局、图片在这下面都被显式覆盖，
-  // 内容预置在第 4 步先清空再按 content 勾选，所以选哪个角色不改变最终配方。
-  await choose(creator.getByRole("button", { name: "页面首屏", exact: true }));
-  await next();
-  if (contentHeight) {
-    // “随内容增长”是向导里的一个画幅预置（1440×900），宽高由它给定，不走自定义尺寸输入。
-    await choose(creator.getByRole("button", { name: "随内容增长 高度随内容", exact: true }));
-  } else {
-    const customSize = creator.getByRole("button", { name: "自定义尺寸", exact: true });
-    if (await customSize.getAttribute("aria-pressed") !== "true") await customSize.click();
-    const widthInput = creator.locator('input[aria-label="宽度"]');
-    const heightInput = creator.locator('input[aria-label="高度"]');
-    await expect(widthInput).toBeVisible();
-    // “自定义尺寸”会在下一帧把焦点交给宽度；先等焦点落稳，避免它在填写高度时抢回焦点。
-    await expect(widthInput).toBeFocused();
-    if (await widthInput.inputValue() !== String(width)) await widthInput.fill(String(width));
-    if (await heightInput.inputValue() !== String(height)) await heightInput.fill(String(height));
-    await expect(widthInput).toHaveValue(String(width));
-    await expect(heightInput).toHaveValue(String(height));
-  }
-  await next();
-  if (!(await creator.getByRole("button", { name: layout, exact: true }).isVisible())) {
-    await creator.getByRole("button", { name: "更多布局", exact: true }).click();
-  }
-  await choose(creator.getByRole("button", { name: layout, exact: true }));
-  await choose(creator.getByRole("button", { name: media, exact: true }));
-  if (arrangement) {
-    await choose(creator.getByRole("button", { name: arrangement, exact: true }));
-  }
-  await next();
-  await expect(creator.getByRole("heading", { name: "设置每张图片的外观" })).toBeVisible();
-  if (imageRatio) {
-    await choose(creator.getByRole("button", {
-      name: `图片 1比例：${imageRatio}`,
-      exact: true,
-    }));
-  }
-  await next();
-  // 区块角色会预置一份推荐内容；这里要的是"恰好勾选 content 列出的项"，先清空再勾。
-  const contentBoxes = creator.getByRole("checkbox");
-  for (let index = 0; index < await contentBoxes.count(); index += 1) {
-    const box = contentBoxes.nth(index);
-    if (await box.isChecked()) await box.uncheck();
-  }
-  for (const label of content) {
-    // 推荐项的无障碍名称会带上“推荐”，精确名称对不上。
-    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    await creator.getByRole("checkbox", {
-      name: new RegExp(`^${escaped}(?:\\s+推荐)?$`),
-    }).check();
-  }
-  await next();
-  await choose(creator.getByRole("button", { name: "简约", exact: true }));
-  await next();
-  await expect(creator.getByRole("heading", { name: "确认模板方案" })).toBeVisible();
-  await creator.getByRole("textbox", { name: "模板名称", exact: true }).fill(name);
-  const previewDevices = creator.getByRole("group", { name: "确认预览设备", exact: true });
-  await previewDevices.getByRole("button", { name: "手机", exact: true }).click();
-  await expect(previewDevices.getByRole("button", { name: "手机", exact: true }))
-    .toHaveAttribute("aria-pressed", "true");
-  await previewDevices.getByRole("button", { name: "桌面", exact: true }).click();
-  await expect(creator.getByLabel("生成方案预览")).toHaveAttribute(
-    "data-canvas-width",
-    String(width),
-  );
-  await creator.getByRole("button", { name: "创建模板", exact: true }).click();
-  await expect(creator).toBeHidden();
-  await expect(page.getByText(/尚未保存|有未保存修改/).first()).toBeVisible();
-}
-
-async function openFreeRefinementSessionThroughSevenSteps(page: Page) {
-  await createTemplateThroughSevenStepRecipe(page);
-}
-
 async function fillTemplateIdentity(page: Page, name: string, purpose: string) {
   await (await productionStageAction(page, "交付信息")).click();
   const inspector = page.getByRole("complementary", { name: "模板属性", exact: true });
@@ -733,6 +621,19 @@ async function prepareTemplatePublishThroughProductionReviews(
     return { confirmAndWaitForSinglePublish, review };
 }
 
+async function fillImageDescriptionFromPublishCheck(page: Page, field: Locator, description: string) {
+  await page.getByRole("button", { name: "更多编辑操作" }).click();
+  await page.getByRole("menuitem", { name: /发布检查（\d+ 项）/ }).click();
+  const review = page.getByRole("region", { name: "本次发布检查" });
+  const nodeId = await field.getAttribute("data-inspector-object-id");
+  await review.locator(`[data-page-publish-object="${nodeId}"][data-page-publish-field="alt"]`)
+    .getByRole("button", { name: "定位", exact: true }).click();
+  const input = field.getByRole("textbox", { name: /替代文字$/ });
+  await input.fill(description);
+  await field.getByRole("button", { name: "完成图片说明" }).click();
+  await review.getByRole("button", { name: "关闭本次发布检查" }).click();
+}
+
 async function uploadTemplateInstanceImage(
   page: Page,
   field: Locator,
@@ -743,17 +644,14 @@ async function uploadTemplateInstanceImage(
     return response.request().method() === "POST" && url.pathname === "/api/upload/image";
   });
   const chooserPromise = page.waitForEvent("filechooser");
-  await field.getByRole("button", { name: /拖入图片或点击上传/ }).click();
+  await field.getByRole("button", { name: /拖入图片或点击上传|替换图片/ }).click();
   await (await chooserPromise).setFiles(
     "public/images/admin/templates/jewelry-home-wireframe.png",
   );
   const uploaded = await responseData<{ id: number; url: string }>(await uploadResponsePromise);
   uploadedAssetIdsByUrl.set(uploaded.url, uploaded.id);
   await expect(field.getByRole("button", { name: "替换图片" })).toBeVisible();
-  const altInput = field.getByRole("textbox", { name: /替代文字$/ });
-  await altInput.fill(altText);
-  await altInput.press("Tab");
-  await expect(altInput).toHaveValue(altText);
+  await fillImageDescriptionFromPublishCheck(page, field, altText);
   return uploaded.url;
 }
 
@@ -795,28 +693,32 @@ async function completePagePublicationMediaThroughUi(
     if (!id) throw new Error(`缺少已上传素材的稳定 ID：${url}`);
     return { id, url };
   });
+  await approveIsolatedMedia(page, assets.map(({ id }) => id), authorizationPrefix);
+}
+
+async function approveIsolatedMedia(page: Page, assetIds: number[], authorizationPrefix: string) {
   const pendingAssets: Array<{ id: number; revision: number }> = [];
-  for (const asset of assets) {
+  for (const id of assetIds) {
     const detail = await responseData<{
       authorization: { revision: number; reviewStatus: string; revocationStatus: string };
-    }>(await page.request.get(`${apiBaseUrl}/upload/media/${asset.id}/authorization`));
+    }>(await page.request.get(`${apiBaseUrl}/upload/media/${id}/authorization`));
     if (detail.authorization.reviewStatus === "APPROVED"
       && detail.authorization.revocationStatus === "ACTIVE") continue;
     const drafted = await browserWrite<{
       authorization: { revision: number };
-    }>(page, `/upload/media/${asset.id}/authorization/draft`, {
+    }>(page, `/upload/media/${id}/authorization/draft`, {
       expectedRevision: detail.authorization.revision,
       sourceType: "BRAND_OWNED",
       authorizationBasis: `${authorizationPrefix} 一次性隔离 QA 自有素材`,
-      evidenceReference: `${authorizationPrefix}-${asset.id}`,
+      evidenceReference: `${authorizationPrefix}-${id}`,
       publicWebUseAllowed: true,
     });
     const submitted = await browserWrite<{
       authorization: { revision: number };
-    }>(page, `/upload/media/${asset.id}/authorization/submit`, {
+    }>(page, `/upload/media/${id}/authorization/submit`, {
       expectedRevision: drafted.authorization.revision,
     }, "POST");
-    pendingAssets.push({ id: asset.id, revision: submitted.authorization.revision });
+    pendingAssets.push({ id, revision: submitted.authorization.revision });
   }
   if (pendingAssets.length === 0) return;
 
@@ -859,6 +761,46 @@ async function completePagePublicationMediaThroughUi(
   } finally {
     await reviewerContext.close();
   }
+}
+
+async function preparePublishedWorks(page: Page) {
+  const category = await browserWrite<{ id: number }>(page, "/categories", {
+    name: "珠宝展陈",
+    slug: "exhibition-jewelry",
+    isActive: true,
+  }, "POST");
+  const csrf = (await page.context().cookies(browserBaseUrl)).find((cookie) => cookie.name === "hc_csrf");
+  expect(csrf).toBeTruthy();
+  const [media] = await responseData<Array<{ mediaAssetId: number; storageKey: string }>>(
+    await page.request.post(`${browserBaseUrl}/api/upload/product-images`, {
+      headers: { Origin: browserBaseUrl, "X-CSRF-Token": decodeURIComponent(csrf!.value) },
+      multipart: {
+        files: {
+          name: "exhibition.png",
+          mimeType: "image/png",
+          buffer: readFileSync("public/images/admin/templates/jewelry-home-wireframe.png"),
+        },
+      },
+    }),
+  );
+  await approveIsolatedMedia(page, [media.mediaAssetId], "ISOLATED-WORK");
+  const works = [
+    { name: "山岚耳饰", code: "HC-EXHIBITION-01" },
+    { name: "远山胸针", code: "HC-EXHIBITION-02" },
+  ];
+  for (const work of works) {
+    const product = await browserWrite<{ id: number }>(page, "/products", {
+      ...work,
+      categoryId: category.id,
+      status: "DRAFT",
+      visibility: "PUBLIC",
+      salesMode: "DISPLAY_ONLY",
+    }, "POST");
+    const image = await browserWrite<{ id: number }>(page, `/products/${product.id}/images`, media, "POST");
+    await browserWrite(page, `/products/${product.id}/images/primary`, { imageId: image.id });
+    await browserWrite(page, `/products/${product.id}/status`, { status: "PUBLISHED" });
+  }
+  return works;
 }
 
 /**
@@ -905,6 +847,61 @@ async function recoverTemplateCatalogAfterThrottle(page: Page) {
   await expect(retryButton).toHaveCount(0);
 }
 
+async function seedAndOpenRealQaTemplateDraft(page: Page, input: {
+  name: string;
+  width: number;
+  height: number;
+  layout: TemplateRecipe["layout"];
+  imageRatio?: number | "fit-area";
+  media?: TemplateRecipe["media"][number]["role"][];
+  mediaArrangement?: TemplateRecipe["mediaArrangement"];
+  content?: TemplateRecipe["content"][number]["role"][];
+  includeProductSlot?: boolean;
+}) {
+  const recipe = createRecommendedRecipe("page-hero");
+  let definition = generateTemplateFromRecipe({
+    ...recipe,
+    canvas: { width: input.width, height: input.height, aspectRatio: input.width / input.height },
+    layout: input.layout,
+    media: createMediaSlots(input.media ?? ["heroImage"]).map((image) => input.imageRatio === "fit-area"
+      ? { ...image, freeRatio: true }
+      : { ...image, aspectRatio: input.imageRatio ?? image.aspectRatio }),
+    mediaArrangement: input.mediaArrangement,
+    content: (input.content ?? ["title", "description", "cta"]).map((role) => createContentSlot(role)),
+  }, { templateId: `tpl_qa_seed_${randomUUID().replace(/-/g, "")}`, name: input.name });
+  if (input.includeProductSlot) {
+    const textColumn = Object.values(definition.nodes).find((node) => node.name === "文字列");
+    if (!textColumn) throw new Error("商品槽位夹具缺少文字列");
+    definition = addDynamicTemplateNode(definition, textColumn.nodeId, "ProductSlot").definition;
+  }
+  const created = await browserWrite<{
+    templateId: string;
+    draft: { revision: number };
+  }>(page, "/page-modules/dynamic-templates", { definition }, "POST");
+  expect(created.templateId).toBe(definition.templateId);
+  expect(created.draft.revision).toBe(1);
+
+  await page.reload();
+  await expectPageWorkspaceReady(page);
+  await page.getByRole("button", { name: "模板设计", exact: true }).click();
+  await recoverTemplateCatalogAfterThrottle(page);
+  await page.locator(
+    `[data-unified-template-library="design"] [data-template-identity="template:${created.templateId}"] .homepage-editor__template-card-main`,
+  ).click();
+  return created;
+}
+
+async function saveRealQaTemplateDraft(page: Page, templateId: string, previousRevision: number) {
+  const savedResponse = page.waitForResponse((response) =>
+    response.request().method() === "PATCH"
+    && new URL(response.url()).pathname === `/api/page-modules/dynamic-templates/${templateId}/draft`,
+  );
+  await page.getByRole("button", { name: "保存模板", exact: true }).click();
+  const saved = await responseData<{ draft: { revision: number } }>(await savedResponse);
+  expect(saved.draft.revision).toBeGreaterThan(previousRevision);
+  await expect(page.getByText("模板草稿已保存，可继续设计或发布")).toBeVisible();
+}
+
 async function readTemplateCatalogWithThrottleRetry<T>(page: Page): Promise<T> {
   const url = `${apiBaseUrl}/page-modules/dynamic-templates/catalog`;
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -926,16 +923,23 @@ async function readTemplateCatalogWithThrottleRetry<T>(page: Page): Promise<T> {
   throw new Error(`${url} 连续限流，目录读取未完成`);
 }
 
-async function createAndPublishFourThreeTemplateThroughUi(
+async function editAndPublishFourThreeTemplateThroughUi(
   page: Page,
   templateName: string,
 ) {
-  await page.getByRole("button", { name: "模板设计", exact: true }).click();
-  await recoverTemplateCatalogAfterThrottle(page);
+  const saved = await seedAndOpenRealQaTemplateDraft(page, {
+    width: 1200,
+    height: 900,
+    layout: "leftImageRightContent",
+    media: ["custom", "custom"],
+    mediaArrangement: "row",
+    content: ["title", "description"],
+    name: templateName,
+  });
   const designLibrary = page.locator('[data-unified-template-library="design"]');
   await expect(
     designLibrary.locator('[data-template-identity^="source:legacy_"]'),
-    "模板设计目录不得暴露旧兼容来源；新建模板必须是唯一创建路径",
+    "模板设计目录不应暴露旧兼容来源",
   ).toHaveCount(0);
   await expect(
     designLibrary.locator(
@@ -943,32 +947,13 @@ async function createAndPublishFourThreeTemplateThroughUi(
     ),
     "模板设计目录中的既有卡片必须全部来自 Repository",
   ).toHaveCount(0);
-  await designLibrary.getByRole("button", { name: "新建模板", exact: true }).click();
-  await createTemplateThroughSevenStepRecipe(page, {
-    width: 1200,
-    height: 900,
-    layout: "左图右文",
-    media: "2 张图片",
-    arrangement: "图片并排",
-    content: ["主标题", "描述"],
-    name: templateName,
-  });
   await fillTemplateIdentity(
     page,
     templateName,
-    "用于验证仅通过新建模板进入统一设计、保存、发布与页面使用流程",
+    "用于验证已有模板的设计、保存、发布与页面使用流程",
   );
   await setOverlayLightNavigationCompatibilityThroughUi(page);
-
-  const saveResponsePromise = page.waitForResponse((response) => {
-    const url = new URL(response.url());
-    return response.request().method() === "POST"
-      && url.pathname === "/api/page-modules/dynamic-templates";
-  });
-  await page.getByRole("button", { name: "保存模板", exact: true }).click();
-  const saved = await responseData<{ templateId: string }>(await saveResponsePromise);
-  await expect(page.getByText("模板草稿已保存，可继续设计或发布", { exact: true }))
-    .toBeVisible();
+  await saveRealQaTemplateDraft(page, saved.templateId, saved.draft.revision);
 
   const { confirmAndWaitForSinglePublish, review } = await prepareTemplatePublishThroughProductionReviews(
     page,
@@ -1003,7 +988,7 @@ async function createAndPublishFourThreeTemplateThroughUi(
   const textSlotId = nodes.find((node) => node.type === "TextSlot")?.slotId;
   const imageSlotId = nodes.find((node) => node.type === "ImageSlot")?.slotId;
   if (!headingSlotId || !textSlotId || !imageSlotId) {
-    throw new Error("新建 4:3 双图文模板缺少标题、正文或图片槽位");
+    throw new Error("4:3 双图文模板缺少标题、正文或图片槽位");
   }
   return { templateId: saved.templateId, headingSlotId, textSlotId, imageSlotId };
 }
@@ -1151,9 +1136,13 @@ async function design1920By240Template(page: Page, templateName: string) {
   await setObjectPercent("垂直位置", 0);
   await setObjectPercent("宽度", 58);
   await setObjectPercent("高度", 100);
-  const imageFit = inspector.getByRole("combobox", { name: "图片适配", exact: true });
-  await imageFit.selectOption("contain");
-  await imageFit.selectOption("cover");
+  const imageFit = inspector.getByRole("group", { name: "图片适配", exact: true });
+  const contain = imageFit.getByRole("button", { name: "完整显示", exact: true });
+  const cover = imageFit.getByRole("button", { name: "裁切填满", exact: true });
+  await contain.click();
+  await expect(contain).toHaveAttribute("aria-pressed", "true");
+  await cover.click();
+  await expect(cover).toHaveAttribute("aria-pressed", "true");
 
   return { inspector, sizeControls };
 }
@@ -1170,7 +1159,7 @@ interface AcceptanceTemplateBlueprint {
   imageRatio: "1:1" | "4:5" | "3:4" | "16:9";
   headingSize: number;
   /**
-   * 走创建向导的“随内容增长”画幅（`CANVAS_PRESETS` 的 auto 档 = 1440×900）。
+   * “随内容增长”画幅（`CANVAS_PRESETS` 的 auto 档 = 1440×900）。
    * 这一档桌面与手机的根高度都是 auto、桌面主体是 flow 布局，是 P0
    * （自动高度画布塌成 0px、整块内容看不见）在真实链路里唯一的路径。
    * 下面两处都不许把它改回固定高度，否则真实闭环又会看不见这条路径。
@@ -1282,9 +1271,13 @@ async function designAcceptanceTemplate(
   await headingSize.fill(String(blueprint.headingSize));
   await headingSize.press("Enter");
   await tree.getByRole("treeitem", { name: /^主图 / }).click();
-  const imageFit = inspector.getByRole("combobox", { name: "图片适配", exact: true });
-  await imageFit.selectOption("contain");
-  await imageFit.selectOption("cover");
+  const imageFit = inspector.getByRole("group", { name: "图片适配", exact: true });
+  const contain = imageFit.getByRole("button", { name: "完整显示", exact: true });
+  const cover = imageFit.getByRole("button", { name: "裁切填满", exact: true });
+  await contain.click();
+  await expect(contain).toHaveAttribute("aria-pressed", "true");
+  await cover.click();
+  await expect(cover).toHaveAttribute("aria-pressed", "true");
 
   await page.getByRole("button", { name: /^移动端模板布局/ }).click();
   await page.getByRole("complementary", { name: "模板结构" })
@@ -1352,6 +1345,299 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     !exactQaTarget,
     "仅在显式 PAGE_BUILDER_REAL_QA=true 且使用 127.0.0.1:3101/5175 一次性环境时运行",
   );
+
+  for (const [pageKey, publicTitle] of [
+    ["catalog", "选款中心"],
+    ["contact", "联系海川"],
+  ] as const) {
+    test(`${pageKey} 仅保留固定业务区仍可真实预检、发布和公开回读`, async ({ browser }) => {
+      test.setTimeout(90_000);
+      const staff = await newAuthenticatedApiSession({ username, password });
+      const anonymous = await browser.newContext({ extraHTTPHeaders: forwardedProtoHeaders });
+      const locale = "zh-CN";
+      const query = `pageKey=${pageKey}&locale=${locale}`;
+      const region = {
+        type: "业务功能区",
+        props: { id: `${pageKey}-business-region`, pageKey, locked: true },
+      };
+      const puckData = { root: { props: {} }, zones: {}, content: [region] };
+      const metadata = { seoTitle: `${publicTitle}｜隔离验收` };
+
+      try {
+        const draft = await responseData<PageDocumentSnapshot | null>(await staff.context.get(
+          `/api/page-modules/document/admin?${query}`,
+        ));
+        const saved = await apiWrite<PageDocumentSnapshot & { contentHash: string }>(
+          staff,
+          "/page-modules/document",
+          {
+            pageKey,
+            locale,
+            puckData,
+            metadata,
+            editorVersion: "0.22.4",
+            ...(draft ? { expectedUpdatedAt: draft.updatedAt } : {}),
+          },
+        );
+
+        const invalid = await apiWrite<{ valid: boolean; errors: string[] }>(
+          staff,
+          "/page-modules/document/validate",
+          { pageKey, locale, puckData: { ...puckData, content: [] }, metadata },
+          "POST",
+        );
+        expect(invalid.valid).toBe(false);
+        expect(invalid.errors).toEqual(expect.arrayContaining([expect.stringContaining("要求固定业务区数量为 1")]));
+
+        const validation = await apiWrite<{ valid: boolean; errors: string[] }>(
+          staff,
+          "/page-modules/document/validate",
+          { pageKey, locale },
+          "POST",
+        );
+        expect(validation.errors).toEqual([]);
+        expect(validation.valid).toBe(true);
+
+        const published = await apiWrite<{ publishedRevisionId: number; publishedHash: string }>(
+          staff,
+          "/page-modules/document/publish",
+          {
+            pageKey,
+            locale,
+            expectedUpdatedAt: saved.updatedAt,
+            expectedContentHash: saved.contentHash,
+            selfReviewAcknowledged: true,
+          },
+        );
+        expect(published.publishedRevisionId).toBeTruthy();
+        expect(published.publishedHash).toBe(saved.contentHash);
+
+        const adminSnapshot = await responseData<PageDocumentSnapshot>(await staff.context.get(
+          `/api/page-modules/document/published/admin?${query}`,
+        ));
+        expect(adminSnapshot.publishedRevisionId).toBe(published.publishedRevisionId);
+
+        const page = await anonymous.newPage();
+        const [publicResponse] = await Promise.all([
+          page.waitForResponse((response) => {
+            const url = new URL(response.url());
+            return url.pathname === "/api/page-modules/document/published"
+              && url.searchParams.get("pageKey") === pageKey;
+          }, { timeout: 45_000 }),
+          page.goto(`/${pageKey}`, { waitUntil: "commit", timeout: 45_000 }),
+        ]);
+        const publicSnapshot = await responseData<PageDocumentSnapshot & { status: string; contentHash: string }>(
+          publicResponse,
+        );
+        expect(publicSnapshot.status).toBe("PUBLISHED");
+        expect(publicSnapshot.version).toBe(adminSnapshot.version);
+        expect(publicSnapshot.contentHash).toBe(published.publishedHash);
+        expect(publicSnapshot.puckData.content).toEqual([region]);
+
+        const main = page.getByRole("main");
+        await expect(main.getByRole("heading", { level: 1 })).toHaveText(publicTitle);
+        await expect(main.locator(pageKey === "catalog" ? ".catalog-page" : "#consultation")).toBeVisible();
+        await expect(main.locator("[data-production-fallback]")).toHaveCount(0);
+      } finally {
+        await anonymous.close();
+        await staff.context.dispose();
+      }
+    });
+  }
+
+  test("从页面装修直接添加三块首页预设，双端预览并保存重开", async ({ page }) => {
+    test.setTimeout(180_000);
+    const presets = [
+      { id: "tpl_launch_page_hero", name: "单图海报", titleLabel: "页面主标题", imageKeys: ["heroBackground"] },
+      { id: "tpl_launch_creation_grid", name: "宝贝推荐", titleLabel: null, imageKeys: ["workA", "workB", "workC", "workD"] },
+      { id: "tpl_launch_editorial_split", name: "左右图文", titleLabel: "主标题", imageKeys: ["splitHero"] },
+    ].map((preset) => ({ ...preset, title: `预设验收 · ${preset.name}` }));
+    const readDraft = async (pageKey = "home") => responseData<PageDocumentSnapshot | null>(
+      await page.request.get(`${apiBaseUrl}/page-modules/document/admin?pageKey=${pageKey}`),
+    );
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await loginAndPrepareIsolatedQaSite(page);
+    const works = await preparePublishedWorks(page);
+    const initialDraft = await readDraft();
+    await page.goto("/admin/editor/home");
+    await expectPageWorkspaceReady(page);
+    const library = page.locator('[data-unified-template-library="page"]');
+    const inspector = page.getByRole("region", { name: "模板实例属性", exact: true });
+    const frame = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const rendered = (id: string) => frame.locator(`.hc-dynamic-template[data-dynamic-template-id="${id}"]`);
+
+    const expectedContent = new Map<string, Record<string, unknown>>();
+    for (const preset of presets) {
+      const card = library.locator(`[data-template-identity="template:${preset.id}"]`);
+      await expect(card).toContainText("通用预设");
+      await expect(card).toContainText(preset.name);
+      await card.getByRole("button", { name: /^添加到页面：.+ v1$/ }).click();
+      await expect(rendered(preset.id)).toHaveCount(1);
+
+      const template = await responseData<{ definition: TemplateDefinitionV2 }>(
+        await page.request.get(
+          `${apiBaseUrl}/page-modules/dynamic-templates/published/${preset.id}/versions/1`,
+        ),
+      );
+      const slots = Object.values(template.definition.slots);
+      const content: Record<string, unknown> = {};
+      const isWorkGrid = preset.id === "tpl_launch_creation_grid";
+      if (isWorkGrid) {
+        await inspector.getByRole("button", { name: "批量选作品", exact: true }).click();
+        const picker = page.getByRole("dialog", { name: "批量选作品", exact: true });
+        for (const work of works) {
+          await picker.getByRole("button", { name: new RegExp(work.name) }).click();
+        }
+        await picker.getByRole("button", { name: "确认选择（2）", exact: true }).click();
+        await expect(picker).toBeHidden();
+        const images = rendered(preset.id).getByRole("img", { name: /山岚耳饰|远山胸针/ });
+        await expect(images).toHaveCount(2);
+        const anonymous = await playwrightRequest.newContext();
+        try {
+          for (const [index, work] of works.entries()) {
+            const src = await images.nth(index).getAttribute("src");
+            const mediaPath = src?.match(/\/products\/public\/\d+\/media\/\d+/)?.[0];
+            expect(mediaPath).toBeTruthy();
+            expect((await anonymous.get(`${apiBaseUrl}${mediaPath}`)).ok()).toBe(true);
+            const slot = slots.find((item) => item.key === preset.imageKeys[index])!;
+            content[slot.slotId] = {
+              src: mediaPath,
+              alt: work.name,
+              workProductCode: work.code,
+            };
+          }
+        } finally {
+          await anonymous.dispose();
+        }
+      }
+      if (preset.titleLabel) {
+        const titleSlot = slots.find((slot) => slot.key === "title");
+        if (!titleSlot) throw new Error(`${preset.id} 缺少标题槽位`);
+        const titleInput = inspector.locator(`[data-slot-id="${titleSlot.slotId}"]`)
+          .getByRole("textbox", { name: preset.titleLabel, exact: true });
+        await titleInput.fill(preset.title);
+        await titleInput.press("Tab");
+        await expect(titleInput).toHaveValue(preset.title);
+        content[titleSlot.slotId] = preset.title;
+      }
+      for (const [index, key] of preset.imageKeys.entries()) {
+        if (isWorkGrid && index === 1) continue;
+        const imageSlot = slots.find((slot) => slot.key === key);
+        if (!imageSlot) throw new Error(`${preset.id} 缺少图片槽位 ${key}`);
+        const alt = `${preset.title}图片 ${index + 1}`;
+        const src = await uploadTemplateInstanceImage(
+          page,
+          inspector.locator(`[data-slot-id="${imageSlot.slotId}"]`),
+          alt,
+        );
+        content[imageSlot.slotId] = {
+          src,
+          alt,
+          ...(isWorkGrid && index === 0 ? { workProductCode: works[0].code } : {}),
+        };
+      }
+      if (isWorkGrid) {
+        await inspector.getByRole("button", { name: "作品图 1后移", exact: true }).click();
+        const [first, second] = preset.imageKeys.slice(0, 2).map((key) =>
+          slots.find((slot) => slot.key === key)!.slotId);
+        [content[first], content[second]] = [content[second], content[first]];
+      }
+      expectedContent.set(preset.id, content);
+    }
+    expect(await readDraft()).toEqual(initialDraft);
+
+    for (const [device, buttonName] of [
+      ["desktop", /^桌面端布局/],
+      ["mobile", /^移动端布局/],
+    ] as const) {
+      const deviceButton = page.getByRole("button", { name: buttonName });
+      await deviceButton.click();
+      await expect(deviceButton).toHaveAttribute("aria-pressed", "true");
+      await page.getByRole("button", { name: "预览当前画布", exact: true }).click();
+      for (const preset of presets) {
+        const block = rendered(preset.id);
+        await expect(block).toHaveAttribute("data-dynamic-template-device", device);
+        if (preset.titleLabel) {
+          await expect(block.getByText(preset.title, { exact: true })).toBeVisible();
+        }
+        const images = block.getByRole("img", { name: new RegExp(`^${preset.title}图片 |^远山胸针$`) });
+        await expect(images).toHaveCount(preset.imageKeys.length);
+        await expect(images.first()).toBeVisible();
+        if (preset.id === "tpl_launch_creation_grid") {
+          await expect.poll(() => images.evaluateAll((nodes) =>
+            new Set(nodes.map((node) => Math.round(node.getBoundingClientRect().top))).size,
+          )).toBe(device === "desktop" ? 1 : 2);
+        }
+      }
+      await page.getByRole("button", { name: "退出当前画布预览", exact: true }).click();
+    }
+
+    const saveResponse = page.waitForResponse((response) =>
+      response.request().method() === "PUT"
+      && new URL(response.url()).pathname === "/api/page-modules/document",
+    );
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+    expect((await saveResponse).ok()).toBe(true);
+    const draft = await readDraft();
+    const instances = draft?.puckData.content.filter((block) =>
+      presets.some(({ id }) => block.props?.templateId === id),
+    );
+    expect(instances?.map((block) => block.props?.templateId)).toEqual(presets.map(({ id }) => id));
+    for (const [index, preset] of presets.entries()) {
+      expect(instances?.[index]?.props).toMatchObject({
+        templateId: preset.id,
+        templateVersion: 1,
+        contentBySlotId: expectedContent.get(preset.id),
+      });
+    }
+    expect(draft?.publishedRevisionId ?? null).toBe(initialDraft?.publishedRevisionId ?? null);
+
+    await page.reload();
+    await expectPageWorkspaceReady(page);
+    for (const preset of presets) {
+      const block = rendered(preset.id);
+      if (preset.titleLabel) {
+        await expect(block.getByText(preset.title, { exact: true })).toBeVisible();
+      }
+      await expect(block.getByRole("img", { name: new RegExp(`^${preset.title}图片 |^远山胸针$`) }))
+        .toHaveCount(preset.imageKeys.length);
+    }
+
+    const source = instances?.find((block) => block.props?.templateId === "tpl_launch_creation_grid");
+    for (const [pageKey, allowed] of [["about", false], ["products", true]] as const) {
+      const catalog = await responseData<{ items: { kind: string; template?: { templateId: string } }[] }>(
+        await page.request.get(`${apiBaseUrl}/page-modules/dynamic-templates/catalog?pageKey=${pageKey}&view=summary`),
+      );
+      expect(catalog.items.some((item) => item.template?.templateId === "tpl_launch_creation_grid")).toBe(allowed);
+    }
+    await page.locator(`[data-layer-id="${source?.props?.id}"] .homepage-editor__layer-select`).click();
+    await page.getByRole("button", { name: "复制到其他页面", exact: true }).click();
+    const chooser = page.getByRole("dialog", { name: "复制到其他页面", exact: true });
+    const selectTarget = async (name: string) => {
+      await chooser.getByRole("combobox", { name: "目标页面" }).click();
+      await page.getByRole("option", { name, exact: true }).click();
+      await chooser.getByRole("button", { name: "前往目标页", exact: true }).click();
+    };
+    await selectTarget("关于海川");
+    await expect(chooser.getByRole("alert")).toContainText("关于海川");
+    await selectTarget("珠宝作品");
+    const add = page.getByRole("dialog", { name: "添加复制的区块", exact: true });
+    await add.getByRole("button", { name: "添加到页面", exact: true }).click();
+    await expect(rendered("tpl_launch_creation_grid")).toHaveCount(1);
+    const copySave = page.waitForResponse((response) =>
+      response.request().method() === "PUT"
+      && new URL(response.url()).pathname === "/api/page-modules/document",
+    );
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+    expect((await copySave).ok()).toBe(true);
+    const target = await readDraft("products");
+    const copied = target?.puckData.content.find((block) => block.props?.templateId === "tpl_launch_creation_grid");
+    expect(copied?.props).toMatchObject({
+      templateVersion: 1,
+      contentBySlotId: source?.props?.contentBySlotId,
+    });
+    expect(copied?.props?.instanceId).not.toBe(source?.props?.instanceId);
+  });
 
   test("真实专项：旧 Schema 响应式分组复制经 Repository 保存重开", async ({ page }) => {
     test.setTimeout(180_000);
@@ -1445,15 +1731,12 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await loginAndPrepareIsolatedQaSite(page);
     await page.goto("/admin/editor/products");
     await expectPageWorkspaceReady(page);
-    await page.getByRole("button", { name: "模板设计", exact: true }).click();
-    await recoverTemplateCatalogAfterThrottle(page);
-    await page.getByRole("button", { name: "新建模板", exact: true }).click();
-    await createTemplateThroughSevenStepRecipe(page, {
+    const created = await seedAndOpenRealQaTemplateDraft(page, {
       width: 1080,
       height: 1080,
-      layout: "上图下文",
-      media: "无图片",
-      content: ["主标题"],
+      layout: "topImageBottomContent",
+      media: [],
+      content: ["title"],
       name: templateName,
     });
     await fillTemplateIdentity(page, templateName, "验证必填后代容器的恢复、撤销和真实保存重开");
@@ -1520,14 +1803,8 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await expect(page.getByRole("switch", { name: "公开时必须有内容", exact: true })).not.toBeChecked();
     expect(templateWrites).toEqual([]);
 
-    const createResponse = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return response.request().method() === "POST"
-        && url.pathname === "/api/page-modules/dynamic-templates";
-    });
-    await page.getByRole("button", { name: "保存模板", exact: true }).click();
-    const created = await responseData<{ templateId: string }>(await createResponse);
-    expect(templateWrites).toEqual(["POST /api/page-modules/dynamic-templates"]);
+    await saveRealQaTemplateDraft(page, created.templateId, created.draft.revision);
+    expect(templateWrites).toEqual([`PATCH /api/page-modules/dynamic-templates/${created.templateId}/draft`]);
     page.off("request", captureTemplateWrite);
 
     await page.reload();
@@ -1602,7 +1879,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
 
     await page.goto(`/admin/editor/${pageKey}`);
     await expectPageWorkspaceReady(page);
-    const createdTemplate = await createAndPublishFourThreeTemplateThroughUi(
+    const createdTemplate = await editAndPublishFourThreeTemplateThroughUi(
       page,
       templateName,
     );
@@ -2019,27 +2296,22 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     }
   });
 
-  test("真实网站从零创建并往返加载六种画布模板", async ({ page }, testInfo) => {
+  test("真实网站编辑并往返加载六种存量画布模板", async ({ page }, testInfo) => {
     test.setTimeout(300_000);
     await page.setViewportSize({ width: 1600, height: 1000 });
     await loginAndPrepareIsolatedQaSite(page);
     await page.goto("/admin/editor/products");
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible({ timeout: 15_000 });
-    await page.getByRole("button", { name: "模板设计", exact: true }).click();
-
     const created: Array<{ templateId: string; blueprint: AcceptanceTemplateBlueprint }> = [];
     for (const blueprint of ACCEPTANCE_TEMPLATE_BLUEPRINTS) {
-      await page.getByRole("button", { name: "新建模板", exact: true }).click();
-      await createTemplateThroughSevenStepRecipe(page, {
+      const [imageWidth, imageHeight] = blueprint.imageRatio.split(":").map(Number);
+      const record = await seedAndOpenRealQaTemplateDraft(page, {
         width: blueprint.width,
         height: blueprint.height,
-        contentHeight: blueprint.contentHeight,
         layout: blueprint.dualColumn
-          ? blueprint.imageFirst ? "左图右文" : "左文右图"
-          : blueprint.imageFirst ? "上图下文" : "上文下图",
-        media: "1 张主图",
-        content: ["主标题", "描述", "主行动"],
-        imageRatio: blueprint.imageRatio,
+          ? blueprint.imageFirst ? "leftImageRightContent" : "leftContentRightImage"
+          : blueprint.imageFirst ? "topImageBottomContent" : "topContentBottomImage",
+        imageRatio: imageWidth / imageHeight,
         name: blueprint.name,
       });
       const { sizeControls } = await designAcceptanceTemplate(page, blueprint);
@@ -2048,15 +2320,8 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
         fullPage: true,
       });
 
-      const createResponsePromise = page.waitForResponse((response) => {
-        const url = new URL(response.url());
-        return response.request().method() === "POST"
-          && url.pathname === "/api/page-modules/dynamic-templates";
-      });
-      await page.getByRole("button", { name: "保存模板", exact: true }).click();
-      const record = await responseData<{ templateId: string }>(await createResponsePromise);
+      await saveRealQaTemplateDraft(page, record.templateId, record.draft.revision);
       created.push({ templateId: record.templateId, blueprint });
-      await expect(page.getByText("模板草稿已保存，可继续设计或发布")).toBeVisible();
 
       await page.reload();
       await page.getByRole("button", { name: "模板设计", exact: true }).click();
@@ -2183,15 +2448,13 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
 
     await page.goto(`/admin/editor/${pageKey}`);
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible({ timeout: 15_000 });
-    await page.getByRole("button", { name: "模板设计", exact: true }).click();
-    await page.getByRole("button", { name: "新建模板", exact: true }).click();
-    await createTemplateThroughSevenStepRecipe(page, {
+    const created = await seedAndOpenRealQaTemplateDraft(page, {
       width: 1200,
       height: 900,
-      layout: "左图右文",
-      media: "2 张图片",
-      arrangement: "图片并排",
-      content: ["主标题", "描述"],
+      layout: "leftImageRightContent",
+      media: ["custom", "custom"],
+      mediaArrangement: "row",
+      content: ["title", "description"],
       name: templateName,
     });
     await fillTemplateIdentity(
@@ -2213,13 +2476,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       await expect(tree.getByRole("treeitem", { name: new RegExp(label) })).toBeVisible();
     }
 
-    const createResponsePromise = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return response.request().method() === "POST"
-        && url.pathname === "/api/page-modules/dynamic-templates";
-    });
-    await page.getByRole("button", { name: "保存模板", exact: true }).click();
-    const created = await responseData<{ templateId: string }>(await createResponsePromise);
+    await saveRealQaTemplateDraft(page, created.templateId, created.draft.revision);
     await page.reload();
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible({ timeout: 15_000 });
     await page.getByRole("button", { name: "模板设计", exact: true }).click();
@@ -2366,7 +2623,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     const textGroupId = compositionChildren.find((nodeId) => (
       definition.nodes[nodeId].name === "文字列"
     ));
-    if (!textGroupId) throw new Error("七步向导生成的 4:3 模板缺少文字列");
+    if (!textGroupId) throw new Error("4:3 模板缺少文字列");
     const textNodeIds = definition.nodes[textGroupId].childIds;
     expect(definition.nodes[definition.rootNodeId].childIds).toHaveLength(1);
     expect(definition.nodes[definition.rootNodeId].type).toBe("Section");
@@ -2671,31 +2928,20 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await expect(workspaceSwitch).toHaveAttribute("data-active-mode", "page");
     await expect(page.locator(".template-editor__toolbar")).toHaveCount(0);
 
-    await page.getByRole("button", { name: "模板设计", exact: true }).click();
-    await expect(page.locator(".template-editor__toolbar")).toBeVisible();
-    await page.getByRole("button", { name: "新建模板", exact: true }).click();
-    await createTemplateThroughSevenStepRecipe(page, {
+    const createdTemplate = await seedAndOpenRealQaTemplateDraft(page, {
       width: 1920,
       height: 240,
-      layout: "左文右图",
-      media: "1 张主图",
-      content: ["主标题", "描述", "主行动"],
-      imageRatio: "适应区域",
+      layout: "leftContentRightImage",
+      imageRatio: "fit-area",
       name: templateNameV1,
     });
+    await expect(page.locator(".template-editor__toolbar")).toBeVisible();
     const { sizeControls } = await design1920By240Template(page, templateNameV1);
     await page.screenshot({
       path: testInfo.outputPath("dynamic-template-editor-1920x240-structure.png"),
       fullPage: true,
     });
-    const createResponsePromise = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return response.request().method() === "POST"
-        && url.pathname === "/api/page-modules/dynamic-templates";
-    });
-    await page.getByRole("button", { name: "保存模板", exact: true }).click();
-    const createdTemplate = await responseData<{ templateId: string }>(await createResponsePromise);
-    await expect(page.getByText("模板草稿已保存，可继续设计或发布")).toBeVisible();
+    await saveRealQaTemplateDraft(page, createdTemplate.templateId, createdTemplate.draft.revision);
 
     await page.reload();
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible({ timeout: 15_000 });
@@ -2780,7 +3026,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       button: Object.values(publishedV1.definition.slots).find((slot) => slot.semanticRole === "cta"),
     };
     if (!slotsByKey.image || !slotsByKey.heading || !slotsByKey.description || !slotsByKey.button) {
-      throw new Error("七步生成的正式模板缺少主图、标题、描述或 CTA 语义槽位");
+      throw new Error("正式模板缺少主图、标题、描述或 CTA 语义槽位");
     }
     expect(publishedV1.definition.defaultContent).toEqual({});
     expect(publishedV1.definition.previewContent).toEqual({});
@@ -2802,14 +3048,16 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await populatedV1Layer.click();
 
     const instanceInspector = page.getByRole("region", { name: "模板实例属性" });
-    await expect(instanceInspector).toContainText(`固定版本 ${createdTemplate.templateId} v1`);
+    await expect(instanceInspector.getByRole("region", { name: "本节管理" })).toBeHidden();
     await instanceInspector.getByRole("textbox", { name: "主标题" }).fill("周年典藏系列");
     await instanceInspector.getByRole("textbox", { name: "描述" })
       .fill("以克制留白呈现珠宝工艺与佩戴光泽。");
     await instanceInspector.getByRole("textbox", { name: "主行动文案" }).fill("查看系列");
     await instanceInspector.getByRole("group", { name: "主行动跳转" })
       .getByRole("button", { name: "页面" }).click();
-    await instanceInspector.getByRole("combobox", { name: "站内页面" }).fill("/products");
+    const pagePicker = page.getByRole("dialog", { name: "选择页面" });
+    await pagePicker.getByRole("radio", { name: "珠宝作品" }).check();
+    await pagePicker.getByRole("button", { name: "确认选择" }).click();
     const imageField = instanceInspector.locator(`[data-slot-id="${slotsByKey.image.slotId}"]`);
     const uploadImageResponsePromise = page.waitForResponse((response) => {
       const url = new URL(response.url());
@@ -2824,10 +3072,8 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     const uploadedImage = await responseData<{ id: number; url: string }>(await uploadImageResponsePromise);
     uploadedAssetIdsByUrl.set(uploadedImage.url, uploadedImage.id);
     await expect(imageField.getByRole("button", { name: "替换图片" })).toBeVisible();
-    await imageField.getByRole("textbox", { name: "主图替代文字" })
-      .fill("周年典藏系列珠宝工艺展示");
-    await instanceInspector.getByRole("group", { name: "页面实例属性范围" })
-      .getByRole("button", { name: "主标题", exact: true }).click();
+    await fillImageDescriptionFromPublishCheck(page, imageField, "周年典藏系列珠宝工艺展示");
+    await expect(instanceInspector.getByRole("group", { name: "页面实例属性范围" })).toHaveCount(0);
     await expect(instanceInspector.getByText("水平偏移", { exact: true })).toHaveCount(0);
     await expect(instanceInspector.getByText("垂直偏移", { exact: true })).toHaveCount(0);
     await expect(instanceInspector.getByText("区域宽度", { exact: true })).toHaveCount(0);
@@ -2843,7 +3089,8 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       .fill("浏览经典系列");
     await instanceInspector.getByRole("group", { name: "主行动跳转" })
       .getByRole("button", { name: "页面" }).click();
-    await instanceInspector.getByRole("combobox", { name: "站内页面" }).fill("/products");
+    await pagePicker.getByRole("radio", { name: "珠宝作品" }).check();
+    await pagePicker.getByRole("button", { name: "确认选择" }).click();
     const lockedImageUrl = await uploadTemplateInstanceImage(
       page,
       imageField,
@@ -3182,8 +3429,8 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await page.getByRole("button", { name: "页面装修", exact: true }).click();
     await recoverTemplateCatalogAfterThrottle(page);
     await populatedV1Layer.click();
-    await expect(instanceInspector).toContainText(`固定版本 ${createdTemplate.templateId} v2`);
-    await expect(instanceInspector).not.toContainText("发现新版本 v2");
+    await expect(instanceInspector).not.toContainText(/当前模板 v\d+/);
+    await expect(instanceInspector.getByRole("button", { name: "查看差异", exact: true })).toHaveCount(0);
     const pageDocumentWritePaths: string[] = [];
     const capturePageDocumentWrite = (request: import("@playwright/test").Request) => {
       const url = new URL(request.url());
@@ -3199,12 +3446,12 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await expect(instanceInspector.getByRole("textbox", { name: "描述" }))
       .toHaveValue("以克制留白呈现珠宝工艺与佩戴光泽。");
     await expect(imageField.getByRole("button", { name: "替换图片" })).toBeVisible();
-    await expect(imageField.getByRole("textbox", { name: "主图替代文字" }))
-      .toHaveValue("周年典藏系列珠宝工艺展示");
+    await expect(imageField.getByRole("textbox", { name: "主图替代文字" })).toHaveCount(0);
+    await expect(page.frameLocator(".homepage-editor__canvas-scale iframe")
+      .locator('img[alt="周年典藏系列珠宝工艺展示"]')).toHaveCount(1);
     await expect(instanceInspector.getByRole("textbox", { name: "主行动文案" }))
       .toHaveValue("查看系列");
-    await expect(instanceInspector.getByRole("combobox", { name: "站内页面" }))
-      .toHaveValue("/products");
+    await expect(instanceInspector.getByText("跳转至「珠宝作品」", { exact: true })).toBeVisible();
     const editorTemplateInstances = page.frameLocator(".homepage-editor__canvas-scale iframe")
       .locator("section[data-dynamic-template-version]")
       .filter({
@@ -4069,9 +4316,15 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
 
     await page.goto(`/admin/editor/${pageKey}`);
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible({ timeout: 15_000 });
-    await page.getByRole("button", { name: "模板设计", exact: true }).click();
-    await page.getByRole("button", { name: "新建模板", exact: true }).click();
-    await openFreeRefinementSessionThroughSevenSteps(page);
+    const createdTemplate = await seedAndOpenRealQaTemplateDraft(page, {
+      width: 1080,
+      height: 1080,
+      layout: "topImageBottomContent",
+      media: [],
+      content: ["title"],
+      name: templateName,
+      includeProductSlot: true,
+    });
     const inspector = page.getByRole("complementary", { name: "模板属性", exact: true });
     await fillTemplateIdentity(
       page,
@@ -4079,24 +4332,13 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       "用于验证真实商品选择及未就绪商品的页面发布阻断",
     );
     const structure = page.getByRole("complementary", { name: "模板结构" });
-    await structure.getByRole("treeitem", { name: /^文字列 布局容器/ }).click();
-    await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
-    const slotPalette = page.getByRole("dialog", { name: "添加槽位", exact: true });
-    await slotPalette.getByRole("button", { name: "添加商品槽位", exact: true }).click();
-    await page.keyboard.press("Escape");
-    await expect(slotPalette).toBeHidden();
+    await expect(structure.getByRole("button", { name: "添加槽位", exact: true })).toHaveCount(0);
     await structure.getByRole("button", { name: "模板整体", exact: true }).click();
     await setOverlayLightNavigationCompatibilityThroughUi(page);
     await expect(structure.getByRole("treeitem", { name: /商品槽位 商品内容 可选/ }))
       .toBeVisible();
 
-    const createResponsePromise = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return response.request().method() === "POST"
-        && url.pathname === "/api/page-modules/dynamic-templates";
-    });
-    await page.getByRole("button", { name: "保存模板", exact: true }).click();
-    const createdTemplate = await responseData<{ templateId: string }>(await createResponsePromise);
+    await saveRealQaTemplateDraft(page, createdTemplate.templateId, createdTemplate.draft.revision);
     const { confirmAndWaitForSinglePublish, review } = await prepareTemplatePublishThroughProductionReviews(
       page,
       createdTemplate.templateId,
@@ -4121,7 +4363,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await expect(productField).toContainText("从真实商品库选择");
     await productField.getByRole("button", { name: "选择商品", exact: true }).click();
     const productDialog = page.getByRole("dialog", { name: "选择商品" });
-    await productDialog.getByRole("textbox", { name: "搜索商品名称或货号" }).fill(productCode);
+    await productDialog.getByRole("textbox", { name: "搜索商品名称或款号" }).fill(productCode);
     const productCard = productDialog.getByRole("button", { name: new RegExp(productCode) });
     await expect(productCard).toBeVisible();
     await expect(productCard).toContainText("草稿");
@@ -4287,34 +4529,36 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     page.off("request", captureLocalWrite);
   });
 
-  test("真实网站区分放弃未保存模板与回收站永久删除", async ({ page }) => {
+  test("真实网站区分放弃草稿修改与回收站永久删除", async ({ page }) => {
     test.setTimeout(300_000);
     const unsavedName = "真实闭环待放弃模板";
     const draftName = "真实闭环待删除草稿";
-    const createRequests: string[] = [];
-    page.on("request", (request) => {
-      const url = new URL(request.url());
-      if (
-        request.method() === "POST"
-        && url.pathname === "/api/page-modules/dynamic-templates"
-      ) {
-        createRequests.push(url.pathname);
-      }
-    });
 
     await page.setViewportSize({ width: 1600, height: 1000 });
     await loginAndPrepareIsolatedQaSite(page);
     await page.goto("/admin/editor/home");
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible({ timeout: 15_000 });
-    await page.getByRole("button", { name: "模板设计", exact: true }).click();
-    await recoverTemplateCatalogAfterThrottle(page);
-    await page.getByRole("button", { name: "新建模板", exact: true }).click();
-    await openFreeRefinementSessionThroughSevenSteps(page);
+    const createdDraft = await seedAndOpenRealQaTemplateDraft(page, {
+      width: 1080,
+      height: 1080,
+      layout: "topImageBottomContent",
+      media: [],
+      content: ["title"],
+      name: draftName,
+    });
+    const writeRequests: string[] = [];
+    page.on("request", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (["POST", "PATCH"].includes(request.method()) && (
+        path === "/api/page-modules/dynamic-templates"
+        || path === `/api/page-modules/dynamic-templates/${createdDraft.templateId}/draft`
+      )) writeRequests.push(path);
+    });
     const inspector = page.getByRole("complementary", { name: "模板属性", exact: true });
     await fillTemplateIdentity(
       page,
       unsavedName,
-      "用于验证未保存模板只关闭本地会话且不创建服务端记录",
+      "用于验证放弃修改只关闭本地会话",
     );
     await page.locator(".template-editor__toolbar")
       .getByRole("button", { name: "更多模板操作", exact: true }).click();
@@ -4325,25 +4569,12 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await expect(discardDialog).toContainText("当前模板还有未保存修改");
     await discardDialog.getByRole("button", { name: "不保存并关闭" }).click();
     await expect(inspector.getByRole("textbox", { name: "模板名称", exact: true })).toHaveCount(0);
-    expect(createRequests).toHaveLength(0);
-
-    await page.getByRole("button", { name: "新建模板", exact: true }).click();
-    await openFreeRefinementSessionThroughSevenSteps(page);
-    await fillTemplateIdentity(
-      page,
-      draftName,
-      "用于验证草稿进入回收站后可永久删除",
+    expect(writeRequests).toHaveLength(0);
+    const persisted = await responseData<{ draft: { revision: number; definition: TemplateDefinitionV2 } }>(
+      await page.request.get(`${apiBaseUrl}/page-modules/dynamic-templates/${createdDraft.templateId}/draft`),
     );
-    const createResponsePromise = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return response.request().method() === "POST"
-        && url.pathname === "/api/page-modules/dynamic-templates";
-    });
-    await page.getByRole("button", { name: "保存模板", exact: true }).click();
-    const createdDraft = await responseData<{ templateId: string }>(await createResponsePromise);
-    expect(createRequests, "已保存草稿必须恰好创建一个 Repository 模板身份")
-      .toHaveLength(1);
-    await expect(page.getByText("模板草稿已保存，可继续设计或发布")).toBeVisible();
+    expect(persisted.draft.revision).toBe(createdDraft.draft.revision);
+    expect(persisted.draft.definition.name).toBe(draftName);
 
     const draftTemplateCard = page.locator(
       `[data-unified-template-library="design"] [data-template-identity="template:${createdDraft.templateId}"]`,

@@ -26,6 +26,8 @@ export interface TemplateCatalogCardProps {
   disabledReason?: string;
   trailingAction?: ReactNode;
   onClick?: MouseEventHandler<HTMLDivElement>;
+  /** 封面目录在实际交互意图出现时准备精确版本，不为整列卡片预读定义。 */
+  onPrepare?: () => void;
   onDragEnd?: DragEventHandler<HTMLDivElement>;
   onDragStart?: DragEventHandler<HTMLDivElement>;
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>;
@@ -90,6 +92,7 @@ export default function TemplateCatalogCard({
   disabledReason,
   trailingAction,
   onClick,
+  onPrepare,
   onDragEnd,
   onDragStart,
   onKeyDown,
@@ -160,8 +163,8 @@ export default function TemplateCatalogCard({
       data-template-identity={dataTemplateIdentity}
       data-template-name={dataTemplateName}
       data-catalog-handoff={dataCatalogHandoff ? "true" : undefined}
-      onMouseEnter={() => setPreviewMounted(true)}
-      onFocusCapture={() => setPreviewMounted(true)}
+      onMouseEnter={() => { setPreviewMounted(true); if (!disabled) onPrepare?.(); }}
+      onFocusCapture={() => { setPreviewMounted(true); if (!disabled) onPrepare?.(); }}
     >
       <div
         className={`homepage-editor__template-card-main${controlClassName ? ` ${controlClassName}` : ""}`}

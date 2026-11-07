@@ -75,6 +75,7 @@ type PublicProductSummary = {
   inventoryPolicy?: InventoryPolicy;
   isAvailableForPurchase?: boolean;
   price?: number | string;
+  priceMin?: number | string | null;
   category?: { name?: string };
   listingImage?: PublicProductMedia;
   primaryImage?: PublicProductMedia;
@@ -161,6 +162,7 @@ function parsePublicProduct(value: unknown): PublicProductSummary | null {
         ? value.isAvailableForPurchase
         : undefined,
     price: optionalNumberLike(value.price),
+    priceMin: optionalNumberLike(value.priceMin),
     category,
     listingImage: parsePublicMedia(value.listingImage),
     primaryImage: parsePublicMedia(value.primaryImage),
@@ -247,6 +249,7 @@ function mapApiProduct(
     images: [...new Set<string>(orderedImages)],
     categoryName: categoryById.get(p.categoryId)?.name || p.category?.name || "",
     price: Number(p.price) || 0,
+    priceMin: Number.isFinite(Number(p.priceMin)) && Number(p.priceMin) > 0 ? Number(p.priceMin) : 0,
     salesMode: p.salesMode,
     inventoryPolicy: p.inventoryPolicy,
     isAvailableForPurchase:
@@ -271,7 +274,7 @@ export interface ProductQuery {
   ids?: string;
   /** 分类 ID 集合；绝不能传入 ids（ids 是商品 ID）。 */
   categoryIds?: string;
-  /** 优先按货号直达；查无作品且有 keyword 时，按原筛选回退搜索。 */
+  /** 优先按款号直达；查无作品且有 keyword 时，按原筛选回退搜索。 */
   exactCode?: string;
   /** 材质（服务端白名单校验，非法值静默忽略） */
   materialType?: string;
@@ -291,11 +294,38 @@ export interface ProductQuery {
   page?: number;
   pageSize?: number;
   sortBy?:
+    | "relevance"
     | "sortOrder"
     | "price_asc"
     | "price_desc"
     | "updated_desc"
+    | "published_desc"
     | "code_asc";
+}
+
+/** 两个搜索入口共用精确款号优先规则，查无匹配后按原筛选重试。 */
+export async function fetchPublicProductSearchPage<T extends { total: number }>(
+  params: Record<string, unknown>,
+  exactCode: string | undefined,
+  signal: AbortSignal,
+  parsePage: (payload: unknown, requireValidItems: boolean) => T,
+): Promise<T> {
+  const fetchPage = async (pageParams: Record<string, unknown>) =>
+    parsePage(
+      unwrapResponse<unknown>(await productApi.getPublicList(pageParams, signal)),
+      Boolean(pageParams.ids || pageParams.exactCode),
+    );
+  if (!exactCode) return fetchPage(params);
+
+  const exactPage = await fetchPage({
+    exactCode,
+    page: 1,
+    pageSize: params.pageSize,
+    sortBy: params.sortBy,
+    includeFacets: params.includeFacets,
+  });
+  if (exactPage.total === 0 && params.keyword && !signal.aborted) return fetchPage(params);
+  return exactPage;
 }
 
 interface ProductFacets {
@@ -441,26 +471,13 @@ export function useProductData(
             includeFacets: query.includeFacets,
           }).filter(([, value]) => value !== undefined),
         );
-        const fetchPage = async (pageParams: Record<string, unknown>) =>
-          parsePublicProductPayload(
-            unwrapResponse<unknown>(await productApi.getPublicList(pageParams, controller.signal)),
-            Boolean(pageParams.ids || pageParams.exactCode),
-          );
-        const fetchProducts = async () => {
-          const exactCode = query.exactCode?.trim();
-          if (!exactCode) return fetchPage(params);
-          const exactPage = await fetchPage({
-            exactCode,
-            page: 1,
-            pageSize: params.pageSize,
-            sortBy: query.sortBy,
-            includeFacets: query.includeFacets,
-          });
-          if (exactPage.total === 0 && params.keyword && !cancelled) return fetchPage(params);
-          return exactPage;
-        };
         const [data, catRes] = await Promise.all([
-          fetchProducts(),
+          fetchPublicProductSearchPage(
+            params,
+            query.exactCode?.trim(),
+            controller.signal,
+            parsePublicProductPayload,
+          ),
           loadCategories ? categoryApi.getTree() : Promise.resolve(null),
         ]);
         const list = data.list;

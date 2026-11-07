@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { installCustomerSession } from "./fixtures/session-auth";
+import { createDynamicTemplateInstanceProps, dynamicTemplateVersionKey } from "../src/page-builder/dynamic-template-instance/types";
+import { generateTemplateFromRecipe } from "../src/page-builder/template-creation/generateTemplateFromRecipe";
+import { createRecommendedRecipe } from "../src/page-builder/template-creation/presets";
 
 const apiResponse = (data: unknown) => JSON.stringify({ code: 200, data, message: "success" });
 
@@ -468,12 +471,12 @@ test.describe("公开页面导航一致性", () => {
   test("旧搜索链接保留查询状态，顶部搜索留在当前结果并聚焦搜索框", async ({ page }) => {
     await page.goto("/search?q=戒指&categoryId=17&material=足金");
     await expect(page).toHaveURL(/\/catalog\?query=%E6%88%92%E6%8C%87&category=17&material=%E8%B6%B3%E9%87%91/);
-    await expect(page.getByRole("search").getByRole("combobox", { name: "关键词或货号" })).toHaveValue("戒指");
+    await expect(page.getByRole("search").getByRole("combobox", { name: "关键词或款号" })).toHaveValue("戒指");
 
     const headerSearch = page.getByRole("button", { name: "搜索" }).first();
     await headerSearch.click();
     await expect(page).toHaveURL(/\/catalog\?query=%E6%88%92%E6%8C%87&category=17&material=%E8%B6%B3%E9%87%91$/);
-    const searchInput = page.getByRole("search").getByRole("combobox", { name: "关键词或货号" });
+    const searchInput = page.getByRole("search").getByRole("combobox", { name: "关键词或款号" });
     await expect(searchInput).toBeFocused();
 
     await page.locator(".catalog-toolbar__spacer").click();
@@ -501,10 +504,10 @@ test.describe("公开页面导航一致性", () => {
 
     await page.getByRole("button", { name: "打开菜单" }).click();
     await page.getByRole("dialog", { name: "品牌菜单" }).getByRole("button", { name: "搜索" }).click();
-    await page.getByRole("dialog", { name: "搜索作品" }).getByLabel("关键词或货号").fill("戒指");
+    await page.getByRole("dialog", { name: "搜索作品" }).getByLabel("关键词或款号").fill("戒指");
     await page.getByRole("button", { name: "查看结果" }).click();
     await expect(page).toHaveURL(/\/catalog\?query=%E6%88%92%E6%8C%87$/);
-    await expect(page.getByRole("search").getByRole("combobox", { name: "关键词或货号" }))
+    await expect(page.getByRole("search").getByRole("combobox", { name: "关键词或款号" }))
       .toHaveValue("戒指");
     await expectNoHorizontalOverflow(page);
   });
@@ -603,7 +606,7 @@ test.describe("公开页面导航一致性", () => {
     await page.getByRole("dialog", { name: "品牌菜单" }).getByRole("button", { name: "搜索" }).click();
     const dialog = page.getByRole("dialog", { name: "搜索作品" });
     await expect(dialog.getByRole("link", { name: "初始推荐作品" })).toBeVisible();
-    const input = dialog.getByRole("textbox", { name: "关键词或货号" });
+    const input = dialog.getByRole("textbox", { name: "关键词或款号" });
     try {
       const slowRequest = page.waitForRequest((request) =>
         new URL(request.url()).searchParams.get("keyword") === "戒指",
@@ -982,6 +985,60 @@ test.describe("公开页面导航一致性", () => {
 test.describe("公开页面业务区顺序", () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
+  for (const withDecoration of [false, true]) {
+    test(`选款中心${withDecoration ? "保留业务区在装修内容之前" : "只发布业务区也显示选款工具"}`, async ({ page }) => {
+      const businessRegion = {
+        type: "业务功能区",
+        props: { id: "catalog-business-region", pageKey: "catalog", locked: true },
+      };
+      const hero = {
+        type: "首屏主视觉",
+        props: {
+          id: "catalog-test-after-business",
+          title: "选款指南",
+          desktopImage: "/images/镶嵌.png",
+          mobileImage: "/images/镶嵌.png",
+          altText: "珠宝工艺影像",
+        },
+      };
+      await page.route("**/api/page-modules/document/published?*", (route) =>
+        route.fulfill({ json: {
+          code: 200,
+          data: {
+            pageKey: "catalog",
+            status: "PUBLISHED",
+            puckData: {
+              content: withDecoration
+                ? [businessRegion, hero]
+                : [{ ...hero, props: { ...hero.props, isVisible: false } }, businessRegion],
+              root: { props: {} },
+            },
+          },
+        } }),
+      );
+      await page.goto("/catalog");
+
+      const tools = page.locator(".catalog-page");
+      await expect(tools).toBeVisible();
+      await expect(page.locator("[data-production-fallback]").filter({ has: tools })).toHaveCount(0);
+      await expect(page.getByRole("region", { name: "选款中心装修内容", exact: true })).toHaveCount(0);
+      const main = page.getByRole("main");
+      await expect(main.getByRole("heading", { level: 1 })).toHaveCount(1);
+      const supplement = page.getByRole("region", { name: "选款中心装修内容补充" });
+      if (withDecoration) {
+        await expect(main.getByRole("region", { name: "选款中心检索", exact: true })).toBeVisible();
+        await expect(supplement.getByRole("heading", { name: "选款指南", level: 1 })).toBeVisible();
+        await expect.poll(() => tools.evaluate((element) => {
+          const after = element.parentElement?.querySelector('section[aria-label="选款中心装修内容补充"]');
+          return Boolean(after && (element.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING));
+        })).toBe(true);
+      } else {
+        await expect(main.getByRole("region", { name: "选款中心", exact: true })).toBeVisible();
+        await expect(supplement).toHaveCount(0);
+      }
+    });
+  }
+
   test("关于海川不再渲染旧暖黄色首屏，标题避开导航", async ({ page }) => {
     await page.route("**/api/page-modules/document/published?*", (route) =>
       route.fulfill({
@@ -1050,7 +1107,7 @@ test.describe("公开页面业务区顺序", () => {
                     id: "catalog-test-intro",
                     eyebrow: "SELECTION CENTER",
                     title: "选款中心",
-                    body: "按关键词、货号与当前真实数据支持的属性查找作品。",
+                    body: "按关键词、款号与当前真实数据支持的属性查找作品。",
                     buttonText: "",
                     linkUrl: "",
                     targetType: "none",
@@ -1096,6 +1153,130 @@ test.describe("公开页面业务区顺序", () => {
       const supplement = document.querySelector('section[aria-label="选款中心装修内容补充"]');
       return Boolean(supplement && (element.compareDocumentPosition(supplement) & Node.DOCUMENT_POSITION_FOLLOWING));
     })).toBe(true);
+  });
+});
+
+test.describe("公开业务页唯一主标题", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route("**/api/**", (route) => route.fulfill({ json: { code: 200, data: null } }));
+    await page.route("**/api/page-modules/document/stream?*", (route) => route.fulfill({ status: 204 }));
+  });
+
+  const cases = [
+    { key: "catalog", path: "/catalog", order: "before", heading: "页面主视觉", width: 1440 },
+    { key: "catalog", path: "/catalog", order: "only", heading: "选款中心", width: 390 },
+    { key: "contact", path: "/contact", order: "only", heading: "联系海川", width: 1440 },
+    { key: "contact", path: "/contact", order: "before", heading: "页面主视觉", width: 1440 },
+    { key: "contact", path: "/contact", order: "after", heading: "页面主视觉", width: 390 },
+    { key: "contact", path: "/contact?view=request", order: "after", heading: "提交咨询需求", width: 1440 },
+    { key: "contact", path: "/contact?type=privacy", order: "after", heading: "提交隐私请求", width: 390 },
+    { key: "contact", path: "/contact?type=privacy", order: "before", heading: "提交隐私请求", width: 390 },
+  ] as const;
+
+  for (const { key, path, order, heading, width } of cases) {
+    test(`${path} ${order} ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: width < 768 ? 844 : 900 });
+      const hero = {
+        type: "首屏主视觉",
+        props: {
+          id: "business-page-heading-hero",
+          title: "页面主视觉",
+          desktopImage: "/images/镶嵌.png",
+          mobileImage: "/images/镶嵌.png",
+          altText: "珠宝工艺影像",
+        },
+      };
+      const business = {
+        type: "业务功能区",
+        props: { id: `${key}-business-region`, pageKey: key, locked: true },
+      };
+      const content = order === "before" ? [hero, business] : order === "after" ? [business, hero] : [business];
+      await page.route("**/api/page-modules/document/published?*", (route) =>
+        route.fulfill({ json: {
+          code: 200,
+          data: { pageKey: key, status: "PUBLISHED", puckData: { content, root: { props: {} } } },
+        } }),
+      );
+      await page.goto(path);
+
+      const main = page.getByRole("main");
+      if (order !== "only") {
+        await expect(main.getByText("页面主视觉", { exact: true })).toBeVisible();
+      }
+      const title = main.getByRole("heading", { level: 1 });
+      await expect(title).toHaveCount(1, { timeout: 5000 });
+      await expect(title).toHaveText(heading);
+      if (order !== "before") {
+        await expect(page.locator("[data-page-header-mode]")).toHaveAttribute("data-page-header-mode", "solid");
+      }
+      await expectNoHorizontalOverflow(page);
+    });
+  }
+
+  test("不同设备的图片决定跨业务区的首屏标题归属", async ({ page }) => {
+    const definition = generateTemplateFromRecipe(createRecommendedRecipe("page-hero"), {
+      templateId: "tpl_business_mobile_heading",
+      name: "手机首屏",
+    });
+    definition.metadata.visualRole = "primary-stage";
+    const image = Object.values(definition.slots).find((slot) => slot.type === "image");
+    const heading = Object.values(definition.slots).find((slot) => slot.type === "heading");
+    if (!image || !heading) throw new Error("手机首屏夹具需要图片与标题");
+    image.required = true;
+    const instance = createDynamicTemplateInstanceProps({
+      templateId: definition.templateId,
+      version: 1,
+      name: definition.name,
+    });
+    instance.contentBySlotId = {
+      [image.slotId]: { src: "", mobileSrc: "/images/镶嵌.png", alt: "手机首屏影像" },
+      [heading.slotId]: "手机首屏标题",
+    };
+    const business = { type: "业务功能区", props: { id: "catalog-business-region", pageKey: "catalog", locked: true } };
+    const trailingHero = {
+      type: "首屏主视觉",
+      props: {
+        id: "business-trailing-hero",
+        title: "补充首屏标题",
+        desktopImage: "/images/镶嵌.png",
+        mobileImage: "/images/镶嵌.png",
+        altText: "补充首屏影像",
+      },
+    };
+    await page.route("**/api/page-modules/document/published?*", (route) =>
+      route.fulfill({ json: {
+        code: 200,
+        data: {
+          pageKey: "catalog",
+          status: "PUBLISHED",
+          puckData: {
+            content: [{ type: "动态模板实例", props: instance }, business, trailingHero],
+            root: { props: {} },
+            resolvedDynamicTemplates: {
+              [dynamicTemplateVersionKey(definition.templateId, 1)]: {
+                templateId: definition.templateId,
+                version: 1,
+                schemaVersion: definition.schemaVersion,
+                definitionChecksum: "business-mobile-heading-fixture",
+                definition,
+              },
+            },
+          },
+        },
+      } }),
+    );
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/catalog");
+    const main = page.getByRole("main");
+    const title = main.getByRole("heading", { level: 1 });
+    await expect(title).toHaveText("补充首屏标题");
+    await expect(main.getByRole("heading", { name: "手机首屏标题" })).toHaveCount(0);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(title).toHaveText("手机首屏标题");
+    await expect(main.getByRole("heading", { name: "补充首屏标题", level: 2 })).toBeVisible();
+    await expectNoHorizontalOverflow(page);
   });
 });
 
@@ -1181,7 +1362,7 @@ test.describe("公开菜单键盘交互", () => {
   test("第三档：菜单关闭时 Esc 不劫持当前输入焦点", async ({ page }) => {
     await page.goto("/catalog");
     const searchInput = page.getByRole("search").getByRole("combobox", {
-      name: "关键词或货号",
+      name: "关键词或款号",
     });
 
     await searchInput.focus();
@@ -1200,7 +1381,7 @@ test.describe("公开菜单键盘交互", () => {
     await page.goto("/catalog");
 
     const searchInput = page.getByRole("search").getByRole("combobox", {
-      name: "关键词或货号",
+      name: "关键词或款号",
     });
     await searchInput.fill("戒指");
     await page.getByRole("search").getByRole("button", { name: "搜索" }).click();

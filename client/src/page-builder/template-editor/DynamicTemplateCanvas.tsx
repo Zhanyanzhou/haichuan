@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App as AntdApp, Button } from "antd";
 import { focusFirstInvalidNumberField } from "../inspector/controls/NumberField";
 import {
   compileDynamicTemplateRenderPlan,
-  canNestDynamicTemplateNode,
   getDynamicTemplateNodeRegistryEntry,
   resolveDynamicTemplateMoveLanding,
   resolveDynamicTemplateMoveShortcutLanding,
@@ -43,7 +42,8 @@ import {
   useVisualEditorSession,
   type CanvasVisualEditMessage,
 } from "../visual-editor/visualEditorSession";
-import { useTemplateEditorSession } from "./templateEditorSession";
+import { TEMPLATE_CANVAS_SPACING_REQUEST, useTemplateEditorSession, type TemplateCanvasSpacingRequest } from "./templateEditorSession";
+import { useEditorCanvasActive } from "../workspace/editorCanvasActivity";
 import type { TemplateEditorSelectionExclusion } from "./templateEditorSelection";
 import { isCanvasTargetInScope } from "./templateCanvasInteraction";
 import {
@@ -79,10 +79,6 @@ import {
 } from "./templateTrialContentSession";
 import { findDynamicTemplateParentId } from "./dynamicTemplateEditorUtils";
 import { requestDeleteTemplateNode, requestRemoveContractRole, type TemplateDeletionUi } from "./requestTemplateNodeDeletion";
-import {
-  addConfiguredTemplateRegion,
-} from "./dynamicTemplateDraftRepository";
-import CanvasInsertButton from "./CanvasInsertButton";
 import TemplateBreakpointComparison from "./TemplateBreakpointComparison";
 import { getTemplateLayoutPresentation } from "./templateLayoutPresentation";
 
@@ -114,6 +110,8 @@ function createEditingContent(
 
 export default function DynamicTemplateCanvas() {
   const { modal } = AntdApp.useApp();
+  const canvasActive = useEditorCanvasActive();
+  const templateWorkspaceActive = useVisualEditorSession((state) => state.workspace === "template");
   const templateDeletionUi: TemplateDeletionUi = {
     confirm: (options) => {
       modal.confirm({
@@ -193,7 +191,55 @@ export default function DynamicTemplateCanvas() {
   const [spacingEditing, setSpacingEditing] = useState(false);
   const stageRef = useRef<HTMLElement>(null);
 
-  useEffect(() => { setSpacingEditing(false); }, [selectedNodeId, selectedContractRole, editingScopeId, breakpoint, previewMode, comparison, sessionId]);
+  useEffect(() => { setSpacingEditing(false); }, [selectedNodeId, selectedContractRole, editingScopeId, device, breakpoint, previewMode, comparison, sessionId, canvasActive, templateWorkspaceActive]);
+
+  const changeSpacingEditing = useCallback((editing: boolean, request?: TemplateCanvasSpacingRequest) => {
+    const state = useTemplateEditorSession.getState();
+    if (!canvasActive || comparison || state.previewMode || (request && !templateWorkspaceActive)) return false;
+    if (editing && (!state.sessionId || !state.selectedObjectId || state.selectedContractRole)) return false;
+    if (request && (
+      request.sessionId !== state.sessionId
+      || request.sessionId !== sessionId
+      || request.nodeId !== state.selectedObjectId
+      || request.nodeId !== selectedNodeId
+      || request.breakpoint !== state.breakpoint
+      || request.breakpoint !== breakpoint
+      || state.device !== device
+      || useVisualEditorSession.getState().workspace !== "template"
+      || Boolean(inlineText || state.imageFocusEditingNodeId)
+      || !state.draft?.definition.nodes[request.nodeId]
+      || getDynamicTemplateStructureLockOwnerId(state.draft.definition, request.nodeId) !== null
+    )) return false;
+    // 与画布按钮共用实际命中条件：无选区、锁定或没有像素手柄时不会渲染这颗按钮。
+    const selectedOverlay = stageRef.current?.querySelector(
+      `[data-overlay-selection-for="node:${CSS.escape(state.selectedObjectId ?? "")}"]`,
+    );
+    const spacingButton = selectedOverlay?.querySelector<HTMLButtonElement>(".template-editor__selection-toolbar-spacing");
+    if (editing && !spacingButton) return false;
+    if (focusFirstInvalidNumberField()) return false;
+    if (state.activeInteraction) {
+      setCanvasNotice("请先完成或取消当前拖动，再切换间距调整。");
+      return false;
+    }
+    setSpacingEditing(editing);
+    if (request) requestAnimationFrame(() => {
+      const current = useTemplateEditorSession.getState();
+      if (current.sessionId === request.sessionId && current.selectedObjectId === request.nodeId
+        && current.breakpoint === request.breakpoint && !current.previewMode) {
+        spacingButton?.focus({ preventScroll: true });
+      }
+    });
+    return true;
+  }, [canvasActive, templateWorkspaceActive, comparison, sessionId, selectedNodeId, breakpoint, device, inlineText]);
+
+  useEffect(() => {
+    const handleRequest = (event: Event) => {
+      const request = (event as CustomEvent<TemplateCanvasSpacingRequest>).detail;
+      if (request && changeSpacingEditing(true, request)) event.preventDefault();
+    };
+    window.addEventListener(TEMPLATE_CANVAS_SPACING_REQUEST, handleRequest);
+    return () => window.removeEventListener(TEMPLATE_CANVAS_SPACING_REQUEST, handleRequest);
+  }, [changeSpacingEditing]);
 
   useEffect(() => {
     setDirectResizePreview(null);
@@ -875,20 +921,6 @@ export default function DynamicTemplateCanvas() {
     if (changed) executeCommand({ type: "replace-definition", label: "调整模板画布尺寸", definition: next });
   };
 
-  const addFirstRegion = () => {
-    let createdNodeId: string | null = null;
-    const result = executeCommand({
-      type: "transform-definition",
-      label: "添加内容区域",
-      transform: (current) => {
-        const added = addConfiguredTemplateRegion(current);
-        createdNodeId = added.nodeId;
-        return added.definition;
-      },
-    });
-    if (result.ok && result.changed && createdNodeId) selectObject(createdNodeId);
-  };
-
   const scopeRules = resolveTemplateNodeRules(dynamicDraft.definition, scopeId, breakpoint);
   const layoutLabel = getTemplateLayoutPresentation(scopeRules).label;
   const comparisonAction = Number(dynamicDraft.definition.schemaVersion) >= 2 && !previewMode ? <button type="button" aria-pressed={comparison} onClick={() => {
@@ -901,10 +933,6 @@ export default function DynamicTemplateCanvas() {
       {neutralImages ? "显示默认图片" : "结构示意"}
     </button>
   );
-  const insertButtons = (entries: readonly (readonly ["Container" | "Row" | "Stack" | "Grid" | "ImageSlot" | "HeadingSlot" | "TextSlot" | "ButtonSlot", string])[]) => entries.map(([type, label]) => {
-    const allowed = canNestDynamicTemplateNode(dynamicDraft.definition.nodes[scopeId].type, type) && !getDynamicTemplateStructureLockOwnerId(dynamicDraft.definition, scopeId);
-    return <CanvasInsertButton key={type} type={type} label={label} parentId={scopeId} disabled={!allowed} onNotice={setCanvasNotice} />;
-  });
   const navigation = (!previewMode ? <nav className="template-editor__scope-breadcrumb" aria-label="画布编辑层级">
         {scopeAncestors.map((id, index) => <span key={id}>
           {index ? <span aria-hidden="true"> / </span> : null}
@@ -915,14 +943,6 @@ export default function DynamicTemplateCanvas() {
         <span role="status">{layoutLabel} · {breakpoint === "desktop" ? "桌面端" : "手机端"}{frameNote ? ` · ${frameNote}` : ""}</span>
         {neutralImageAction}
         {selectedNodeId && selectedNodeId !== scopeId && getDynamicTemplateNodeRegistryEntry(dynamicDraft.definition.nodes[selectedNodeId].type).canHaveChildren ? <Button size="small" disabled={Boolean(getDynamicTemplateStructureLockOwnerId(dynamicDraft.definition, selectedNodeId))} onClick={() => enterEditingScope(selectedNodeId)}>进入选中容器</Button> : null}
-        <details className="template-editor__canvas-add"><summary>＋ 添加内容</summary><div>
-          <strong>添加到：{dynamicDraft.definition.nodes[scopeId]?.name}</strong>
-          {scopeId === dynamicDraft.definition.rootNodeId ? <p>请先在画布或结构树选择内容区域；也可从下方添加布局区域。</p> : null}
-          {insertButtons([["ImageSlot", "图片槽位"], ["HeadingSlot", "标题槽位"], ["TextSlot", "正文槽位"], ["ButtonSlot", "按钮槽位"]])}
-          <details className="template-editor__canvas-add-layout"><summary>布局区域与分组</summary><div>
-            {insertButtons([["Container", "区域"], ["Row", "左右排列布局分组"], ["Stack", "上下排列布局分组"], ["Grid", "网格布局分组"]])}
-          </div></details>
-        </div></details>
       </nav> : null);
   return (
     <section ref={stageRef} className="homepage-editor__stage template-editor__stage" aria-label={`${dynamicDraft.definition.name}模板设计画布`}
@@ -931,6 +951,12 @@ export default function DynamicTemplateCanvas() {
         const target = event.target as HTMLElement;
         if (target.closest('input, textarea, select, [contenteditable="true"], [role="dialog"], .ant-popover')) return;
         if (event.key === "Escape") {
+          if (spacingEditing) {
+            changeSpacingEditing(false);
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
           if (leaveEditingScope()) { event.preventDefault(); event.stopPropagation(); }
         } else if (event.key === "Enter" && target.closest('[data-overlay-hit-for]')) {
           if (enterEditingScope()) { event.preventDefault(); event.stopPropagation(); }
@@ -992,14 +1018,7 @@ export default function DynamicTemplateCanvas() {
         }}
         propertyControls={propertyControls}
         spacingEditing={spacingEditing}
-        onSpacingEditingChange={(editing) => {
-          if (focusFirstInvalidNumberField()) return;
-          if (useTemplateEditorSession.getState().activeInteraction) {
-            setCanvasNotice("请先完成或取消当前拖动，再切换间距调整。");
-            return;
-          }
-          setSpacingEditing(editing);
-        }}
+        onSpacingEditingChange={changeSpacingEditing}
         onPropertyPreview={(key, value) => applyPlacementCommand({ type: "update-definition", label: "调整画布间距", update: (next) => {
           if (!selectedNodeId) return;
           if (key.startsWith("imageFocus.")) {
@@ -1131,12 +1150,9 @@ export default function DynamicTemplateCanvas() {
               : handleNodeAction}
           />
           {!previewMode && isEmptyTemplate ? (
-            <div className="template-editor__canvas-empty-state" role="region" aria-label="空白模板起步操作">
+            <div className="template-editor__canvas-empty-state" role="region" aria-label="模板结构为空">
               <strong>当前模板暂无内容</strong>
-              <p>添加区域继续编辑，或撤销刚才的删除。</p>
-              <div className="template-editor__canvas-empty-actions">
-                <Button type="primary" onClick={addFirstRegion}>添加区域</Button>
-              </div>
+              <p>可以撤销本次编辑中的删除，或在模板组件库选择已有内容的模板。</p>
             </div>
           ) : null}
         </div>

@@ -131,7 +131,7 @@ test.describe("商品引用黄金闭环（确定性 UI）", () => {
     await expect(dialog.getByText("分页商品 13")).toBeVisible();
     await expect(dialog.getByText(/第 2 页 · 共 13 件商品/)).toBeVisible();
 
-    const search = dialog.getByRole("textbox", { name: "搜索商品名称或货号" });
+    const search = dialog.getByRole("textbox", { name: "搜索商品名称或款号" });
     const slowRequest = page.waitForRequest((request) => request.url().includes("keyword=slow"));
     await search.fill("slow");
     await slowRequest;
@@ -153,7 +153,7 @@ test.describe("商品引用黄金闭环（确定性 UI）", () => {
     await expect(page.getByText("可公开戒指")).toBeVisible();
     await page.getByRole("button", { name: "重新选择商品" }).click();
     const dialog = page.getByRole("dialog", { name: "选择商品" });
-    const search = dialog.getByRole("textbox", { name: "搜索商品名称或货号" });
+    const search = dialog.getByRole("textbox", { name: "搜索商品名称或款号" });
     await search.fill("fail-new");
     await dialog.getByRole("button", { name: /触发解析失败商品/ }).click();
     await expect(page.getByTestId("product-reference-state")).not.toContainText("FAIL-NEW");

@@ -155,7 +155,7 @@ function scrollCanvasPreviewIntoView(target: HTMLElement) {
   });
 }
 
-export function PageCanvasTemplatePreview() {
+export function PageCanvasTemplatePreview({ onSelect }: { onSelect?: () => void }) {
   const preview = usePageCanvasTemplatePreview();
   const rootRef = useRef<HTMLElement>(null);
   const currentViewport = useHomepagePuck((state) => state.appState.ui.viewports.current);
@@ -190,11 +190,12 @@ export function PageCanvasTemplatePreview() {
     const frameWindow = root?.ownerDocument.defaultView;
     if (!root || !preview || !frameWindow || frameWindow === window) return;
 
+    const contentShell = root.closest<HTMLElement>(".homepage-editor__storefront-frame");
     const reportCanvasHeight = () => {
-      const contentShell = root.closest<HTMLElement>(".homepage-editor__storefront-frame");
+      if (!contentShell?.isConnected) return;
       const documentHeight = Math.ceil(Math.max(
-        contentShell?.scrollHeight || 0,
-        contentShell?.offsetHeight || 0,
+        contentShell.scrollHeight,
+        contentShell.offsetHeight,
       ));
       if (documentHeight <= 0) return;
       frameWindow.parent.postMessage(
@@ -209,15 +210,16 @@ export function PageCanvasTemplatePreview() {
     return () => {
       observer.disconnect();
       frameWindow.clearTimeout(delayedReport);
+      frameWindow.requestAnimationFrame(reportCanvasHeight);
     };
   }, [preview]);
 
   useEffect(() => {
     const root = rootRef.current;
-    if (!root || !preview) return;
+    if (!root || !preview?.focused) return;
     const frameWindow = root.ownerDocument.defaultView ?? window;
     const frame = frameWindow.requestAnimationFrame(() => scrollCanvasPreviewIntoView(root));
-    // 切换设备后 Puck 会异步把已选模块带回视口；预览排在该模块之前，需要再拉回第一屏。
+    // iframe 高度和缩放由宿主异步更新，更新后再次定位页尾的预览。
     const delayed = frameWindow.setTimeout(() => scrollCanvasPreviewIntoView(root), 140);
     return () => {
       frameWindow.cancelAnimationFrame(frame);
@@ -254,7 +256,11 @@ export function PageCanvasTemplatePreview() {
       data-canvas-template-preview="true"
       aria-label={`画布预览：${preview.name}，尚未加入页面`}
       onPointerDown={(event) => event.stopPropagation()}
-      onClick={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation();
+        setPageCanvasTemplatePreviewFocused(true);
+        onSelect?.();
+      }}
     >
       <DynamicTemplateRenderer
         definition={projected.definition}

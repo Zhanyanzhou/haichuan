@@ -84,10 +84,12 @@ test("客户档案只读页沿用员工 Cookie 会话，并保留筛选与详情
   await authenticateCustomerService(page);
   const listRequests: Request[] = [];
   const detailRequests: Request[] = [];
+  let releaseInitialList = () => {};
+  const initialListCanFinish = new Promise<void>((resolve) => { releaseInitialList = resolve; });
 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
-    const path = new URL(request.url()).pathname;
+    const { pathname: path, searchParams } = new URL(request.url());
     if (path.endsWith("/auth/profile")) return route.fallback();
     if (path.endsWith("/customers/admin/42")) {
       detailRequests.push(request);
@@ -95,6 +97,10 @@ test("客户档案只读页沿用员工 Cookie 会话，并保留筛选与详情
     }
     if (path.endsWith("/customers/admin")) {
       listRequests.push(request);
+      if (!searchParams.has("keyword")) {
+        await initialListCanFinish;
+        return fulfill(route, { list: [{ ...customer, name: "迟到的未筛选结果" }], total: 1 });
+      }
       return fulfill(route, { list: [customer], total: 1 });
     }
     if (path.endsWith("/settings/flags")) {
@@ -108,18 +114,28 @@ test("客户档案只读页沿用员工 Cookie 会话，并保留筛选与详情
   });
 
   await page.goto("/admin/customers");
-  await expect(page.getByRole("heading", { name: "客户管理" })).toBeVisible();
-  await expect(page.getByText("客户档案合同样本", { exact: true })).toBeVisible();
+  try {
+    await expect(page.getByRole("heading", { name: "客户管理" })).toBeVisible();
+    await expect(page.getByRole("status", { name: "正在加载客户档案…" })).toBeVisible();
+    const search = page.getByPlaceholder("搜索手机号 / 姓名 / 邮箱（回车应用）");
+    await search.click();
+    await search.fill("合同样本");
+    await search.press("Enter");
+    await expect(page.getByText("客户档案合同样本", { exact: true })).toBeVisible();
+    const initialList = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname.endsWith("/customers/admin") && !url.searchParams.has("keyword");
+    });
+    releaseInitialList();
+    await (await initialList).finished();
+    await expect(page.getByText("迟到的未筛选结果", { exact: true })).toHaveCount(0);
+  } finally {
+    releaseInitialList();
+  }
   expect(listRequests[0].headers().authorization).toBeUndefined();
   expect(new URL(listRequests[0].url()).searchParams.get("page")).toBe("1");
   expect(new URL(listRequests[0].url()).searchParams.get("pageSize")).toBe("20");
 
-  await page
-    .getByPlaceholder("搜索手机号 / 姓名 / 邮箱（回车应用）")
-    .fill("合同样本");
-  await page
-    .getByPlaceholder("搜索手机号 / 姓名 / 邮箱（回车应用）")
-    .press("Enter");
   await expect.poll(() => listRequests.some((request) =>
     new URL(request.url()).searchParams.get("keyword") === "合同样本",
   )).toBe(true);
@@ -144,11 +160,18 @@ test("客户档案只读页沿用员工 Cookie 会话，并保留筛选与详情
 test("客户档案列表失败只显示安全本地文案并保留重试入口", async ({ page }) => {
   await authenticateCustomerService(page);
   const internalMessage = "Prisma P2022 column customer_secret does not exist";
+  const viewport = { width: 390, height: 844 };
+  await page.setViewportSize(viewport);
+  let releaseList = () => {};
+  const listCanFinish = new Promise<void>((resolve) => { releaseList = resolve; });
 
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith("/auth/profile")) return route.fallback();
-    if (path.endsWith("/customers/admin")) return fail(route, internalMessage);
+    if (path.endsWith("/customers/admin")) {
+      await listCanFinish;
+      return fail(route, internalMessage);
+    }
     if (path.endsWith("/settings/flags")) {
       return fulfill(route, {
         commerceEnabled: false,
@@ -160,6 +183,15 @@ test("客户档案列表失败只显示安全本地文案并保留重试入口",
   });
 
   await page.goto("/admin/customers");
+  try {
+    const loading = page.getByRole("status", { name: "正在加载客户档案…" });
+    await expect(loading).toBeVisible();
+    const indicator = (await loading.locator(".site-route-loading__indicator").boundingBox())!;
+    expect(indicator.x + indicator.width / 2).toBeCloseTo(viewport.width / 2, 0);
+    expect(indicator.y + indicator.height / 2).toBeCloseTo(viewport.height / 2, 0);
+  } finally {
+    releaseList();
+  }
   await expect(page.getByText("客户档案加载失败，请稍后重新加载。", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "重新加载" })).toBeVisible();
   await expect(page.getByText(internalMessage, { exact: true })).toHaveCount(0);

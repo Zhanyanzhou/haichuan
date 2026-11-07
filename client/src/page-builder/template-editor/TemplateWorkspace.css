@@ -1762,19 +1762,6 @@
   line-height: 20px;
 }
 
-@media (max-width: 520px) {
-  .template-editor__toolbar-new {
-    display: none;
-  }
-}
-
-/* 停靠布局以组件库底部入口为主；窄屏才保留顶部快捷入口。 */
-@media (min-width: 1025px) {
-  .template-editor__toolbar-new {
-    display: none;
-  }
-}
-
 .template-editor__mobile-settings {
   text-align: left;
   font: inherit;
@@ -1794,12 +1781,6 @@
 @media (max-width: 767px) {
   .template-editor__toolbar-settings {
     display: none;
-  }
-}
-
-@media (min-width: 521px) and (max-width: 1024px) {
-  .template-editor__toolbar-new-menu-item {
-    display: none !important;
   }
 }
 
@@ -3279,6 +3260,24 @@ button.template-editor__toolbar-state {
 .template-editor__toolbar-state[data-mode="error"] > i { background: var(--adm-error); }
 .template-editor__toolbar-state[data-mode="pending"] > i { background: var(--adm-info); }
 
+@media (min-width: 1025px) and (max-width: 1439px) {
+  .admin-header__editor-slot .template-editor__toolbar {
+    grid-template-columns: minmax(0, 1fr) auto minmax(max-content, 1fr);
+  }
+
+  .admin-header__editor-slot .template-editor__toolbar > .homepage-editor__toolbar-actions {
+    position: static;
+    grid-column: 3;
+    grid-row: 1;
+    justify-self: end;
+    transform: none;
+  }
+}
+
+@media (min-width: 521px) {
+  .template-editor__toolbar-check > .ant-btn-icon { display: none; }
+}
+
 @media (max-width: 520px) {
   .admin-header__editor-slot .template-editor__toolbar {
     padding-inline: 6px;
@@ -3287,6 +3286,14 @@ button.template-editor__toolbar-state {
   .template-editor__toolbar .homepage-editor__toolbar-actions {
     gap: 2px;
   }
+
+  .template-editor__toolbar .homepage-editor__toolbar-actions .ant-btn:not(.template-editor__toolbar-settings) {
+    width: 30px;
+    min-width: 30px !important;
+    padding-inline: 0;
+  }
+
+  .template-editor__toolbar-check > span:not(.ant-btn-icon) { display: none; }
 }
 
 .template-editor__library .homepage-editor__library-tools {
@@ -3297,10 +3304,9 @@ button.template-editor__toolbar-state {
   padding: 8px 12px 108px;
 }
 
-/* 设计模式的页脚现在有两个入口（12+38+8+38+12=108px），列表底部要让出整块页脚并留富余；
-   页面装修模式仍只有一个"新建模板"，不能跟着多出这段空白。 */
+/* 为模板设计的固定页脚留出滚动空间。 */
 .template-editor__library[data-unified-template-library="design"] .homepage-editor__template-scroll {
-  padding-bottom: 156px;
+  padding-bottom: 110px;
 }
 
 .template-editor__library .unified-template-library__category {
@@ -3369,10 +3375,6 @@ button.template-editor__toolbar-state {
   background: var(--adm-neutral-bg);
   outline: 2px solid var(--adm-focus);
   outline-offset: 2px;
-}
-
-.template-editor__library-footer > button + button {
-  margin-top: 8px;
 }
 
 .template-editor__structure-scroll { padding-top: 4px; }

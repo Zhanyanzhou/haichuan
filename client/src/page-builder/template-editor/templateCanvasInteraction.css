@@ -231,7 +231,7 @@
 .template-editor__canvas-add-layout > div { display: grid; gap: 6px; }
 .template-editor__canvas-add p { margin: 0; line-height: 1.5; }
 .template-editor__preview-trial { margin-top: 12px; }
-.template-editor__preview-trial summary { cursor: pointer; padding: 8px 0; }
+.template-editor__preview-trial > h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
 .template-editor__preview-trial select { display: block; width: 100%; margin-top: 6px; }
 .homepage-editor__inspector.template-editor__preview-inspector {
   display: grid;

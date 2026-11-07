@@ -116,7 +116,7 @@ assert.match(
 );
 assert.match(
   serverSource,
-  /import \{ customerFacingProductWhereForVisibilities \} from "\.\.\/products\/product-eligibility";/,
+  /import\s*\{[^}]*\bcustomerFacingProductWhereForVisibilities\b[^}]*\}\s*from "\.\.\/products\/product-eligibility";/,
   "页面发布必须从商品资格模块导入共享门禁",
 );
 assert.match(

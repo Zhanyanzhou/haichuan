@@ -9,7 +9,7 @@ export type PublicProductInquiryType =
   | "purchase-support"
   | "custom";
 
-/** URL 中的作品引用只允许复用数据库货号上限，不把任意长文本带入查询链。 */
+/** URL 中的作品引用只允许复用数据库款号上限，不把任意长文本带入查询链。 */
 export function normalizePublicProductReference(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const reference = value.trim();
@@ -20,7 +20,9 @@ export function normalizePublicProductReference(value: unknown): string | null {
   if (
     reference.length === 0
     || reference.length > 50
+    || reference === "." || reference === ".."
     || hasControlCharacter
+    || /[\uD800-\uDFFF]/u.test(reference)
   ) {
     return null;
   }
@@ -32,7 +34,7 @@ function publicProductReference(product: PublicProductReference): string {
   return code || String(product.id);
 }
 
-/** 新公开链接优先使用稳定货号；旧数据缺少货号时保留数字 ID 兼容。 */
+/** 新公开链接优先使用稳定款号；旧数据缺少款号时保留数字 ID 兼容。 */
 export function publicProductPath(product: PublicProductReference): string {
   return `/products/${encodeURIComponent(publicProductReference(product))}`;
 }

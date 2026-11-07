@@ -33,9 +33,11 @@ const SALES_MODES = [
 ] as const;
 
 const SORT_OPTIONS = [
+  "relevance",
   "sortOrder",
   "price_asc",
   "price_desc",
+  "published_desc",
   "updated_desc",
   "code_asc",
 ] as const;

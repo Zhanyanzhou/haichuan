@@ -6,6 +6,174 @@ const useMock = process.env.VITE_USE_MOCK === "true";
 test.describe("商品管理列表查询契约", () => {
   test.skip(useMock, "该回归通过拦截真实 API 路径检查查询参数");
 
+  test("逐行勾选商品，改分类时预览原值并保留冲突项", async ({ page }) => {
+    const categories = [
+      { id: 1, name: "原分类", slug: "original", level: 1, sortOrder: 1 },
+      { id: 2, name: "目标分类", slug: "target", level: 1, sortOrder: 2 },
+    ];
+    const products = [31, 32, 33, 34].map((id) => ({
+      id, name: `测试商品 ${id}`, code: `CATEGORY-${id}`, status: "PUBLISHED",
+      categoryId: id === 34 ? 2 : 1, materialType: "GOLD_999", salesMode: "DISPLAY_ONLY",
+      images: [], skus: [], completeness: { score: id === 33 ? 100 : 88, missingFields: id === 33 ? [] : ["detailContent"] },
+    }));
+    const writes: Array<{ id: number; body: unknown }> = [];
+    await page.route("**/api/**", async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      const update = path.match(/^\/api\/products\/(\d+)$/);
+      if (update && request.method() === "PUT") {
+        const id = Number(update[1]);
+        writes.push({ id, body: request.postDataJSON() });
+        if (id === 32) return route.fulfill({ status: 409, json: { code: 409, message: "商品分类已被更新" } });
+        const product = products.find((item) => item.id === id)!;
+        product.categoryId = 2;
+        return route.fulfill({ json: { code: 200, data: product } });
+      }
+      const data = path === "/api/products"
+        ? { list: products.map((product) => ({ ...product, category: categories.find(({ id }) => id === product.categoryId) })), total: products.length }
+        : path === "/api/categories/admin/tree" ? categories
+          : path === "/api/products/counts" ? { all: 4, PUBLISHED: 4 } : {};
+      return route.fulfill({ json: { code: 200, data } });
+    });
+    await installAdminSession(page, { role: "ADMIN" });
+    await page.goto("/admin/products");
+    const batch = page.getByRole("button", { name: "更多批量操作" });
+    const row = (id: number) => page.getByRole("row").filter({ hasText: `测试商品 ${id}` });
+
+    await expect(batch).toBeDisabled();
+    await expect(row(31)).toContainText("88%");
+    await expect(page.getByText(/当前页资料不完整商品/)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /勾选本页资料不完整商品/ })).toHaveCount(0);
+    await row(31).getByRole("checkbox").check();
+    await page.getByRole("button", { name: "清除选择" }).click();
+    await expect(batch).toBeDisabled();
+    for (const id of [31, 32, 34]) {
+      await row(id).getByRole("checkbox").check();
+    }
+
+    await batch.click();
+    await page.getByRole("menuitem", { name: "批量改分类" }).click();
+    const dialog = page.getByRole("dialog", { name: "批量改分类" });
+    await dialog.getByRole("combobox", { name: "目标分类" }).click();
+    await page.locator(".ant-select-item-option").filter({ hasText: /^目标分类$/ }).click();
+    await expect(dialog.getByText("CATEGORY-31 · 原分类 → 目标分类")).toBeVisible();
+    await expect(dialog.getByText(/1 件已在目标分类/)).toBeVisible();
+    expect(writes).toEqual([]);
+    await dialog.getByRole("button", { name: "确认移动 2 件" }).click();
+
+    await expect(dialog.getByText("1 件未移动，已保留选择。")).toBeVisible();
+    await expect(dialog.getByText("测试商品 32")).toBeVisible();
+    expect(writes.sort((a, b) => a.id - b.id)).toEqual([
+      { id: 31, body: { categoryId: 2, expectedCategoryId: 1 } },
+      { id: 32, body: { categoryId: 2, expectedCategoryId: 1 } },
+    ]);
+    await dialog.getByRole("button", { name: /^取\s*消$/ }).click();
+    await expect(row(31)).toContainText("目标分类");
+    await expect(row(31).getByRole("checkbox")).not.toBeChecked();
+    await expect(row(32).getByRole("checkbox")).toBeChecked();
+    await expect(row(34).getByRole("checkbox")).not.toBeChecked();
+  });
+
+  test("向下滚动商品筛选和列表时，标题与状态标签留在原位", async ({ page }) => {
+    const products = Array.from({ length: 20 }, (_, index) => ({
+      id: index + 1, name: `滚动测试商品 ${index + 1}`, code: `SCROLL-${index + 1}`,
+      status: "PUBLISHED", salesMode: "DISPLAY_ONLY", images: [], skus: [],
+    }));
+    await page.route("**/api/**", (route) => {
+      const path = new URL(route.request().url()).pathname;
+      const data = path === "/api/products" ? { list: products, total: 40 }
+        : path === "/api/products/counts" ? { all: 40, PUBLISHED: 40 }
+          : path === "/api/categories/admin/tree" ? [] : {};
+      return route.fulfill({ json: { code: 200, data } });
+    });
+    await installAdminSession(page, { role: "ADMIN" });
+
+    for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 740 }]) {
+      await page.setViewportSize(viewport);
+      await page.goto("/admin/products");
+      const title = page.getByRole("heading", { name: "商品管理" });
+      const tabs = page.getByRole("tablist", { name: "商品状态" });
+      const list = page.getByRole("region", { name: "商品筛选与列表" });
+      const search = page.getByPlaceholder("搜索商品标题");
+      await expect(list.getByRole("row")).toHaveCount(21);
+      const initialTitleY = (await title.boundingBox())!.y;
+      const initialTabsY = (await tabs.boundingBox())!.y;
+      const initialSearchY = (await search.boundingBox())!.y;
+
+      await search.hover();
+      await page.mouse.wheel(0, 320);
+      await expect.poll(async () => (await search.boundingBox())!.y).toBeLessThan(initialSearchY - 100);
+      await list.focus();
+      await page.keyboard.press("End");
+      await expect(list.locator(".ant-pagination")).toBeInViewport();
+      expect((await title.boundingBox())!.y).toBe(initialTitleY);
+      expect((await tabs.boundingBox())!.y).toBe(initialTabsY);
+    }
+  });
+
+  test("批量改销售方式预览目标，仅写入需修改的商品并保留失败项", async ({ page }) => {
+    const products = [
+      { id: 41, salesMode: "DIRECT_PURCHASE" },
+      { id: 42, salesMode: "SELECTION" },
+      { id: 43, salesMode: "APPOINTMENT" },
+      { id: 44, salesMode: "DISPLAY_ONLY" },
+    ].map((product) => ({
+      ...product, name: `测试作品 ${product.id}`, code: `MODE-${product.id}`,
+      status: "PUBLISHED", materialType: "GOLD_999", images: [], skus: [],
+    }));
+    const writes: Array<{ id: number; body: { salesMode: string } }> = [];
+    await page.route("**/api/**", async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      const update = path.match(/^\/api\/products\/(\d+)$/);
+      if (update && request.method() === "PUT") {
+        const id = Number(update[1]);
+        const body = request.postDataJSON();
+        writes.push({ id, body });
+        if (id === 42) return route.fulfill({
+          status: 409,
+          json: { code: 409, errorCode: "PRODUCT_SALES_MODE_CONFLICT", message: "商品原值已变化" },
+        });
+        const product = products.find((item) => item.id === id)!;
+        product.salesMode = body.salesMode;
+        return route.fulfill({ json: { code: 200, data: product } });
+      }
+      const data = path === "/api/products"
+        ? { list: products, total: products.length }
+        : path === "/api/categories/admin/tree" ? []
+          : path === "/api/products/counts" ? { all: 4, PUBLISHED: 4 } : {};
+      return route.fulfill({ json: { code: 200, data } });
+    });
+    await installAdminSession(page, { role: "ADMIN" });
+    await page.goto("/admin/products");
+    const row = (id: number) => page.getByRole("row").filter({ hasText: `测试作品 ${id}` });
+    for (const id of [41, 42, 43]) await row(id).getByRole("checkbox").check();
+    await page.getByRole("button", { name: "更多批量操作" }).click();
+    await page.getByRole("menuitem", { name: "批量改销售方式" }).click();
+    const dialog = page.getByRole("dialog", { name: "批量改销售方式" });
+    await expect(dialog.getByRole("button", { name: "确认修改" })).toBeDisabled();
+    await dialog.getByRole("combobox", { name: "目标销售方式" }).click();
+    await page.locator(".ant-select-item-option").filter({ hasText: /^预约到店$/ }).click();
+    await expect(dialog.getByText(/直接销售 → 预约到店/)).toBeVisible();
+    await expect(dialog.getByText(/1 件已是目标方式/)).toBeVisible();
+    await expect(dialog.getByText(/将停止标准零售加购和下单/)).toBeVisible();
+    expect(writes).toEqual([]);
+    await dialog.getByRole("button", { name: "确认修改 2 件商品" }).click();
+
+    const result = page.getByRole("dialog", { name: "已修改 1 件商品，1 件未确认完成" });
+    await expect(result.getByText(/测试作品 42.*数据已被其他操作更新/)).toBeVisible();
+    expect(writes.sort((a, b) => a.id - b.id)).toEqual([
+      { id: 41, body: { salesMode: "APPOINTMENT", expectedSalesMode: "DIRECT_PURCHASE" } },
+      { id: 42, body: { salesMode: "APPOINTMENT", expectedSalesMode: "SELECTION" } },
+    ]);
+    await result.getByRole("button", { name: /^关\s*闭$/ }).click();
+    await expect(row(41).getByText("预约到店", { exact: true })).toBeVisible();
+    await expect(row(41).getByRole("checkbox")).not.toBeChecked();
+    await expect(row(42).getByRole("checkbox")).toBeChecked();
+    await expect(row(43).getByRole("checkbox")).not.toBeChecked();
+    await expect(row(44).getByText("仅展示", { exact: true })).toBeVisible();
+  });
+
   test("默认、切换和重置排序均发送后端允许的 sortBy", async ({ page }) => {
     const productQueries: string[] = [];
 

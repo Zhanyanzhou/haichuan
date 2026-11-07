@@ -57,6 +57,7 @@
       "pageKey": "home",
       "publicPath": "/",
       "pageRole": "brand-home",
+      "allowedSectionRoles": ["page-hero", "page-intro", "collection-story", "editorial-split", "craft-detail", "creation-grid", "maison-fact", "service-invitation", "video-story"],
       "contentPlacement": "root-only",
       "allowedTemplateKeys": [
         "hero"
@@ -72,6 +73,7 @@
       "pageKey": "products",
       "publicPath": "/products",
       "pageRole": "brand-showcase",
+      "allowedSectionRoles": ["page-hero", "page-intro", "collection-story", "editorial-split", "craft-detail", "creation-grid", "video-story"],
       "contentPlacement": "root-only",
       "allowedTemplateKeys": [
         "hero"
@@ -87,12 +89,12 @@
       "pageKey": "catalog",
       "publicPath": "/catalog",
       "pageRole": "selection-tool",
+      "allowedSectionRoles": ["page-hero", "page-intro"],
       "contentPlacement": "root-only",
       "allowedTemplateKeys": [
         "hero"
       ],
       "businessRegionCount": 1,
-      "businessRegionPosition": "after-first-brand-block",
       "headerMode": {
         "configured": "overlay-light",
         "overlayRequiresFirstTemplate": "hero",
@@ -103,6 +105,7 @@
       "pageKey": "custom",
       "publicPath": "/custom",
       "pageRole": "brand-service",
+      "allowedSectionRoles": ["page-hero", "page-intro", "editorial-split", "service-invitation"],
       "contentPlacement": "root-only",
       "allowedTemplateKeys": [
         "hero"
@@ -118,6 +121,7 @@
       "pageKey": "about",
       "publicPath": "/about",
       "pageRole": "brand-story",
+      "allowedSectionRoles": ["page-hero", "page-intro", "editorial-split", "craft-detail", "maison-fact", "video-story"],
       "contentPlacement": "root-only",
       "allowedTemplateKeys": [
         "hero"
@@ -133,12 +137,12 @@
       "pageKey": "contact",
       "publicPath": "/contact",
       "pageRole": "conversion-support",
+      "allowedSectionRoles": ["page-hero", "page-intro", "editorial-split", "service-invitation"],
       "contentPlacement": "root-only",
       "allowedTemplateKeys": [
         "hero"
       ],
       "businessRegionCount": 1,
-      "businessRegionPosition": "after-first-brand-block",
       "headerMode": {
         "configured": "overlay-light",
         "overlayRequiresFirstTemplate": "hero",

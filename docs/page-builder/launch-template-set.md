@@ -1,5 +1,7 @@
 # 首发七母模板合同
 
+> D.53 从这七块中取首页首屏、作品网格和左右图文，作为三个独立的正式预设版本加入页面装修目录。D.54 退役模板设计里的「从首发母版开始」。本文中的母版派生、从零新建和七步向导流程作为历史参考。
+
 > 生效：2026-10-08。本文把[店铺装修产品合同](store-decoration.md)第 2 节的区块角色和[区块模板标准](section-template-standard.md)第 6 节的双端几何，落成**首次上线要交付的七块母模板**：每一块的角色、画幅、结构骨架、槽位、双端差异、禁区和验收断言。
 > 本文不新立产品规则。角色用途与禁区认 store-decoration 第 2 节；比例、栏数和首屏高度认区块模板标准第 6 节；创建步骤认 template-creation-rules；第三层取值只认区块模板标准第 2.3 节，不再要求风格名或像素圆角档；色值与对比度认 [UI_GUIDE](../UI_GUIDE.md)；公开条件认 [D.38](../DECISIONS.md)，**"公开必填只由页面自己的值满足"认 [D.40](../DECISIONS.md)**——D.40 已取代 D.38 中"锁定默认文案可满足公开必填"的子范围，D.38 其余条款不变。
 > 规则生效不等于功能验收。本文描述的是**要交付的产物**，不是已经存在的模板目录；当前是否做到见 [CURRENT_STATE](../CURRENT_STATE.md)。
@@ -369,13 +371,13 @@ cd client && npx playwright test tests/launch-template-set.contract.spec.ts --pr
 
 校验只证明**结构合法**，不证明：模板可生成、四区可精调、双端几何正确、页面可发布。这些属于第 7 节。
 
-**七份定义自 2026-10-08 起有创建入口，它同样不证明第 7 节的内容。** 模板设计器的模板库底部提供「从首发母版开始」（定义与派生在 [launchTemplateSet.ts](../../client/src/page-builder/template-creation/launchTemplateSet.ts)，选择面板 `LaunchMasterPickerModal.tsx` 只负责挑选）：选中一块后进入模板设计器，得到一份只换 `templateId`、结构与内容逐字节相同的新草稿。入口验收：
+**入口演进。** 七份定义自 2026-10-08 起曾通过模板库底部的「从首发母版开始」派生草稿。定义在 [launchTemplateSet.ts](../../client/src/page-builder/template-creation/launchTemplateSet.ts)。D.54 退役派生入口，已派生的草稿和已发布版本按原身份继续使用。入口回归命令如下。
 
 ```text
 cd client && npx playwright test tests/template-launch-master-entry.admin.spec.ts --project=admin-chromium
 ```
 
-它证明的是"定义能被编辑器接受、能派生、未保存前不产生任何服务端写入"，**不**证明模板可生成、四区可精调、双端几何正确、页面可发布——那些仍属第 7 节。母版与起步草稿都不会自动进入模板目录。
+此命令覆盖入口和模板工作台的浏览器行为。双端几何和页面发布结果按第 7 节分别验收。
 
 ## 7. 验收
 

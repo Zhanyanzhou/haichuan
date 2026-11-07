@@ -69,7 +69,6 @@ import {
   DYNAMIC_TEMPLATE_METADATA_LIST_LIMITS,
   DYNAMIC_TEMPLATE_METADATA_TEXT_MAX_LENGTH,
   DYNAMIC_TEMPLATE_SLOT_RULE_MAX_LINES,
-  addDynamicTemplateNode,
   moveDynamicTemplateNode,
   resolveTemplateDesignFrame,
   setDynamicTemplateNodeStructureLocked,
@@ -83,6 +82,7 @@ import {
   type DynamicTemplateResponsiveRules,
   type DynamicTemplateSlotDefinition,
   type DynamicTemplateValidationIssue,
+  type DynamicTemplateValidationResult,
   type DynamicTemplateResponsiveGroup,
   type TemplateInspectorBatchFieldPlan,
 } from "../template-definition";
@@ -1057,16 +1057,20 @@ import type {
 } from "./TemplateWorkspaceController";
 import type { TemplateInspectorIssueTarget } from "./templateInspectorCapabilities";
 
+function templateCheckIssueKey(issue: DynamicTemplateValidationIssue) {
+  return JSON.stringify([issue.code, issue.path, issue.nodeId, issue.slotId]);
+}
+
 export default function DynamicTemplateInspectorPanel({
   localOnly = false,
   workspaceVisible = true,
   metadataOpenRequest = 0,
   validationOpenRequest = 0,
+  checkedDefinition,
   publishReview = null,
   publishIssueEditing = false,
   publishedDraftAvailability = null,
   onSelectPublishIssue,
-  onPrepareIssueTarget,
   onEditPublishIssue,
   onOpenPublishReview,
   onConfirmPublish,
@@ -1077,17 +1081,18 @@ export default function DynamicTemplateInspectorPanel({
   onRetryCatalogRefresh,
   onReloadPublishedDraft,
   onUsePublishedTemplate,
+  onStartCanvasEdit,
 }: {
   localOnly?: boolean;
   workspaceVisible?: boolean;
   metadataOpenRequest?: number;
   /** 只读制作检查请求；不进入发布流程，也不保存草稿。 */
   validationOpenRequest?: number;
+  checkedDefinition?: DynamicTemplateValidationResult;
   publishReview?: TemplatePublishReview | null;
   publishIssueEditing?: boolean;
   publishedDraftAvailability?: PublishedDraftAvailability | null;
   onSelectPublishIssue?: (index: number) => void;
-  onPrepareIssueTarget?: (target: TemplateInspectorIssueTarget) => void;
   onEditPublishIssue?: (target: TemplateInspectorIssueTarget) => boolean;
   onOpenPublishReview?: () => void;
   onConfirmPublish?: () => void;
@@ -1098,6 +1103,7 @@ export default function DynamicTemplateInspectorPanel({
   onRetryCatalogRefresh?: () => void;
   onReloadPublishedDraft?: () => void;
   onUsePublishedTemplate?: () => void;
+  onStartCanvasEdit?: () => void;
 }) {
   const publishReviewRef = useRef<HTMLElement>(null);
   const validationSectionRef = useRef<HTMLElement>(null);
@@ -1121,6 +1127,16 @@ export default function DynamicTemplateInspectorPanel({
     };
   }, [publishReview?.requestId, workspaceVisible]);
   const draft = useTemplateEditorSession((state) => state.draft);
+  const sessionId = useTemplateEditorSession((state) => state.sessionId);
+  const [checkSession, setCheckSession] = useState<string | null>(null);
+  const [lastCheckedIssue, setLastCheckedIssue] = useState<{
+    sessionId: string;
+    objectId: string;
+    key: string;
+    message: string;
+  } | null>(null);
+  const returnIssue = lastCheckedIssue?.sessionId === sessionId ? lastCheckedIssue : null;
+  const validationOverviewOpen = Boolean(sessionId && checkSession === sessionId && !publishReview && !publishIssueEditing);
   const dirty = useTemplateEditorSession((state) => state.dirty);
   const previewDocument = useTemplateEditorSession((state) => state.previewDocument);
   const breakpoint = useTemplateEditorSession((state) => state.breakpoint);
@@ -1149,8 +1165,6 @@ export default function DynamicTemplateInspectorPanel({
   const metadataDetailsRef = useRef<HTMLElement>(null);
   const [gridColumnsError, setGridColumnsError] = useState<string | null>(null);
   // 名称和视觉职责原位可见，目录资料按需展开；问题定位仍能直接打开对应字段。
-  const [metadataDetailsOpen, setMetadataDetailsOpen] = useState(false);
-  const [rootSettingsOpen, setRootSettingsOpen] = useState(false);
   const [defaultContentFocus, setDefaultContentFocus] = useState<{ nodeId: string; slotId: string; requestId: number } | null>(null);
   const [locateIssueNotice, setLocateIssueNotice] = useState<string | null>(null);
   const [locateUnlockOwnerId, setLocateUnlockOwnerId] = useState<string | null>(null);
@@ -1214,10 +1228,9 @@ export default function DynamicTemplateInspectorPanel({
       if (rootNodeId) state.selectObject(rootNodeId);
       state.setInspectorTask("design");
       state.setInspectorView("context");
-      setRootSettingsOpen(true);
-      setMetadataDetailsOpen(true);
       window.requestAnimationFrame(() => {
         metadataDetailsRef.current?.scrollIntoView({ block: "nearest" });
+        metadataDetailsRef.current?.focus({ preventScroll: true });
       });
     };
     window.addEventListener("template-editor:open-metadata", openMetadata);
@@ -1265,8 +1278,6 @@ export default function DynamicTemplateInspectorPanel({
     state.selectObject(rootNodeId);
     state.setInspectorTask("design");
     state.setInspectorView("context");
-    setRootSettingsOpen(true);
-    setMetadataDetailsOpen(true);
     let secondFrame = 0;
     const frame = window.requestAnimationFrame(() => {
       secondFrame = window.requestAnimationFrame(() => {
@@ -1282,23 +1293,28 @@ export default function DynamicTemplateInspectorPanel({
     };
   }, [metadataOpenRequest, workspaceVisible]);
   useEffect(() => {
-    if (!workspaceVisible || validationOpenRequest <= handledValidationOpenRequestRef.current) return;
+    if (!sessionId || !workspaceVisible || validationOpenRequest <= handledValidationOpenRequestRef.current) return;
     if (focusFirstInvalidNumberField()) return;
     const state = useTemplateEditorSession.getState();
     if (!state.draft || state.activeInteraction) return;
     handledValidationOpenRequestRef.current = validationOpenRequest;
-    state.selectObject(state.draft.definition.rootNodeId);
-    state.setInspectorTask("design");
-    state.setInspectorView("context");
-    let secondFrame = 0;
+    setCheckSession(sessionId);
+  }, [sessionId, validationOpenRequest, workspaceVisible]);
+  useEffect(() => {
+    if (!validationOverviewOpen || !workspaceVisible) return;
     const frame = window.requestAnimationFrame(() => {
-      secondFrame = window.requestAnimationFrame(() => {
-        validationSectionRef.current?.scrollIntoView({ block: "nearest" });
-        validationSectionRef.current?.focus();
-      });
+      const section = validationSectionRef.current;
+      const row = returnIssue ? section?.querySelector<HTMLElement>(
+        `[data-template-check-issue="${CSS.escape(returnIssue.key)}"]`,
+      ) : null;
+      const details = row?.closest("details");
+      if (details) details.open = true;
+      const focusTarget = row?.querySelector("button") ?? row ?? section;
+      focusTarget?.scrollIntoView({ block: "nearest" });
+      focusTarget?.focus({ preventScroll: true });
     });
-    return () => { window.cancelAnimationFrame(frame); window.cancelAnimationFrame(secondFrame); };
-  }, [validationOpenRequest, workspaceVisible]);
+    return () => window.cancelAnimationFrame(frame);
+  }, [returnIssue, validationOpenRequest, validationOverviewOpen, workspaceVisible]);
   const canvasMeasurement = useCanvasObjectMeasurement({
     definition: dynamicDraft?.definition,
     nodeId: selectionNodeId,
@@ -1310,8 +1326,8 @@ export default function DynamicTemplateInspectorPanel({
     [draft],
   );
   const publishValidation = useMemo(
-    () => draft ? validateDynamicTemplatePublishDefinition(draft.definition) : null,
-    [draft],
+    () => checkedDefinition ?? (draft ? validateDynamicTemplatePublishDefinition(draft.definition) : null),
+    [checkedDefinition, draft],
   );
   useEffect(() => {
     if (!pendingIssueFocus || !dynamicDraft) return;
@@ -1335,7 +1351,6 @@ export default function DynamicTemplateInspectorPanel({
     let cancelled = false;
     let frame = 0;
     let attemptsRemaining = 4;
-    let structureSettleFrames = 2;
     const finish = () => setPendingIssueFocus((current) => (
       current?.requestId === pendingIssueFocus.requestId ? null : current
     ));
@@ -1359,9 +1374,7 @@ export default function DynamicTemplateInspectorPanel({
       destination.dataset.templateInspectorLocated = "true";
       destination.scrollIntoView({ block: "nearest", behavior: "smooth" });
       focusTarget.focus();
-      if (target.destination === "structure-region" || target.destination === "structure-slot") {
-        setLocateIssueNotice(target.reason ?? "请在结构工具中完成选择。");
-      } else if (pendingIssueFocus.source === "validation" && target.access !== "editable") {
+      if (pendingIssueFocus.source === "validation" && target.access !== "editable") {
         setLocateIssueNotice(target.reason ?? `“${target.field}”由系统管理，不能在此直接修改。`);
         setLocateIssueRecovery(true);
       }
@@ -1378,40 +1391,6 @@ export default function DynamicTemplateInspectorPanel({
         focusReviewFallback();
         return;
       }
-      if (target.destination === "structure-region" || target.destination === "structure-slot") {
-        if (target.destination === "structure-slot") {
-          const trigger = document.querySelector<HTMLButtonElement>(
-            '.template-editor__add-trigger[aria-label="添加槽位"]',
-          );
-          if (trigger?.getAttribute("aria-expanded") !== "true") trigger?.click();
-        }
-        const destination = target.destination === "structure-slot"
-          ? document.querySelector<HTMLElement>(
-              '[role="region"][aria-label="常用内容槽位"], [role="region"][aria-label="先创建区域并添加"]',
-            )
-          : document.querySelector<HTMLElement>(`[data-template-inspector-field="${CSS.escape(target.field)}"]`);
-        if (!destination) {
-          retryOrFinish();
-          return;
-        }
-        if (structureSettleFrames > 0) {
-          structureSettleFrames -= 1;
-          frame = window.requestAnimationFrame(locate);
-          return;
-        }
-        const focusTarget = destination.matches("button,input,select,textarea,[tabindex]")
-          ? destination
-          : destination.querySelector<HTMLElement>(
-              "button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex]",
-            );
-        if (!focusTarget) {
-          retryOrFinish();
-          return;
-        }
-        markAndFocus(destination, focusTarget);
-        return;
-      }
-
       const field = inspectorPanelRef.current?.querySelector<HTMLElement>(
         `[data-template-inspector-field="${CSS.escape(target.field)}"]`,
       ) ?? (target.field.startsWith("responsive.*.")
@@ -1458,8 +1437,15 @@ export default function DynamicTemplateInspectorPanel({
   // 当前断点投影会把旧合同的 desktop/mobile 都替换为同一份有效值；
   // 跨画布复制与来源判断必须读取会话原始定义，否则真实差异会被误判为无差异。
   const responsiveDefinition = draft!.definition;
-  if (selectionSnapshot.targets.length > 1 && !publishReview) {
-    if (Number(definition.schemaVersion) >= 2) return <aside className="homepage-editor__inspector template-editor__inspector" aria-label="模板属性"><div className="homepage-editor__inspector-scroll"><TemplateNativeDesignControls nodeIds={selectionSnapshot.targets.filter((target) => !target.roleId).map((target) => target.targetId)} /></div></aside>;
+  const returnToTemplateCheck = returnIssue && !publishReview && !publishIssueEditing ? (
+    <Button size="small" type="link" onClick={() => {
+      if (!focusFirstInvalidNumberField() && !useTemplateEditorSession.getState().activeInteraction) {
+        setCheckSession(sessionId);
+      }
+    }}>返回模板检查</Button>
+  ) : null;
+  if (selectionSnapshot.targets.length > 1 && !publishReview && !validationOverviewOpen) {
+    if (Number(definition.schemaVersion) >= 2) return <aside className="homepage-editor__inspector template-editor__inspector" aria-label="模板属性">{returnToTemplateCheck}<div className="homepage-editor__inspector-scroll"><TemplateNativeDesignControls nodeIds={selectionSnapshot.targets.filter((target) => !target.roleId).map((target) => target.targetId)} /></div></aside>;
     return (
       <TemplateBatchInspector
         definition={definition}
@@ -1790,17 +1776,12 @@ export default function DynamicTemplateInspectorPanel({
         target,
         source,
       });
-      if (target.objectId === definition.rootNodeId) {
-        setRootSettingsOpen(true);
-        setMetadataDetailsOpen(true);
-      }
       const session = useTemplateEditorSession.getState();
       if (switchDevice && (issueBreakpoint === "desktop" || issueBreakpoint === "mobile")) session.setBreakpoint(issueBreakpoint);
       else if (switchDevice && target.device) session.setDevice(target.device);
       session.selectObject(target.objectId);
       session.setInspectorTask(target.task);
       session.setInspectorView(target.view);
-      onPrepareIssueTarget?.(target);
     };
     if (publishReview) {
       if (issue.level === "error") {
@@ -1833,6 +1814,10 @@ export default function DynamicTemplateInspectorPanel({
     setLocateIssueNotice(null);
     setLocateUnlockOwnerId(null);
     setLocateIssueRecovery(false);
+    if (validationOverviewOpen && sessionId) {
+      setLastCheckedIssue({ sessionId, objectId: target.objectId, key: templateCheckIssueKey(issue), message: issue.message });
+      setCheckSession(null);
+    }
     presentTarget("validation", true);
   };
 
@@ -1884,12 +1869,12 @@ export default function DynamicTemplateInspectorPanel({
 
   const parentId = findDynamicTemplateParentId(definition, activeNodeId);
   const allowedParents = isRoot ? [] : getDynamicTemplateAllowedParentIds(definition, activeNodeId);
-  const activeValidation = (publishReview || isRoot) && publishValidation ? publishValidation : validation;
+  const activeValidation = (publishReview || isRoot || validationOverviewOpen) && publishValidation ? publishValidation : validation;
   const displayedSelectionSnapshot = publishReview?.selectionSnapshot ?? selectionSnapshot;
   const nodeIssues = activeValidation.issues.filter((issue) => (
     issue.nodeId === activeNodeId || (node.slotId && issue.slotId === node.slotId)
   ));
-  const contextValidationIssues = publishReview ? publishReview.issues : isRoot
+  const contextValidationIssues = publishReview ? publishReview.issues : isRoot || validationOverviewOpen
     ? activeValidation.issues
     : nodeIssues.length
       ? nodeIssues
@@ -1902,6 +1887,13 @@ export default function DynamicTemplateInspectorPanel({
   ));
   const currentIssueIndex = Math.max(0, Math.min(publishReview?.currentIndex ?? 0, displayedValidationIssues.length - 1));
   const remainingValidationIssues = publishReview ? [] : displayedValidationIssues.slice(12);
+  const returnedIssueResolved = validationOverviewOpen && returnIssue && !activeValidation.issues.some(
+    (issue) => templateCheckIssueKey(issue) === returnIssue.key,
+  );
+  const describeCheckTarget = ({ objectId, device }: TemplateInspectorIssueTarget) => [
+    objectId === definition.rootNodeId ? "模板整体" : definition.nodes[objectId]?.name,
+    device ? (device === "mobile" ? "移动端" : "桌面端") : null,
+  ].filter(Boolean).join(" · ");
   const recommendedPageOptions = [
     ...editorPages.map((page) => ({ value: page.key, label: page.label })),
     ...definition.metadata.recommendedFor
@@ -1978,8 +1970,11 @@ export default function DynamicTemplateInspectorPanel({
         : isRoot ? "请先完成必要修改" : "请先修正输入";
   const validationSection = (
         <section ref={publishReview ? publishReviewRef : validationSectionRef} role="region" aria-label={publishReview ? "本次发布检查" : "模板制作检查"} tabIndex={-1} className="homepage-editor__inspector-section template-editor__validation-section">
-          <div className="homepage-editor__inspector-section-head"><strong>{publishReview ? "本次发布检查" : isRoot ? "发布检查" : "实时校验"}</strong><span>{validationStatus}</span></div>
+          <div className="homepage-editor__inspector-section-head"><strong>{publishReview ? "本次发布检查" : validationOverviewOpen ? "模板检查" : isRoot ? "发布检查" : "实时校验"}</strong>
+            <span>{validationOverviewOpen ? `${displayedValidationIssues.length} 项需修正 · ${designSuggestions.length} 项提醒` : validationStatus}</span></div>
           <div className="homepage-editor__inspector-section-body template-editor__validation-list" role="status" aria-live="polite">
+            {validationOverviewOpen ? <p>自动检查模板结构与页面字段。构图和可读性请结合双端预览核对。</p> : null}
+            {returnedIssueResolved && returnIssue ? <p>已修正：{returnIssue.message}</p> : null}
             {publishReview ? <>
               {reviewedSnapshot ? (
                 <dl className="template-editor__publish-review-summary">
@@ -2011,7 +2006,8 @@ export default function DynamicTemplateInspectorPanel({
                 ))}
               </section>
               <p>{displayedValidationIssues.length > 0 ? `${displayedValidationIssues.length} 项需要修改，点击问题可进入对应设置。` : "必填项目与模板结构检查通过。留白、风格和无法自动判断的可读性仍需人工核对，这次通过不是视觉验收。"}</p>
-              <details><summary>预览与核对（可选）</summary>
+              <section className="template-editor__settings-section" aria-label="预览与核对（可选）">
+              <h3>预览与核对（可选）</h3>
               <span className="template-editor__validation-actions" role="group" aria-label="本次发布检查设备">
                 <Button
                   size="small"
@@ -2040,7 +2036,7 @@ export default function DynamicTemplateInspectorPanel({
                   {productionReviewFacts.pageScope ? "页面开放范围已核对" : "确认页面开放范围已核对"}
                 </Button>
               </span>
-              </details>
+              </section>
               {publishWorkflow?.status === "review-ready" ? <p>{unchangedPublishedContent ? unchangedPublishedCopy : "确认后保存当前设计并发布为模板版本。能保留内容的页面草稿、语言草稿和装修方案会自动沿用，已填写的内容会保留。同一份里有一处保不住时，整份保持旧版本。客户前台仍在发布页面后更新。"}</p> : null}
               {publishWorkflow?.status === "review-blocked" ? <p>请完成下面的必要修改，再重新检查并发布。</p> : null}
               {publishWorkflow?.status === "review-stale" ? <p>本次检查已过期，请重新检查。已审阅快照不会被当前新输入替换。</p> : null}
@@ -2093,7 +2089,7 @@ export default function DynamicTemplateInspectorPanel({
               const target = resolveTemplateInspectorIssueTarget(definition, issue);
               return (
                 <div
-                  key={`${issue.code}-${issue.path}`}
+                  key={templateCheckIssueKey(issue)}
                   className={`is-${issue.level}`}
                   aria-current={publishReview?.issues[publishReview.currentIndex] === issue ? "step" : undefined}
                   data-template-issue-object={target.objectId}
@@ -2101,17 +2097,21 @@ export default function DynamicTemplateInspectorPanel({
                   data-template-issue-field={target.field}
                   data-template-issue-device={target.device}
                   data-template-issue-destination={target.destination}
+                  data-template-check-issue={validationOverviewOpen ? templateCheckIssueKey(issue) : undefined}
                 >
                   <strong>需要修改</strong>
                   <span>{issue.message}</span>
-                  {target.destination === "structure-region" || target.destination === "structure-slot" ? (
+                  {validationOverviewOpen ? <small>{describeCheckTarget(target)}</small> : null}
+                  {target.field === "structure" && target.reason ? (
                     <small>{target.reason}</small>
                   ) : null}
-                  <span className="template-editor__validation-actions">
-                    <Button type="link" size="small" onClick={() => focusValidationIssue(issue)}>
-                      {publishReview ? "定位并返回编辑" : "定位"}
-                    </Button>
-                  </span>
+                  {target.field !== "structure" ? (
+                    <span className="template-editor__validation-actions">
+                      <Button type="link" size="small" onClick={() => focusValidationIssue(issue)}>
+                        {publishReview ? "定位并返回编辑" : "定位"}
+                      </Button>
+                    </span>
+                  ) : null}
                 </div>
               );
             })}
@@ -2122,34 +2122,39 @@ export default function DynamicTemplateInspectorPanel({
                     const target = resolveTemplateInspectorIssueTarget(definition, issue);
                     return (
                       <div
-                        key={`${issue.code}-${issue.path}`}
+                        key={templateCheckIssueKey(issue)}
                         className={`is-${issue.level}`}
                         data-template-issue-object={target.objectId}
                         data-template-issue-group={target.group}
                         data-template-issue-field={target.field}
                         data-template-issue-device={target.device}
                         data-template-issue-destination={target.destination}
+                        data-template-check-issue={validationOverviewOpen ? templateCheckIssueKey(issue) : undefined}
                       >
                         <strong>{issue.level === "error" ? "错误" : issue.level === "warning" ? "提醒" : "说明"}</strong>
                         <span>{issue.message}</span>
-                        {target.destination === "structure-region" || target.destination === "structure-slot" ? (
+                        {validationOverviewOpen ? <small>{describeCheckTarget(target)}</small> : null}
+                        {target.field === "structure" && target.reason ? (
                           <small>{target.reason}</small>
                         ) : null}
-                        <span className="template-editor__validation-actions">
-                          <Button type="link" size="small" onClick={() => focusValidationIssue(issue)}>
-                            {publishReview ? "定位并返回编辑" : "定位"}
-                          </Button>
-                        </span>
+                        {target.field !== "structure" ? (
+                          <span className="template-editor__validation-actions">
+                            <Button type="link" size="small" onClick={() => focusValidationIssue(issue)}>
+                              {publishReview ? "定位并返回编辑" : "定位"}
+                            </Button>
+                          </span>
+                        ) : null}
                       </div>
                     );
                   })}
                 </div>
               </section>
             ) : null}
-            {designSuggestions.length > 0 ? <details>
+            {designSuggestions.length > 0 ? <details open={validationOverviewOpen || undefined}>
               <summary>设计建议 · {designSuggestions.length} 项（不影响发布）</summary>
-              {designSuggestions.map((issue) => <div key={`${issue.code}-${issue.path}`} className="is-warning">
+              {designSuggestions.map((issue) => <div data-template-check-issue={validationOverviewOpen ? templateCheckIssueKey(issue) : undefined} key={templateCheckIssueKey(issue)} className="is-warning">
                 <span>{issue.message}</span>
+                {validationOverviewOpen ? <small>{describeCheckTarget(resolveTemplateInspectorIssueTarget(definition, issue))}</small> : null}
                 <Button type="link" size="small" onClick={() => focusValidationIssue(issue)}>查看对应设置</Button>
               </div>)}
             </details> : null}
@@ -2197,7 +2202,8 @@ export default function DynamicTemplateInspectorPanel({
     </section>
   ) : null;
   const rootUsageSection = isRoot ? (
-    <section className="template-editor__root-usage" aria-label="模板名称与页面职责">
+    <section className="template-editor__settings-section template-editor__root-usage" aria-label="模板名称与页面职责">
+      <h3>模板设置</h3>
       <div data-template-inspector-field="metadata.visualRole"><VisualChoiceField label="页面视觉职责" value={definition.metadata.visualRole ?? "support-stage"} columns={3} options={[
         { value: "primary-stage", label: "主舞台", icon: <FullscreenOutlined /> },
         { value: "feature-stage", label: "重点区", icon: <AppstoreOutlined /> },
@@ -2212,8 +2218,8 @@ export default function DynamicTemplateInspectorPanel({
             ? "重点区用于突出系列、工艺或专题内容，不占用页面的主舞台名额。"
             : "辅助区用于说明、补充图文或配套内容，不占用页面的主舞台名额。"}
       </p>
-      <details className="template-editor__header-compatibility">
-        <summary>首屏导航兼容</summary>
+      <section className="template-editor__header-compatibility">
+        <h4>首屏导航兼容</h4>
         <div data-template-inspector-field="metadata.headerCompatibility"><VisualMultiChoiceField
           label="导航兼容模式"
           values={definition.metadata.headerCompatibility ?? ["solid"]}
@@ -2226,11 +2232,7 @@ export default function DynamicTemplateInspectorPanel({
           })}
         /></div>
         <p className="homepage-editor__inspector-hint">当模板位于页面首个可见内容位置，且页面配置支持覆盖导航时，浅色覆盖声明才会影响导航展示；不兼容时回退为实色导航。此设置不添加导航，也不自动把模板变成主舞台。</p>
-      </details>
-      <Button size="small" aria-expanded={metadataDetailsOpen} aria-controls="template-inspector-metadata" onClick={() => {
-        if (focusFirstInvalidNumberField()) return;
-        setMetadataDetailsOpen((open) => !open);
-      }}>模板资料与使用限制</Button>
+      </section>
     </section>
   ) : null;
   const renderInspectorPanel = (activePanel: TemplateInspectorPanel, label: string) => (
@@ -3315,6 +3317,18 @@ export default function DynamicTemplateInspectorPanel({
     ),
   );
 
+  if (validationOverviewOpen) {
+    return (
+      <aside className="homepage-editor__inspector template-editor__inspector" aria-label="模板属性">
+        {inspectorHeader}
+        <div className="homepage-editor__inspector-scroll">
+          <Button size="small" type="link" onClick={() => setCheckSession(null)}>返回属性</Button>
+          {validationSection}
+        </div>
+      </aside>
+    );
+  }
+
   if (inspectorTask === "page-scope") {
     return (
       <aside
@@ -3328,6 +3342,7 @@ export default function DynamicTemplateInspectorPanel({
         {inspectorHeader}
         {inspectorTaskTabs}
         {publishIssueEditingNotice}
+        {returnToTemplateCheck}
         <div
           id="template-inspector-page-scope-panel"
           className="homepage-editor__inspector-scroll template-editor__page-scope"
@@ -3570,7 +3585,7 @@ export default function DynamicTemplateInspectorPanel({
                   type="info"
                   showIcon
                   message="当前结构没有页面字段"
-                  description="从结构区添加图片、文字等内容元素后，会自动生成对应页面字段；再在这里设置名称与填写规则，无需另建字段。"
+                  description="这里显示现有槽位对应的页面字段。"
                 />
               )}
               {scopedPageFields.length ? <PageFieldFormPreview fields={scopedPageFields} schemaVersion={definition.schemaVersion} onLocate={activatePageField} /> : null}
@@ -3583,6 +3598,10 @@ export default function DynamicTemplateInspectorPanel({
 
   const simpleSlot = !publishIssueEditing && !selectedRoleObject && SIMPLE_SLOT_TYPES.has(node.type) && !hasDesignField("responsive.placement") && ["auto", "fixed", "aspect-ratio"].includes(rules.height.mode);
   const nativeDesign = Number(definition.schemaVersion) >= 2 && !selectedRoleObject;
+  const issueControlsRequested = publishIssueEditing || returnIssue?.objectId === activeNodeId
+    || pendingIssueFocus?.target.objectId === activeNodeId;
+  const heroPresetContext = nativeDesign && (definition.metadata.sectionRole ?? definition.templateRecipe?.sectionRole) === "page-hero"
+    && !issueControlsRequested;
   const simpleContainer = !isRoot && isLayoutContainer && !getTemplateComposition(definition, activeNodeId, device) && rules.layoutMode !== "free";
   return (
     <aside
@@ -3599,7 +3618,8 @@ export default function DynamicTemplateInspectorPanel({
       {inspectorHeader}
       {inspectorTaskTabs}
       {publishIssueEditingNotice}
-      {!isRoot && !simpleSlot && hasCapability("node.name") ? <div className="template-editor__pinned-name" data-template-inspector-field="node.name">
+      {returnToTemplateCheck}
+      {!isRoot && !heroPresetContext && !simpleSlot && hasCapability("node.name") ? <div className="template-editor__pinned-name" data-template-inspector-field="node.name">
         <TextField transactional validate={(name) => name.trim() ? null : "节点名称不能为空。"} label="节点名称" value={node.name} maxLength={TEMPLATE_NODE_NAME_MAX_LENGTH} readOnly={isLocked} onChange={(name) => updateDefinition((next) => { next.nodes[activeNodeId].name = name; })} />
       </div> : null}
 
@@ -3612,7 +3632,7 @@ export default function DynamicTemplateInspectorPanel({
         {publishReview ? validationSection : (
         <>
         {isRoot && !publishReview ? <div className="template-editor__pinned-name" data-template-inspector-field="name">
-          <TextField transactional label="模板名称" hint="发布前必填；用于在模板列表中识别这份设计。" value={definition.name} maxLength={100} onChange={(name) => updateDefinition((next) => { next.name = name; })} />
+          <TextField transactional label="模板名称" hint={heroPresetContext ? undefined : "发布前必填；用于在模板列表中识别这份设计。"} value={definition.name} maxLength={100} onChange={(name) => updateDefinition((next) => { next.name = name; })} />
         </div> : null}
         {lastCommandResult && !lastCommandResult.ok ? (
           <Alert
@@ -3657,7 +3677,14 @@ export default function DynamicTemplateInspectorPanel({
             />
           </div>
         ) : null}
-        {nativeDesign ? <TemplateNativeDesignControls nodeIds={[activeNodeId]} onOpenPageScope={pageField ? openCurrentPageScope : undefined} layoutControls={({ disabled }) => <TemplateLayoutConversionControls nodeId={activeNodeId} disabled={disabled} />} /> : null}
+        {nativeDesign ? <TemplateNativeDesignControls
+          nodeIds={[activeNodeId]}
+          onOpenPageScope={pageField ? openCurrentPageScope : undefined}
+          onStartCanvasEdit={onStartCanvasEdit}
+          showIssueControls={issueControlsRequested}
+          showDefaultContent={defaultContentFocus?.nodeId === activeNodeId}
+          layoutControls={({ disabled, presetsOnly }) => <TemplateLayoutConversionControls nodeId={activeNodeId} disabled={disabled} presetsOnly={presetsOnly} />}
+        /> : null}
         {!nativeDesign && selectedRoleObject && Number(definition.schemaVersion) >= 3 ? (
           <TemplateDefaultContentControls
             section="content"
@@ -3666,10 +3693,7 @@ export default function DynamicTemplateInspectorPanel({
             onOpenPageScope={pageField ? openCurrentPageScope : undefined}
           />
         ) : null}
-        {isRoot ? <details open={rootSettingsOpen} onToggle={(event) => {
-          if (!event.currentTarget.open && focusFirstInvalidNumberField()) { event.currentTarget.open = true; return; }
-          setRootSettingsOpen(event.currentTarget.open);
-        }}><summary>模板设置</summary>{rootUsageSection}</details> : null}
+        {rootUsageSection}
         {!nativeDesign && simpleSlot ? <TemplateSlotControls definition={definition} nodeId={activeNodeId} device={device} onChange={updateDefinition} /> : null}
         {!nativeDesign && (simpleSlot || simpleContainer) ? <section className="homepage-editor__inspector-section template-editor__responsive-source-section">
           <div className="homepage-editor__inspector-section-head"><strong>布局值来源</strong><span>{responsiveSource === "shared" ? "与另一画布一致" : "当前画布有独立值"}</span></div>
@@ -3688,21 +3712,21 @@ export default function DynamicTemplateInspectorPanel({
         </section> : null}
         {!nativeDesign ? <TemplateCompositionControls definition={definition} selectedId={activeNodeId} device={device} onChange={updateDefinition} /> : null}
         {!nativeDesign && !getTemplateComposition(definition, activeNodeId, device) && isLayoutContainer ? <TemplateContainerControls definition={definition} nodeId={activeNodeId} device={device} showNodeName={isRoot} onChange={updateDefinition} /> : null}
-        {structureLockSection}
+        {!heroPresetContext || isLocked ? structureLockSection : null}
         {nativeDesign || simpleSlot || isRoot || simpleContainer ? null : getTemplateComposition(definition, activeNodeId, device) || isLayoutContainer ? (
           <section className="template-editor__settings-section">
             <h3>精确位置与尺寸 · 查看当前数值</h3>
             {renderInspectorPanel("layout", TEMPLATE_INSPECTOR_PANELS[inspectorContext].find((entry) => entry.panel === "layout")!.label)}
           </section>
         ) : renderInspectorPanel("layout", TEMPLATE_INSPECTOR_PANELS[inspectorContext].find((entry) => entry.panel === "layout")!.label)}
-        {metadataDetailsOpen && isRoot ? (
-          <section id="template-inspector-metadata" ref={metadataDetailsRef} className="template-editor__settings-section">
-            <h3>模板资料 · {nodeIssues.filter((issue) => issue.level === "error").length} 项错误</h3>
+        {isRoot ? (
+          <section id="template-inspector-metadata" ref={metadataDetailsRef} tabIndex={-1} className="template-editor__settings-section">
+            <h3>模板资料与使用限制</h3>
             {renderInspectorPanel("definition", TEMPLATE_INSPECTOR_PANELS[inspectorContext].find((entry) => entry.panel === "definition")!.label)}
             {renderInspectorPanel("rules", TEMPLATE_INSPECTOR_PANELS[inspectorContext].find((entry) => entry.panel === "rules")!.label)}
           </section>
         ) : null}
-        {(validationOpenRequest > 0 || (Number(definition.schemaVersion) < 3 && displayedValidationIssues.length > 0)) ? validationSection : null}
+        {(!heroPresetContext && validationOpenRequest === 0 && Number(definition.schemaVersion) < 3 && displayedValidationIssues.length > 0) ? validationSection : null}
         </>
         )}
       </div>

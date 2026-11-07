@@ -30,7 +30,7 @@ import {
   createPageLocaleContentHash,
   stripPageLocaleRevisionMetadata,
 } from "./page-document-localization";
-import { CONTENT_TEMPLATE_PAGE_RULES, withoutContentTemplatePublicationAttestation } from "./generated/contentTemplates.generated";
+import { CONTENT_TEMPLATE_PAGE_RULES, isContentTemplateSectionRoleAllowedOnPage, withoutContentTemplatePublicationAttestation } from "./generated/contentTemplates.generated";
 import {
   buildConsultationStarterDefinition,
   CONSULTATION_STARTER_SPECS,
@@ -49,6 +49,7 @@ const MAX_DEFINITION_BYTES = 1024 * 1024;
 const FORBIDDEN_JSON_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 const CATALOG_COVER_PREFIX = "/uploads/page-assets/";
 const MAX_CATALOG_COVER_URL_LENGTH = 500;
+const LAUNCH_PAGE_PRESET_SOURCE = "launch-page-preset:v1";
 
 interface ValidatedDefinition {
   definition: TemplateDefinitionV2;
@@ -553,7 +554,7 @@ export class DynamicTemplatesService {
       layoutType: definition.metadata.layoutType.trim(),
       description: definition.description?.trim() || null,
       slotSummary: definition.metadata.slotSummary.trim(),
-      recommendedFor: definition.metadata.recommendedFor as Prisma.InputJsonValue,
+      recommendedFor: definition.metadata.recommendedFor,
       tags: definition.metadata.tags as Prisma.InputJsonValue,
       definitionSchemaVersion: definition.schemaVersion,
     };
@@ -845,7 +846,10 @@ export class DynamicTemplatesService {
       where: {
         status: "ACTIVE",
         visibility: "STAFF",
-        sourceType: "CUSTOM",
+        OR: [
+          { sourceType: "CUSTOM" },
+          { sourceType: "SYSTEM", sourceReference: LAUNCH_PAGE_PRESET_SOURCE },
+        ],
         publishedVersion: { gt: 0 },
       },
       orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
@@ -927,7 +931,7 @@ export class DynamicTemplatesService {
     ));
   }
 
-  /** 与页面装修添加库的既有准入保持一致；recommendedFor 仅为推荐，不限制页面。 */
+  /** 样例、历史咨询模板不进入页面装修目录。 */
   private isPageEditorCatalogTemplate(template: {
     templateId: string;
     definition: TemplateDefinitionV2;
@@ -952,8 +956,19 @@ export class DynamicTemplatesService {
     }
     return this.withAuthorizedStaffRead(actor, false, async (transaction, staff) => {
       const published = (await this.listPublishedWithClient(transaction)).filter((template) => (
-        pageKey === undefined || this.isPageEditorCatalogTemplate(template)
+        pageKey === undefined || (
+          this.isPageEditorCatalogTemplate(template)
+          && isContentTemplateSectionRoleAllowedOnPage(
+            pageKey,
+            template.definition.metadata.sectionRole ?? template.definition.templateRecipe?.sectionRole,
+          )
+          && (template.sourceReference !== LAUNCH_PAGE_PRESET_SOURCE || template.recommendedFor.includes(pageKey))
+        )
       ));
+      if (pageKey !== undefined) {
+        published.sort((a, b) => Number(b.sourceReference === LAUNCH_PAGE_PRESET_SOURCE)
+          - Number(a.sourceReference === LAUNCH_PAGE_PRESET_SOURCE));
+      }
       // 页面装修只添加正式模板；设计模式继续读取当前员工自己的草稿目录。
       const editable = pageKey === undefined && staff.role === "SUPER_ADMIN"
         ? await this.listMineWithClient(staff.id, transaction)

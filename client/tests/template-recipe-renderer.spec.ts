@@ -1607,9 +1607,9 @@ test("首页首屏旧画布与新画框在指定视口分开成立", async ({ pa
     subtitle: "画面里的说明",
   });
   const poster = await read();
-  expect(poster.fit).toBe("cover");
-  expect(poster.poster).toBeNull();
-  expect(poster.imageWidth / poster.imageHeight, "带字横图也按桌面反比例显示").toBeCloseTo(9 / 16, 1);
+  expect(poster.fit).toBe("contain");
+  expect(poster.poster).toBe("contain");
+  expect(poster.imageWidth / poster.imageHeight, "带字横图完整放入对换后的竖框").toBeCloseTo(9 / 16, 1);
   expect(poster.source).toBe("desktop");
   expect(poster.titleText).toContain("画面里的标题");
   expect(poster.titleHeight).toBeLessThan(8);
@@ -1640,8 +1640,12 @@ test("首页首屏旧画布与新画框在指定视口分开成立", async ({ pa
     title: "画面标题",
   });
   const artworkLink = await read();
+  expect(artworkLink.fit).toBe("contain");
   expect(artworkLink.links).toEqual([{ href: "/products", nested: 0 }]);
   expect(artworkLink.titleHeight).toBeLessThan(8);
+
+  await show({ geometry: "new", device: "desktop", mode: "public", imageCarriesCopy: true, title: "画面标题" });
+  expect((await read()).fit).toBe("contain");
 
   await show({
     geometry: "new",

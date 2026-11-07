@@ -56,12 +56,6 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
     else await page.getByRole("button", { name: "进入选中容器", exact: true }).click();
   }
   async function number(page: Page, label: string, value: number) {
-    if (label === "水平焦点" || label === "垂直焦点") {
-      const precise = page.getByRole("button", { name: "精确百分比", exact: true });
-      if (await precise.count() && (await precise.getAttribute("aria-expanded")) !== "true") {
-        await precise.click();
-      }
-    }
     const field = page.getByRole("spinbutton", { name: label, exact: true });
     await field.fill(String(value)); await field.press("Enter");
     await expect(field).toHaveValue(String(value));
@@ -151,7 +145,6 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
     await fillTemplateIdentity(page, "黄金 Hero", "珠宝新品图文展示");
     const region = await add(page, "区域");
     await select(page, region);
-    await page.locator('details[data-template-property-group="尺寸与位置"] > summary').click();
     await page.getByRole("combobox", { name: "高度方式", exact: true }).selectOption("fixed");
     await number(page, "高度", 600);
     await enter(page, region);
@@ -171,8 +164,6 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
     const afterTrial = await readSession(page);
     expect(afterTrial.definition).toEqual(beforeTrial.definition);
     expect(afterTrial.historyPast).toEqual(beforeTrial.historyPast);
-    await page.getByText("断点显示与继承", { exact: true }).click();
-    await page.getByText("高级定位 · 改为局部叠放", { exact: true }).click();
     await page.getByRole("button", { name: "锚点 left top", exact: true }).click();
     await page.getByRole("button", { name: "确认定位", exact: true }).click();
     const historyBeforeMove = (await readSession(page)).historyPast.length;
@@ -246,7 +237,6 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
     await page.getByRole("tree", { name: "模板区域与槽位" }).locator(`[role="treeitem"][data-selection-target-id="${cards[1]}"]`).click({ modifiers: ["Control"] });
     await expect(page.getByRole("region", { name: "多选设计属性", exact: true })).toBeVisible();
     const batchHistory = (await readSession(page)).historyPast.length;
-    await page.locator('details[data-template-property-group="外观"] > summary').click();
     await number(page, "圆角", 12);
     const batch = await readSession(page);
     expect(batch.historyPast).toHaveLength(batchHistory + 1);

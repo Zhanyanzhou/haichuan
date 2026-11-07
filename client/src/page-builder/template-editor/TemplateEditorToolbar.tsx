@@ -1,4 +1,5 @@
 import {
+  AuditOutlined,
   CloseCircleOutlined,
   DesktopOutlined,
   DownloadOutlined,
@@ -7,7 +8,6 @@ import {
   SettingOutlined,
   DeleteOutlined,
   MobileOutlined,
-  PlusOutlined,
   RollbackOutlined,
 } from "@ant-design/icons";
 import { Button } from "antd";
@@ -32,7 +32,6 @@ import {
 } from "./WorkspaceToolbarPrimitives";
 
 export default function TemplateEditorToolbar({
-  onCreate,
   onSave,
   onPublish,
   localOnly = false,
@@ -41,6 +40,8 @@ export default function TemplateEditorToolbar({
   publishIssueEditing = false,
   publishedDraftUnavailable = false,
   onOpenPublishReview,
+  templateCheck,
+  onOpenTemplateCheck,
   onExport,
   onOpenVersionHistory,
   onArchive,
@@ -51,7 +52,6 @@ export default function TemplateEditorToolbar({
   onTogglePreview,
   previewButtonRef,
 }: {
-  onCreate?: () => void;
   onSave?: () => void;
   onPublish?: () => void;
   localOnly?: boolean;
@@ -60,6 +60,8 @@ export default function TemplateEditorToolbar({
   publishIssueEditing?: boolean;
   publishedDraftUnavailable?: boolean;
   onOpenPublishReview?: () => void;
+  templateCheck?: { errorCount: number; warningCount: number };
+  onOpenTemplateCheck?: () => void;
   onExport?: () => void;
   onOpenVersionHistory?: () => void;
   onArchive?: () => void;
@@ -196,13 +198,6 @@ export default function TemplateEditorToolbar({
               ? "当前模板没有未保存修改"
               : null;
   const compactActionItems = [
-    {
-      key: "new-template",
-      icon: <PlusOutlined />,
-      label: "新建模板",
-      className: "template-editor__toolbar-new-menu-item",
-      onClick: onCreate,
-    },
     ...(draft
       ? [{
           key: "template-settings",
@@ -346,6 +341,9 @@ export default function TemplateEditorToolbar({
                 ? "模板状态：有未发布修改"
                 : persistence.ariaLabel;
   const toolbarStateAction = publishReview ? onOpenPublishReview : undefined;
+  const templateCheckCount = templateCheck
+    ? templateCheck.errorCount + templateCheck.warningCount
+    : 0;
 
   const toolbar = (
     <header className="homepage-editor__toolbar template-editor__toolbar">
@@ -404,17 +402,20 @@ export default function TemplateEditorToolbar({
       <WorkspaceToolbarActions
         leading={(
           <>
-            <Button
-              className="template-editor__toolbar-new"
-              size="small"
-              icon={<PlusOutlined />}
-              disabled={busy || previewMode || !onCreate}
-              onClick={onCreate}
-              aria-label="顶部新建模板"
-              title="配置并生成模板；当前模板有未保存修改时会先询问如何处理"
-            >
-              新建模板
-            </Button>
+            {draft && !previewMode && !publishReview && templateCheck && onOpenTemplateCheck ? (
+              <Button
+                size="small"
+                className="template-editor__toolbar-check"
+                icon={<AuditOutlined />}
+                disabled={busy}
+                onClick={onOpenTemplateCheck}
+                aria-label={templateCheckCount > 0
+                  ? `模板检查，${templateCheck.errorCount} 项需修正，${templateCheck.warningCount} 项提醒`
+                  : "模板检查，当前无错误或提醒"}
+              >
+                {templateCheckCount > 0 ? `检查 ${templateCheckCount}` : "检查"}
+              </Button>
+            ) : null}
             {draft && !previewMode && (!storedDraftName.trim() || storedDraftName.trim() === "未命名模板") ? (
               <Button
                 className="template-editor__toolbar-settings"

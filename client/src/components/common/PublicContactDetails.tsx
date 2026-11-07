@@ -1,7 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import type { PublicSiteSettingsResource } from "@/hooks/usePublicSiteSettings";
 import { isDialablePhone, preferSiteSetting, resolvePublicPhone, resolvePublicWechat, SIGNED_PUBLIC_CONTACT } from "@/config/publicContact";
-import RouteLoading from "./RouteLoading";
 
 type PublicContactDetailsProps = {
   resource: PublicSiteSettingsResource;
@@ -36,6 +35,9 @@ export default function PublicContactDetails({ resource, preview = false, presen
     { label: "服务时间", value: hours },
     { label: "服务范围", value: SIGNED_PUBLIC_CONTACT.serviceArea },
   ].filter((channel) => channel.value);
+  const loadingNotice = resource.status === "loading"
+    ? <p className="public-contact-details__notice" role="status">正在加载联系方式…</p>
+    : null;
 
   useEffect(() => { setCopyStatus(""); }, [wechat, resource.status]);
   useEffect(() => { setQrReady(false); setQrFailed(false); }, [qrCode, resource.status]);
@@ -57,7 +59,7 @@ export default function PublicContactDetails({ resource, preview = false, presen
 
   if (presentation === "direct") return (
     <div className="contact-methods">
-      {resource.status === "loading" ? <RouteLoading scope="inline" surface="public" label="正在加载联系方式…" /> : null}
+      {loadingNotice}
       {resource.status === "error" ? <section className="contact-direct__unavailable" aria-label="联系方式加载状态">
         <h2>联系方式暂时无法加载</h2>
         <p role="alert">请稍后重试，恢复后即可查看微信与电话。</p>
@@ -106,7 +108,7 @@ export default function PublicContactDetails({ resource, preview = false, presen
 
   return (
     <div className="public-contact-details">
-      {resource.status === "loading" ? <RouteLoading scope="inline" surface="public" label="正在加载联系方式…" /> : null}
+      {loadingNotice}
       {resource.status === "error" ? <p role="alert" className="public-contact-details__notice">
         联系信息暂时无法加载，您仍可通过本页表单提交需求。
       </p> : null}

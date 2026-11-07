@@ -15,6 +15,7 @@ interface SkuRecord {
   isActive: boolean;
   material?: string;
   size?: string | null;
+  color?: string | null;
   price: number;
   goldWeight?: number | null;
   inventories?: Array<{ quantity: number }>;
@@ -97,7 +98,16 @@ interface ProductRecord {
   fulfillmentType: "IN_STOCK" | "PREORDER" | "CUSTOM";
   dispatchTime: "SAME_DAY" | "WITHIN_24_HOURS" | "WITHIN_48_HOURS" | "OVER_48_HOURS" | "CUSTOM";
   deliveryMethods: string[];
-  shippingTemplate: { isActive: boolean } | null;
+  shippingTemplate: {
+    id: number;
+    isActive: boolean;
+    feeMode: "FREE" | "FIXED" | "CONDITIONAL";
+    baseFee: number;
+    remoteSurcharge: number;
+    freeShippingThreshold: number | null;
+    excludedRegions: unknown;
+    updatedAt: Date;
+  } | null;
   requiresInsuredShipping: boolean;
   requiresSignature: boolean;
   includesCertificate: boolean;
@@ -109,6 +119,7 @@ interface ProductRecord {
   isLimited: boolean;
   isCustom: boolean;
   price: number;
+  priceMin?: number | null;
   primaryImageId: number | null;
   listingImageId: number | null;
   primaryImage?: ImageRecord | null;
@@ -196,7 +207,16 @@ function product(
     fulfillmentType: "IN_STOCK",
     dispatchTime: "WITHIN_48_HOURS",
     deliveryMethods: ["EXPRESS"],
-    shippingTemplate: null,
+    shippingTemplate: {
+      id: 1,
+      isActive: true,
+      feeMode: "FREE",
+      baseFee: 0,
+      remoteSurcharge: 0,
+      freeShippingThreshold: null,
+      excludedRegions: [],
+      updatedAt: new Date("2026-08-24T00:00:00.000Z"),
+    },
     requiresInsuredShipping: true,
     requiresSignature: true,
     includesCertificate: true,
@@ -538,7 +558,7 @@ test("发布质量快照覆盖公开规格、履约服务、SKU 与证书事实"
         status: "DRAFT",
         price: 100,
         primaryImageId: 1,
-        skus: [{ id: 1, isActive: true, size: "圈口 14", price: 100 }],
+        skus: [{ id: 1, isActive: true, size: "圈口 14", color: "白色", price: 100 }],
         ...overrides,
       }),
     ]);
@@ -561,6 +581,9 @@ test("发布质量快照覆盖公开规格、履约服务、SKU 与证书事实"
   assert.notEqual(await qualityHash({ requiresInsuredShipping: false }), baseline);
   assert.notEqual(await qualityHash({
     skus: [{ id: 1, isActive: true, size: "圈口 15", price: 100 }],
+  }), baseline);
+  assert.notEqual(await qualityHash({
+    skus: [{ id: 1, isActive: true, size: "圈口 14", color: "玫瑰金", price: 100 }],
   }), baseline);
   assert.notEqual(await qualityHash({
     certificates: [{
@@ -751,7 +774,7 @@ test("存量质量报告复用发布门禁并保持严格只读", async () => {
   assert.equal(report.items[1].assessment, "READY");
   assert.equal(report.items[1].storedStateFresh, false);
   assert.deepEqual(report.items[1].issues, []);
-  assert.match(report.items[2].issues.join("、"), /名称|货号|图片|主图|列表图/);
+  assert.match(report.items[2].issues.join("、"), /名称|款号|图片|主图|列表图/);
   assert.match(report.items[3].issues.join("、"), /一物一件商品/);
 });
 
@@ -1010,6 +1033,47 @@ test("DIRECT_PURCHASE 库存为 0 仍可发布，SINGLE_UNIT 多有效 SKU 返�
   ]);
   await assert.doesNotReject(() => priceOnly.service.canPublish(302));
 
+  const missingTemplate = createService([
+    product({
+      id: 303,
+      status: "DRAFT",
+      price: 100,
+      primaryImageId: 1,
+      shippingTemplate: null,
+      skus: [{ id: 35, isActive: true, price: 100, inventories: [{ quantity: 1 }] }],
+    }),
+  ]);
+  await assert.rejects(
+    () => missingTemplate.service.canPublish(303),
+    (error: unknown) => error instanceof BadRequestException
+      && String(error.message).includes("包邮运费模板"),
+  );
+
+  const paidTemplate = createService([
+    product({
+      id: 304,
+      status: "DRAFT",
+      price: 100,
+      primaryImageId: 1,
+      shippingTemplate: {
+        id: 2,
+        isActive: true,
+        feeMode: "FIXED",
+        baseFee: 20,
+        remoteSurcharge: 0,
+        freeShippingThreshold: null,
+        excludedRegions: [],
+        updatedAt: new Date("2026-08-24T00:00:00.000Z"),
+      },
+      skus: [{ id: 36, isActive: true, price: 100, inventories: [{ quantity: 1 }] }],
+    }),
+  ]);
+  await assert.rejects(
+    () => paidTemplate.service.canPublish(304),
+    (error: unknown) => error instanceof BadRequestException
+      && String(error.message).includes("包邮运费模板"),
+  );
+
   const invalidSingle = createService([
     product({
       id: 301,
@@ -1075,6 +1139,71 @@ test("已发布商品 SKU 更新破坏门禁时返回 409，并由事务回滚�
   );
   assert.equal(records[0].skus[0].price, 100);
   assert.equal(records[0].price, 100);
+});
+
+for (const salesMode of ["DISPLAY_ONLY", "DIRECT_PURCHASE"] as const) {
+  test(`已发布READY的${salesMode}作品切换1000起预约定制后重算发布质量且保留SKU`, async () => {
+    const id = salesMode === "DISPLAY_ONLY" ? 321 : 322;
+    const { service, records } = createService([
+      product({
+        id,
+        status: "PUBLISHED",
+        salesMode,
+        price: 5800,
+        priceMin: null,
+        primaryImageId: 1,
+        skus: [{ id: 42, isActive: true, price: 5800, inventories: [{ quantity: 3 }] }],
+      }),
+    ]);
+    await service.canPublish(id);
+    const previousHash = records[0].publicationQualityHash;
+    const previousSkus = structuredClone(records[0].skus);
+
+    const updated = await service.update(id, { salesMode: "CUSTOM_INQUIRY", priceMin: 1000 }, adminActor);
+
+    assert.equal(updated.status, "PUBLISHED");
+    assert.equal(updated.salesMode, "CUSTOM_INQUIRY");
+    assert.equal(updated.priceMin, 1000);
+    assert.equal(records[0].publicationQualityStatus, "READY");
+    assert.ok(records[0].publicationQualityCheckedAt instanceof Date);
+    assert.notEqual(records[0].publicationQualityHash, previousHash);
+    const storedHash = records[0].publicationQualityHash;
+    assert.match(storedHash || "", /^[a-f0-9]{64}$/);
+    assert.equal(records[0].price, 5800);
+    assert.deepEqual(records[0].skus, previousSkus);
+
+    // 更新结果先断言READY，再独立重跑真实发布门禁核对已保存哈希；不替换协调或门禁实现。
+    const currentQuality = await service.canPublish(id);
+    assert.equal(storedHash, currentQuality.qualityHash);
+    const repriced = await service.update(id, { priceMin: 1800 }, adminActor);
+    assert.equal(repriced.status, "PUBLISHED");
+    assert.equal(records[0].publicationQualityStatus, "READY");
+    assert.notEqual(records[0].publicationQualityHash, storedHash);
+    assert.deepEqual(records[0].skus, previousSkus);
+  });
+}
+
+test("已发布但现有媒体失效的作品切换定制返回409，事务回滚销售模式、参考起价与质量态", async () => {
+  const { service, records, getProductUpdateCount } = createService([
+    product({
+      id: 323,
+      status: "PUBLISHED",
+      salesMode: "DISPLAY_ONLY",
+      price: 5800,
+      priceMin: null,
+      primaryImageId: 1,
+      skus: [{ id: 43, isActive: true, price: 5800, inventories: [{ quantity: 3 }] }],
+    }),
+  ], false);
+  const previous = structuredClone(records[0]);
+
+  await assert.rejects(
+    () => service.update(323, { salesMode: "CUSTOM_INQUIRY", priceMin: 1000 }, adminActor),
+    (error: unknown) => error instanceof ConflictException && /已发布商品更新后不满足发布条件/.test(error.message),
+  );
+
+  assert.ok(getProductUpdateCount() > 0, "先发生事务内更新，再由真实发布门禁拒绝");
+  assert.deepEqual(records[0], previous);
 });
 
 test("公开列表只返回当前标记为 READY 的已发布商品", async () => {

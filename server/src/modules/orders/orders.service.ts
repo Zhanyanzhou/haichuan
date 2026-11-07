@@ -129,7 +129,7 @@ export interface OrderListParams {
   pageSize?: number;
   status?: string;
   keyword?: string;
-  /** 商品名/货号筛选 */
+  /** 商品名/款号筛选 */
   productKeyword?: string;
   startDate?: string;
   endDate?: string;
@@ -751,11 +751,15 @@ export class OrdersService implements OnModuleInit {
   private async lockTradeProduct(
     tx: Prisma.TransactionClient,
     productId: number,
+    forReservationRelease = false,
   ) {
+    const visibleProduct = forReservationRelease
+      ? Prisma.sql`AND (deleted_at IS NULL OR status = 'ARCHIVED')`
+      : Prisma.sql`AND deleted_at IS NULL`;
     const rows = await tx.$queryRaw<
       Array<{ id: number; inventoryPolicy: "STANDARD" | "SINGLE_UNIT" }>
     >(
-      Prisma.sql`SELECT id, inventory_policy AS inventoryPolicy FROM products WHERE id = ${productId} AND deleted_at IS NULL FOR UPDATE`,
+      Prisma.sql`SELECT id, inventory_policy AS inventoryPolicy FROM products WHERE id = ${productId} ${visibleProduct} FOR UPDATE`,
     );
     if (rows.length === 0) throw new NotFoundException("商品不存在或已删除");
     return rows[0].inventoryPolicy;
@@ -884,7 +888,7 @@ export class OrdersService implements OnModuleInit {
 
     let releasedCount = 0;
     for (const productId of [...byProduct.keys()].sort((a, b) => a - b)) {
-      const inventoryPolicy = await this.lockTradeProduct(tx, productId);
+      const inventoryPolicy = await this.lockTradeProduct(tx, productId, true);
       const claimed = [] as typeof reservations;
       for (const reservation of byProduct.get(productId) ?? []) {
         // 先用状态条件原子抢占释放权；库存写入失败会随整个事务回滚该标记。
@@ -1220,7 +1224,7 @@ export class OrdersService implements OnModuleInit {
       if (max !== null) where.finalAmount.lte = new Prisma.Decimal(max);
     }
 
-    // 商品名/货号筛选：通过 items 关联
+    // 商品名/款号筛选：通过 items 关联
     if (params.productKeyword) {
       where.items = {
         some: {

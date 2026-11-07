@@ -43,7 +43,12 @@ export default function CommerceRoute({
         </Suspense>
       );
     }
-    return <Navigate to={withPublicLocalePath("/contact", locale)} replace />;
+    return (
+      <>
+        <RouteLoading surface="public" />
+        <Navigate to={withPublicLocalePath("/contact", locale)} replace />
+      </>
+    );
   }
   return <>{children}</>;
 }

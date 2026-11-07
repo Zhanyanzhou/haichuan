@@ -19,7 +19,11 @@ export type MediaReferenceContext = {
   sourceId?: string;
 };
 
-export type MediaReferenceInput = MediaReferenceContext & { url: string };
+export type MediaReferenceInput = MediaReferenceContext & {
+  url: string;
+  /** 由发布服务根据公开作品和图片归属解析，不能来自页面输入。null 表示引用无法解析。 */
+  verifiedProductMediaAssetId?: number | null;
+};
 
 export type MediaReferenceIssueCode =
   | 'DANGEROUS_URL'
@@ -312,6 +316,12 @@ export class MediaAuthorizationResolverService {
     }
     if (/^https?:\/\//i.test(value) || value.startsWith('//')) {
       return { kind: 'ISSUE', code: 'EXTERNAL_UNMANAGED' };
+    }
+    if (reference.verifiedProductMediaAssetId !== undefined && /^\/products\/public\/\d+\/media\/\d+$/.test(value)) {
+      const id = reference.verifiedProductMediaAssetId;
+      return id && Number.isSafeInteger(id) && id > 0
+        ? { kind: 'MANAGED', lookup: { id } }
+        : { kind: 'ISSUE', code: 'UNREGISTERED_MEDIA' };
     }
     const controlled = value.match(/^\/api\/upload\/public-media\/(\d+)(?:[?#].*)?$/);
     if (controlled) return { kind: 'MANAGED', lookup: { id: Number(controlled[1]) } };

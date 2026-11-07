@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { PAGE_MEDIA_STORAGE_KEY, type PageMediaItem } from "../src/page-builder/fields/pageMediaLibrary";
 
 const screenshotDir = path.resolve("test-results/visual-editor-hero");
 
@@ -69,7 +70,9 @@ test.describe("Hero 所见即所得编辑器（确定性 UI）", () => {
     await expect(contentPanel.getByRole("button", { name: "删除图片" })).toHaveCount(0);
 
     await contentPanel.getByLabel("更多图片操作").click();
-    await expect(contentPanel.getByRole("button", { name: "删除图片" })).toBeVisible();
+    const removeImage = page.getByRole("menuitem", { name: "删除图片" });
+    await expect(removeImage).toBeVisible();
+    await removeImage.press("Escape");
 
     await contentPanel.getByRole("button", { name: "在画布中调整构图" }).click();
     await expect(page.getByRole("tab", { name: "模板编辑" })).toHaveAttribute("aria-selected", "true");
@@ -78,7 +81,19 @@ test.describe("Hero 所见即所得编辑器（确定性 UI）", () => {
       .toHaveAttribute("aria-pressed", "true");
   });
 
-  test("图片异常时只出现一条可操作警告，技术信息按需展开", async ({ page }) => {
+  test("图片异常时直接显示一条可操作警告和尺寸信息", async ({ page }) => {
+    const measuredImage: PageMediaItem = {
+      url: "/svg/template-hero.svg",
+      name: "低清测试图",
+      type: "image",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      displayWidth: 320,
+      displayHeight: 180,
+      metadataStatus: "measured",
+    };
+    await page.evaluate(({ key, image }) => {
+      localStorage.setItem(key, JSON.stringify([image]));
+    }, { key: PAGE_MEDIA_STORAGE_KEY, image: measuredImage });
     await page.unroute("**/svg/template-hero.svg");
     await page.route("**/svg/template-hero.svg", (route) => route.fulfill({
       status: 200,
@@ -88,10 +103,9 @@ test.describe("Hero 所见即所得编辑器（确定性 UI）", () => {
     await page.reload();
 
     const contentPanel = page.getByRole("region", { name: "内容编辑测试区" });
-    await expect(contentPanel.getByRole("alert")).toHaveText(/图片清晰度不足，建议更换更大的图片/);
-    await expect(contentPanel.getByText(/当前 320 × 180/)).not.toBeVisible();
-    await contentPanel.getByText("查看图片信息").click();
-    await expect(contentPanel.getByText(/当前 320 × 180；建议/)).toBeVisible();
+    await expect(contentPanel.getByRole("alert")).toHaveText(/像素偏低，建议源宽/);
+    await expect(contentPanel.getByRole("status", { name: "图片信息" }).getByText("320×180。")).toBeVisible();
+    await expect(contentPanel.locator("details")).toHaveCount(0);
   });
 
   test("空海报显示可点文字角色，并用预览卡调整实例样式", async ({ page }) => {

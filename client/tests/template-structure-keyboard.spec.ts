@@ -6,7 +6,7 @@ import { createNewDynamicTemplateDraft } from "../src/page-builder/template-edit
 import type { TemplateCatalogItemResource } from "../src/services/clients/dynamicTemplateClient";
 import { installAdminSession } from "./fixtures/session-auth";
 import {
-  addTwoRegions, createBlankTemplate, installNewTemplateServer,
+  addContentGroupsAndSlots, addTwoRegions, createBlankTemplate, installNewTemplateServer,
   readSession, structurePanel,
 } from "./fixtures/template-authoring-main-route";
 
@@ -22,35 +22,22 @@ const unsafeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const DEEP_TEMPLATE_CHECKSUM = "a".repeat(64);
 
 base.describe("结构问题修复入口与全局显隐（自有 API Mock）", () => {
-  base("缺槽位选择内容不写入，沿用当前区域并允许显式选择内容类型", async ({ page }) => {
+  base("缺槽位提示保留定位，不打开创建槽位面板", async ({ page }) => {
     const server = await installNewTemplateServer(page);
     await page.setViewportSize({ width: 1600, height: 1000 });
     await createBlankTemplate(page);
     await addTwoRegions(page);
     const before = await readSession(page);
-    const definition = before.definition!;
-    const [firstId, secondId] = definition.nodes[definition.rootNodeId].childIds;
-    expect(before.selectedObjectId).toBe(secondId);
     const structure = structurePanel(page);
-    await structure.getByRole("button", { name: "选择内容", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "添加槽位", exact: true });
-    await expect(dialog).toBeVisible();
-    await expect(dialog.getByLabel("添加目标", { exact: true })).toHaveValue(secondId);
-    expect((await readSession(page)).definition).toEqual(definition);
-    expect((await readSession(page)).historyPast).toEqual(before.historyPast);
-    await page.keyboard.press("Escape");
-    await expect(structure.getByRole("button", { name: "添加槽位", exact: true })).toBeFocused();
-    await structure.getByRole("button", { name: /模板整体/ }).click();
-    await structure.getByRole("button", { name: "选择内容", exact: true }).click();
-    await expect(dialog.getByLabel("添加目标", { exact: true })).toHaveValue("");
-    await dialog.getByLabel("添加目标", { exact: true }).selectOption(secondId);
-    await dialog.getByRole("button", { name: "添加正文槽位", exact: true }).click();
+    const issue = structure.getByRole("listitem").filter({ hasText: "模板没有内容槽位，无法发布" });
+    await expect(issue).toBeVisible();
+    await expect(issue.getByRole("button", { name: /^(选择内容|修复)$/ })).toHaveCount(0);
+    await issue.getByRole("button", { name: "定位", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "添加槽位", exact: true })).toHaveCount(0);
     const after = await readSession(page);
-    expect(after.definition!.nodes[firstId].childIds).toEqual([]);
-    const children = after.definition!.nodes[secondId].childIds;
-    expect(children).toHaveLength(1);
-    expect(after.definition!.nodes[children[0]].type).toBe("TextSlot");
-    expect(after.historyPast).toHaveLength(before.historyPast.length + 1);
+    expect(after.selectedObjectId).toBe(before.definition!.rootNodeId);
+    expect(after.definition).toEqual(before.definition);
+    expect(after.historyPast).toEqual(before.historyPast);
     expect(server.writes).toEqual([]);
   });
 
@@ -58,12 +45,8 @@ base.describe("结构问题修复入口与全局显隐（自有 API Mock）", ()
     const server = await installNewTemplateServer(page);
     await page.setViewportSize({ width: 1600, height: 1000 });
     await createBlankTemplate(page);
-    await addTwoRegions(page);
+    await addContentGroupsAndSlots(page);
     const structure = structurePanel(page);
-    await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
-    await page.getByRole("dialog", { name: "添加槽位", exact: true })
-      .getByRole("button", { name: "添加正文槽位", exact: true }).click();
-    await page.keyboard.press("Escape");
     const before = await readSession(page);
     const regionId = before.definition!.nodes[before.definition!.rootNodeId].childIds[1];
     const region = structure.getByRole("treeitem", { name: "内容区域 2", exact: true });

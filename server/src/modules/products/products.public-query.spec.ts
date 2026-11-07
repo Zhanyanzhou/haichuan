@@ -15,6 +15,7 @@ interface FindManyCall {
   take?: number;
   orderBy?: unknown;
   distinct?: unknown;
+  select?: Record<string, unknown>;
 }
 
 test("公开商品列表与详情禁止缓存权威快照", () => {
@@ -65,6 +66,7 @@ function createService() {
         return 0;
       },
     },
+    $transaction: async (callback: (tx: unknown) => Promise<unknown>): Promise<unknown> => callback(prisma),
   };
   const service = new ProductsService(
     prisma as unknown as PrismaService,
@@ -96,7 +98,7 @@ test("公开目录：商品 ids 与分类 categoryIds 分别进入正确字段�
   assert.equal(result.pageSize, 32);
 });
 
-test("commerce 档位的价格筛选和排序只作用于公开价格的直购商品", async (t) => {
+test("commerce 档位的价格筛选和排序只作用于直购价或定制公开参考价", async (t) => {
   const previousProfile = process.env.RELEASE_PROFILE;
   process.env.RELEASE_PROFILE = "commerce";
   t.after(() => {
@@ -113,9 +115,206 @@ test("commerce 档位的价格筛选和排序只作用于公开价格的直购�
 
     const where = findManyCalls[0].where;
     assert.match(JSON.stringify(where.AND), /"salesMode":"DIRECT_PURCHASE"/);
+    assert.match(JSON.stringify(where.AND), /"salesMode":"CUSTOM_INQUIRY"/);
     if (query.salesMode) {
-      assert.equal(where.salesMode, "DISPLAY_ONLY");
+      assert.match(JSON.stringify(where), /"salesMode":"DISPLAY_ONLY"/);
     }
+  }
+});
+
+test("公开新品按发布时间稳定分页，保留访问范围与组合筛选", async () => {
+  const query = plainToInstance(PublicProductQueryDto, {
+    sortBy: "published_desc",
+    categoryIds: "7,8",
+    materialTypes: "AU750",
+    keyword: "竹叶吊坠",
+    page: 2,
+    pageSize: 5,
+  });
+  assert.equal((await validate(query)).length, 0);
+  const { service, findManyCalls, getCountWhere } = createService();
+  await service.findPublic(query);
+
+  const [call] = findManyCalls;
+  assert.deepEqual(call.orderBy, [{ publishedAt: "desc" }, { id: "desc" }]);
+  assert.equal(call.skip, 5);
+  assert.equal(call.take, 5);
+  assert.deepEqual(call.where.visibility, { in: ["PUBLIC"] });
+  assert.equal(call.where.status, "PUBLISHED");
+  assert.equal(call.where.publicationQualityStatus, "READY");
+  assert.deepEqual(call.where.categoryId, { in: [7, 8] });
+  assert.deepEqual(call.where.materialType, { in: ["AU750"] });
+  assert.match(JSON.stringify(call.where.AND), /竹叶/);
+  assert.match(JSON.stringify(call.where.AND), /吊坠/);
+  assert.equal(call.where.publishedAt, undefined, "历史缺少发布时间的作品仍保留在结果中");
+  assert.deepEqual(getCountWhere(), call.where);
+});
+
+test("公开价格上限为零仍严格过滤，定制参考价仍必须大于零", async () => {
+  const query = plainToInstance(PublicProductQueryDto, { maxPrice: 0 });
+  assert.equal((await validate(query)).length, 0);
+  const { service, findManyCalls, getCountWhere } = createService();
+  await service.findPublic(query);
+
+  const [call] = findManyCalls;
+  assert.deepEqual(call.where.AND, [{ OR: [
+    { salesMode: "DIRECT_PURCHASE", price: { lte: 0 } },
+    { salesMode: "CUSTOM_INQUIRY", priceMin: { lte: 0, gt: 0 } },
+  ] }]);
+  assert.match(JSON.stringify(call.where.AND), /"salesMode":"DIRECT_PURCHASE"/);
+  assert.deepEqual(getCountWhere(), call.where);
+});
+
+test("公开目录：组合词分别匹配名称、款号、分类或材质，并与既有筛选取交集", async () => {
+  const { service, findManyCalls, getCountWhere } = createService();
+  await service.findPublic({
+    keyword: "  吊坠　竹叶、S925，吊坠  ",
+    categoryIds: "7,8",
+    page: 2,
+    pageSize: 5,
+  });
+
+  const [call] = findManyCalls;
+  const groups = call.where.AND as Array<Record<string, unknown>>;
+  assert.equal(groups.length, 3, "重复词不增加查询条件，每个独立词仍须命中");
+  assert.match(JSON.stringify(groups[0]), /"吊坠"/);
+  assert.match(JSON.stringify(groups[0]), /"挂坠"/);
+  assert.match(JSON.stringify(groups[1]), /"竹叶"/);
+  assert.match(JSON.stringify(groups[2]), /"materialType":\{"in":\["S925"\]\}/);
+  assert.deepEqual(call.where.categoryId, { in: [7, 8] });
+  assert.deepEqual(call.where.visibility, { in: ["PUBLIC"] });
+  assert.equal(call.where.status, "PUBLISHED");
+  assert.equal(call.where.publicationQualityStatus, "READY");
+  assert.equal(call.skip, 5);
+  assert.equal(call.take, 5);
+  assert.deepEqual(getCountWhere(), call.where);
+});
+
+test("公开目录：单个款号的连字符和 LIKE 特殊字符按字面匹配", async () => {
+  const { service, findManyCalls } = createService();
+  await service.findPublic({ keyword: " ATP404-VAJRA_% " });
+  const contains = "ATP404-VAJRA\\_\\%";
+  const groups = findManyCalls[0].where.AND as Array<{ OR: unknown[] }>;
+  assert.equal(groups.length, 1, "完整款号保持一个查询词");
+  assert.deepEqual(groups[0].OR.slice(0, 2), [
+    { name: { contains } },
+    { code: { contains } },
+  ]);
+});
+
+test("公开查询 DTO 接受相关性排序，并继续拒绝未知排序方式", async () => {
+  const accepted = plainToInstance(PublicProductQueryDto, {
+    keyword: "圆牌镂空吊坠",
+    sortBy: "relevance",
+  });
+  assert.equal((await validate(accepted)).length, 0);
+  const rejected = plainToInstance(PublicProductQueryDto, { sortBy: "random" });
+  assert.ok((await validate(rejected)).some((error) => error.property === "sortBy"));
+});
+
+test("公开相关性搜索单次读取空或唯一候选，仅多候选分页使用同一快照", async () => {
+  const countCalls: Array<Record<string, unknown>> = [];
+  const outsideReads: FindManyCall[] = [];
+  const listCalls: FindManyCall[] = [];
+  let transactionOptions: unknown;
+  let matchedTotal = 0;
+  const rows = [{ id: 1, code: "HC-PENDANT-01", name: "花丝挂坠" }, { id: 2, code: "HC-PENDANT-02", name: "錾刻挂坠" }];
+  const product = {
+    count: async ({ where }: { where: Record<string, unknown> }) => {
+      countCalls.push(where);
+      return matchedTotal;
+    },
+    findMany: async (args: FindManyCall) => {
+      listCalls.push(args);
+      if (!args.distinct && listCalls.filter((call) => !call.distinct).length === 5) {
+        return rows.slice(0, args.take);
+      }
+      return [];
+    },
+  };
+  const prisma = {
+    product: {
+      count: async () => assert.fail("不得在事务外另行计数"),
+      findMany: async (args: FindManyCall) => {
+        outsideReads.push(args);
+        if (args.distinct) return [];
+        return rows.slice(0, matchedTotal).reverse();
+      },
+    },
+    $transaction: async (
+      action: (transaction: { product: typeof product }) => Promise<unknown>,
+      options: unknown,
+    ) => {
+      transactionOptions = options;
+      return action({ product });
+    },
+  };
+  const service = new ProductsService(
+    prisma as unknown as PrismaService,
+    { isProductMediaReadable: () => true } as never,
+    {} as never,
+  );
+  const assertScopedWhere = (securedWhere: Record<string, unknown>) => {
+    assert.deepEqual(securedWhere.visibility, { in: ["PUBLIC"] });
+    assert.equal(securedWhere.deletedAt, null);
+    assert.equal(securedWhere.status, "PUBLISHED");
+    assert.equal(securedWhere.publicationQualityStatus, "READY");
+    assert.ok(securedWhere.primaryImage);
+    assert.deepEqual(securedWhere.categoryId, { in: [7, 8] });
+    assert.deepEqual(securedWhere.materialType, { in: ["AU750"] });
+    assert.match(JSON.stringify(securedWhere.AND), /錾刻/);
+  };
+  for (const [expectedTotal, page] of [[0, 1], [1, 1], [1, 2], [2, 1]]) {
+    matchedTotal = expectedTotal;
+    transactionOptions = undefined;
+    countCalls.length = 0;
+    outsideReads.length = 0;
+    listCalls.length = 0;
+    const result = await service.findPublic({
+      keyword: "圆牌挂坠",
+      sortBy: "relevance",
+      categoryIds: "7,8",
+      materialTypes: "AU750",
+      craftTechniques: "錾刻",
+      includeFacets: "true",
+      page,
+      pageSize: 2,
+    });
+    const candidateReads = outsideReads.filter((call) => !call.distinct);
+    assert.equal(candidateReads.length, 1);
+    const [probe] = candidateReads;
+    assert.equal(probe.take, 2);
+    assert.equal(probe.orderBy, undefined);
+    assert.equal(probe.select?.name, true);
+    assert.equal(probe.select?.code, true);
+    assert.equal(probe.select?.costPrice, undefined);
+    assertScopedWhere(probe.where);
+    assert.match(JSON.stringify(probe.where.AND), /圆牌/);
+    assert.match(JSON.stringify(probe.where.AND), /挂坠/);
+    const productReads = listCalls.filter((call) => !call.distinct);
+    if (expectedTotal <= 1) {
+      assert.equal(transactionOptions, undefined);
+      assert.deepEqual(countCalls, []);
+      assert.deepEqual(listCalls, []);
+      assert.deepEqual(outsideReads.filter((call) => call.distinct).map((call) => call.distinct), [["size"]]);
+    } else {
+      assert.deepEqual(transactionOptions, { isolationLevel: "RepeatableRead" });
+      assert.deepEqual(countCalls, [probe.where], "事务内重新计算完整候选集总数");
+      assert.deepEqual(listCalls.filter((call) => call.distinct).map((call) => call.distinct), [["size"]]);
+      assert.equal(outsideReads.length, 1);
+      assert.equal(productReads.length, 5);
+      for (const [index, bucket] of productReads.entries()) {
+        const securedWhere = (bucket.where.AND as Array<Record<string, unknown>>)[0];
+        assertScopedWhere(securedWhere);
+        if (index < 4) {
+          assert.equal((securedWhere.AND as unknown[]).length, 1, "前四桶只继承结构筛选");
+        } else {
+          assert.deepEqual(securedWhere, countCalls[0], "跨字段桶保留完整关键词约束");
+        }
+      }
+    }
+    assert.equal(result.total, expectedTotal);
+    assert.deepEqual(result.list.map(({ id }) => id), page === 1 ? rows.slice(0, expectedTotal).map(({ id }) => id) : []);
   }
 });
 
@@ -302,10 +501,12 @@ test("commerce 档位的游客详情返回安全作品、履约、规格、证�
           skus: [
             {
               id: 881,
+              imageId: 999,
               productId: 88,
               skuCode: "HC-REAL-088-13",
               material: "GOLD_999",
               size: "圈口 13",
+              color: "黄金色",
               goldWeight: 8.6,
               price: 12600,
               stock: 999,
@@ -319,10 +520,12 @@ test("commerce 档位的游客详情返回安全作品、履约、规格、证�
             },
             {
               id: 882,
+              imageId: 501,
               productId: 88,
               skuCode: "HC-REAL-088-14",
               material: "GOLD_999",
               size: "圈口 14",
+              color: "白色",
               goldWeight: 8.8,
               price: 12800,
               stock: 999,
@@ -408,6 +611,7 @@ test("commerce 档位的游客详情返回安全作品、履约、规格、证�
   assert.deepEqual(findFirstArgs.select.skus.select.inventories, {
     select: { quantity: true },
   });
+  assert.equal(findFirstArgs.select.skus.select.color, true);
   assert.deepEqual(findFirstArgs.select.certificates.select, {
     certType: true,
     certNumber: true,
@@ -433,6 +637,7 @@ test("commerce 档位的游客详情返回安全作品、履约、规格、证�
       id: 881,
       material: "GOLD_999",
       size: "圈口 13",
+      color: "黄金色",
       goldWeight: 8.6,
       price: 12600,
       isActive: true,
@@ -440,8 +645,10 @@ test("commerce 档位的游客详情返回安全作品、履约、规格、证�
     },
     {
       id: 882,
+      imageId: 501,
       material: "GOLD_999",
       size: "圈口 14",
+      color: "白色",
       goldWeight: 8.8,
       price: 12800,
       isActive: true,
@@ -510,6 +717,81 @@ test("commerce 档位的游客详情返回安全作品、履约、规格、证�
     JSON.stringify(catalogResult),
     /includesCertificate|packageType|内部包装配置|SAME_CITY_COURIER/,
   );
+});
+
+test("预约定制公开 SKU 颜色但继续隐藏成交价与库存", async () => {
+  const prisma = {
+    product: {
+      findFirst: async () => ({
+        id: 90,
+        code: "HC-CUSTOM-090",
+        name: "预约定制戒指",
+        categoryId: 3,
+        shortDescription: "预约沟通后确认方案",
+        description: "预约定制作品说明。",
+        detailContent: [],
+        materialType: "AU750",
+        goldWeight: 5.2,
+        price: 18800,
+        priceMin: 1000,
+        weight: 5.8,
+        size: "圈口 14",
+        gemInfo: null,
+        craftTechnique: [],
+        fulfillmentType: "CUSTOM",
+        dispatchTime: "CUSTOM",
+        deliveryMethods: [],
+        requiresInsuredShipping: true,
+        requiresSignature: true,
+        customLeadTime: "方案确认后沟通",
+        salesMode: "CUSTOM_INQUIRY",
+        inventoryPolicy: "STANDARD",
+        isHot: false,
+        isNew: false,
+        isRecommended: false,
+        isLimited: false,
+        isCustom: true,
+        category: { id: 3, name: "戒指" },
+        images: [],
+        primaryImage: null,
+        listingImage: null,
+        skus: [{
+          id: 901,
+          imageId: null,
+          material: "AU750",
+          size: "圈口 14",
+          color: "玫瑰金",
+          goldWeight: 5.2,
+          price: 18800,
+          isActive: true,
+          inventories: [{ quantity: 9 }],
+        }],
+        certificates: [],
+      }),
+    },
+  };
+  const service = new ProductsService(
+    prisma as unknown as PrismaService,
+    { isProductMediaReadable: () => false } as never,
+    { recordDetailView: async () => undefined } as never,
+  );
+
+  const result = await service.findPublicById("HC-CUSTOM-090");
+
+  assert.equal(result?.price, null);
+  assert.equal(result?.priceMin, 1000);
+  assert.equal(result?.isAvailableForPurchase, false);
+  assert.deepEqual(result?.skus, [{
+    id: 901,
+    material: "AU750",
+    size: "圈口 14",
+    color: "玫瑰金",
+    goldWeight: 5.2,
+    price: null,
+    isActive: true,
+    isAvailableForPurchase: false,
+  }]);
+  assert.doesNotMatch(JSON.stringify(result), /inventories|quantity|stock|safetyStock/);
 });
 
 test("合作资格在 Guard 后暂停时目录列表与详情使用共享锁内最新资格", async () => {
@@ -726,7 +1008,7 @@ test("commerce 档位的游客详情在全部公开 SKU 售罄时返回作品级
   );
 });
 
-test("线索型档位仍可按货号读取已发布直购详情", async (t) => {
+test("线索型档位仍可按款号读取已发布直购详情", async (t) => {
   const previousProfile = process.env.RELEASE_PROFILE;
   delete process.env.RELEASE_PROFILE;
   t.after(() => {

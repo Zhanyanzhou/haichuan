@@ -12,7 +12,6 @@ import {
 } from "antd";
 import {
   DownOutlined,
-  InfoCircleOutlined,
   PlusOutlined,
 } from "@ant-design/icons";
 import {
@@ -21,8 +20,9 @@ import {
   productApi,
   type ProductAdminQuery,
 } from "@/services/api";
-import type { Category, Product, ProductStatus } from "@/types";
+import type { Category, Product, ProductStatus, SalesMode } from "@/types";
 import { unwrapResponse } from "@/utils/unwrap";
+import { currentSessionEpoch, isCurrentSessionEpoch, StaleSessionResponseError } from "@/services/sessionEpoch";
 import {
   ADMIN_COPY,
   getSafeAdminErrorMessage,
@@ -34,23 +34,42 @@ import {
 } from "@/components/common/AdminDataStates";
 import ProductManageTable from "./ProductManageTable";
 import { ProductBatchPriceModal } from "./ProductBatchPriceModal";
+import { ProductBatchSalesModeModal, type SalesModeTarget } from "./ProductBatchSalesModeModal";
+import { ProductCustomPricingModal } from "./ProductCustomPricingModal";
 import { ProductBatchStockModal } from "./ProductBatchStockModal";
+import { ProductFolderImportModal } from "./ProductFolderImportModal";
 import type { BatchPriceUpdate } from "./productBatchPrice";
 import type { BatchStockSource, BatchStockUpdate } from "./productBatchStock";
 import { useAuthStore } from "@/store/authStore";
 import {
+  salesModeLabels,
   statusMeta,
   statuses,
   type ProductListItem,
 } from "./productManageModel";
+import CategoryBatchMoveDialog from "../CategoryManage/CategoryBatchMoveDialog";
 import "./ProductManage.css";
 
-type ProductActionError = { status?: number };
+type ProductActionError = { status?: number; errorCode?: string };
 
 const DEFAULT_PRODUCT_PAGE_SIZE = 20;
 const MAX_BATCH_SELECTION = 50;
 const DEFAULT_PRODUCT_SORT: NonNullable<ProductAdminQuery["sortBy"]> =
   "updated_desc";
+const PERMANENT_DELETE_ACTION = ADMIN_COPY.actions.permanentlyDelete;
+const PERMANENT_DELETE_CONSEQUENCE =
+  "商品会从商品列表和回收站移除，无法恢复。订单、库存等业务记录会保留。引用该商品的页面区块可能不再展示它。";
+const permanentDeleteConflictMessages = new Map([
+  ["PRODUCT_PERMANENT_DELETE_NOT_ARCHIVED", "商品已不在回收站，请核对最新状态。"],
+  // 兼容尚未更新删除规则的服务端返回。
+  ["PRODUCT_PERMANENT_DELETE_ORDER", "商品有关联订单，已保留。"],
+  ["PRODUCT_PERMANENT_DELETE_INVENTORY", "商品有库存、库存历史或无法核实的库存记录，已保留。"],
+  ["PRODUCT_PERMANENT_DELETE_QUOTATION", "商品有关联报价，已保留。"],
+  ["PRODUCT_PERMANENT_DELETE_PUBLISHED", "商品有上架或下架历史，已保留。"],
+  ["PRODUCT_PERMANENT_DELETE_PAGE", "页面装修中有相同款号或商品引用，已保留。"],
+  ["PRODUCT_PERMANENT_DELETE_REFERENCED", "商品有关联业务记录，已保留。"],
+  ["PRODUCT_PERMANENT_DELETE_DEMO_ONLY", "演示模式无法核对业务关联，商品已保留。"],
+]);
 
 function readPositiveInteger(
   value: string | null,
@@ -107,11 +126,28 @@ function getProductActionErrorMessage(error: unknown, action: string): string {
   return `${action}未完成：发生未知异常，请稍后重试；若持续失败，请联系管理员。`;
 }
 
+function getPermanentDeleteErrorMessage(error: unknown): string {
+  const { status, errorCode } = (error as ProductActionError | undefined) ?? {};
+  if (status === 409 && errorCode) {
+    const conflictMessage = permanentDeleteConflictMessages.get(errorCode);
+    if (conflictMessage) return conflictMessage;
+  }
+  if (status === undefined || status >= 500) {
+    return "未能确认删除结果，请在回收站核对后再试。";
+  }
+  if (status === 429) return "操作过于频繁，请稍后再试。";
+  return getProductActionErrorMessage(error, PERMANENT_DELETE_ACTION);
+}
+
 export default function ProductManage() {
   const { message, modal } = AntdApp.useApp();
   const navigate = useNavigate();
   const role = useAuthStore((state) => state.user?.role);
+  const staffId = useAuthStore((state) => state.user?.id);
   const canGovernPublic = role === "SUPER_ADMIN" || role === "ADMIN";
+  const canImport = canGovernPublic || role === "EDITOR";
+  const [folderImportOpen, setFolderImportOpen] = useState(false);
+  const [importCategories, setImportCategories] = useState<{ value: number; label: string }[]>([]);
   const canInventory = role === "SUPER_ADMIN" || role === "ADMIN" || role === "WAREHOUSE";
   const [searchParams, setSearchParams] = useSearchParams();
   const initialTitleKeyword = searchParams.get("title") || "";
@@ -133,6 +169,9 @@ export default function ProductManage() {
   const [activeStatus, setActiveStatus] = useState<ProductStatus | undefined>(
     () => readProductStatus(searchParams.get("status")),
   );
+  const isTrash = activeStatus === "ARCHIVED";
+  const canRestoreTrash = isTrash && canImport;
+  const canPermanentlyDelete = isTrash && role === "SUPER_ADMIN";
   const [titleKeyword, setTitleKeyword] = useState(initialTitleKeyword);
   const [codeKeyword, setCodeKeyword] = useState(initialCodeKeyword);
   // 支持来自分类管理「查看商品列表」的跳转：挂载时从 URL 读取 categoryId 预筛一次。
@@ -148,7 +187,15 @@ export default function ProductManage() {
     { value: number; label: string }[]
   >([]);
   const [selectedIds, setSelectedIds] = useState<Key[]>([]);
+  const [categoryTree, setCategoryTree] = useState<Category[]>([]);
+  const [categoryMoveTargets, setCategoryMoveTargets] = useState<ProductListItem[]>([]);
+  const [salesModeBatch, setSalesModeBatch] = useState<{
+    products: SalesModeTarget[];
+    epoch: number;
+    controller: AbortController;
+  } | null>(null);
   const [priceModalOpen, setPriceModalOpen] = useState(false);
+  const [customPricingOpen, setCustomPricingOpen] = useState(false);
   const [priceModalLoading, setPriceModalLoading] = useState(false);
   const [priceTargets, setPriceTargets] = useState<ProductListItem[]>([]);
   const [priceUnresolvedCount, setPriceUnresolvedCount] = useState(0);
@@ -169,6 +216,10 @@ export default function ProductManage() {
     () => searchParams.get("advanced") === "1" || Boolean(searchParams.get("categoryId")),
   );
   const productRequestIdRef = useRef(0);
+  const permanentDeleteInProgress = useRef(false);
+  const batchRestoreInProgress = useRef(false);
+  const salesModeInProgress = useRef(false);
+  useEffect(() => () => salesModeBatch?.controller.abort(), [salesModeBatch]);
   const [sortBy, setSortBy] = useState<
     NonNullable<ProductAdminQuery["sortBy"]>
   >(() => readProductSort(searchParams.get("sort")));
@@ -220,31 +271,37 @@ export default function ProductManage() {
   const isProductIdSearch =
     productIdSearch.length > 0 && productIdSearch.every((id) => /^\d+$/.test(id));
   const hasFilters = Boolean(titleKeyword || codeKeyword || categoryId || activeStatus);
-  // 资料完整度为后端计算字段（非 DB 列）；这里只展示当前页统计，不伪装成全量筛选。
   const visibleProducts = products;
-  const qualityIssueCount = useMemo(
-    () =>
-      products.filter((product) => (product.completeness?.score ?? 0) < 100)
-        .length,
-    [products],
-  );
+  const selectedProducts = visibleProducts.filter(({ id }) => selectedIds.includes(id));
+  const selectedTrashProducts = selectedProducts.filter(({ status }) => status === "ARCHIVED");
+  const canEditProduct = (product: ProductListItem) =>
+    canImport && product.status !== "ARCHIVED" && product.reviewStatus !== "IN_REVIEW" &&
+    (canGovernPublic || product.status === "DRAFT");
+  const batchUnavailable = loading || batchProcessing || pendingProductId !== null;
 
   const loadCategories = useCallback(async () => {
     try {
       // 管理端分类树含停用记录。选款中心读 /categories/tree，只含启用中的分类。
       const response = await categoryApi.getManageTree();
       const options: { value: number; label: string }[] = [];
-      const walk = (nodes: Category[], parentLabel = "") => {
+      const enabled: typeof options = [];
+      const walk = (nodes: Category[], parentLabel = "", parentActive = true) => {
         nodes.forEach((node) => {
           const label = parentLabel
             ? `${parentLabel} / ${node.name}`
             : node.name;
-          options.push({ value: node.id, label });
-          if (node.children?.length) walk(node.children, label);
+          const option = { value: node.id, label };
+          const active = parentActive && node.isActive !== false;
+          options.push(option);
+          if (active) enabled.push(option);
+          if (node.children?.length) walk(node.children, label, active);
         });
       };
-      walk(unwrapResponse<Category[]>(response) || []);
+      const tree = unwrapResponse<Category[]>(response) || [];
+      walk(tree);
+      setCategoryTree(tree);
       setCategoryOptions(options);
+      setImportCategories(enabled);
     } catch (error: unknown) {
       reportUnexpectedProductActionError(error, "加载分类");
       message.error(
@@ -254,6 +311,7 @@ export default function ProductManage() {
         ),
       );
       setCategoryOptions([]);
+      setCategoryTree([]);
     } finally {
       setCategoriesLoaded(true);
     }
@@ -285,6 +343,7 @@ export default function ProductManage() {
         status?: ProductStatus;
         categoryId?: number;
         keyword?: string;
+        clampToLastPage?: boolean;
       },
     ) => {
       const requestId = ++productRequestIdRef.current;
@@ -311,7 +370,12 @@ export default function ProductManage() {
           response,
         );
         if (requestId !== productRequestIdRef.current) return;
-        setProducts(data?.list || []);
+        const lastPage = Math.max(1, Math.ceil((data?.total || 0) / pageSize));
+        if (overrides?.clampToLastPage && p > lastPage) setPage(lastPage);
+        const rows = data?.list || [];
+        const rowIds = new Set(rows.map(({ id }) => id));
+        setSelectedIds((ids) => ids.filter((id) => rowIds.has(Number(id))));
+        setProducts(rows);
         setTotal(data?.total || 0);
       } catch (requestError: unknown) {
         if (requestId !== productRequestIdRef.current) return;
@@ -359,11 +423,13 @@ export default function ProductManage() {
   const loadProductsRef = useRef(loadProducts);
   loadProductsRef.current = loadProducts;
   useEffect(() => {
+    setSelectedIds([]);
     void loadProductsRef.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, pageSize, sortBy, activeStatus, categoryId, includeDescendants, debouncedKeyword]);
 
   const resetFilters = () => {
+    setSelectedIds([]);
     setTitleKeyword("");
     setCodeKeyword("");
     setCategoryId(undefined);
@@ -375,6 +441,7 @@ export default function ProductManage() {
   };
 
   const search = () => {
+    setSelectedIds([]);
     setPage(1);
     void loadProducts(1, { keyword });
   };
@@ -543,6 +610,249 @@ export default function ProductManage() {
   const selectedProductIds = () => selectedIds
     .map((id) => Number(id))
     .filter((id) => Number.isInteger(id) && id > 0);
+
+  const openCategoryMove = () => {
+    if (batchUnavailable || !selectedProducts.length) return;
+    if (selectedProducts.length > MAX_BATCH_SELECTION) {
+      message.warning(`一次最多为 ${MAX_BATCH_SELECTION} 件商品改分类，请减少勾选数量。`);
+      return;
+    }
+    if (!selectedProducts.every(canEditProduct)) {
+      message.warning("所选商品中有不可编辑的商品，请取消勾选审核中或当前角色无权编辑的商品。");
+      return;
+    }
+    if (!importCategories.length) {
+      message.warning("没有可用的目标分类，请在分类管理中核对后再试。");
+      return;
+    }
+    setCategoryMoveTargets(selectedProducts);
+  };
+
+  const openSalesModeBatch = () => {
+    if (batchUnavailable || !selectedProducts.length) return;
+    if (selectedProducts.length > MAX_BATCH_SELECTION) {
+      message.warning(`一次最多为 ${MAX_BATCH_SELECTION} 件商品改销售方式，请减少勾选数量。`);
+      return;
+    }
+    if (!selectedProducts.every(canEditProduct)) {
+      message.warning("请取消勾选审核中或当前角色无权编辑的商品，再修改销售方式。");
+      return;
+    }
+    const targets = selectedProducts.filter((product): product is SalesModeTarget =>
+      !!product.salesMode && Object.prototype.hasOwnProperty.call(salesModeLabels, product.salesMode));
+    if (targets.length !== selectedProducts.length) {
+      message.warning("部分商品的原销售方式未能读取，请刷新列表后再试。");
+      return;
+    }
+    setSalesModeBatch({ products: targets, epoch: currentSessionEpoch("admin"), controller: new AbortController() });
+  };
+
+  const applySalesModeBatch = async (salesMode: SalesMode, changes: SalesModeTarget[]) => {
+    if (!salesModeBatch || !changes.length || salesModeInProgress.current) return;
+    const { products: targets, epoch, controller } = salesModeBatch;
+    const isActive = () => !controller.signal.aborted && isCurrentSessionEpoch("admin", epoch);
+    if (!isActive()) {
+      setSalesModeBatch(null);
+      message.warning("登录状态已变化，请重新勾选商品后再试。");
+      return;
+    }
+
+    salesModeInProgress.current = true;
+    setBatchProcessing(true);
+    try {
+      const byId = new Map(changes.map((product) => [product.id, product]));
+      const { succeeded, failed } = await runBatch([...byId.keys()], async (id) => {
+        if (!isActive()) throw new StaleSessionResponseError("admin");
+        const original = byId.get(id);
+        if (!original) throw new Error("未能确认商品原销售方式");
+        const response = await productApi.update(
+          id,
+          { salesMode, expectedSalesMode: original.salesMode },
+          { suppressGlobalError: true },
+        );
+        const saved = unwrapResponse<Product>(response);
+        if (saved?.id !== id || saved.salesMode !== salesMode) throw new Error("销售方式未确认保存");
+      });
+      if (!isActive()) {
+        if (!controller.signal.aborted) setSalesModeBatch(null);
+        return;
+      }
+      const unchanged = targets.filter((item) => item.salesMode === salesMode).map(({ id }) => id);
+      const completed = new Set([...succeeded, ...unchanged]);
+      setSelectedIds((ids) => ids.filter((id) => !completed.has(Number(id))));
+      await loadProductsRef.current();
+      if (!isActive()) {
+        if (!controller.signal.aborted) setSalesModeBatch(null);
+        return;
+      }
+      setSalesModeBatch(null);
+      if (!failed.length) {
+        message.success(`已将 ${succeeded.length} 件商品改为${salesModeLabels[salesMode]}。`);
+        return;
+      }
+
+      const failures = new Map(failed.map(({ id, error }) => [id, error]));
+      modal.warning({
+        title: `已修改 ${succeeded.length} 件商品，${failed.length} 件未确认完成`,
+        content: (
+          <ul className="product-manage__batch-list" aria-label="未确认完成的商品">
+            {changes.filter(({ id }) => failures.has(id)).map(({ id, name, code }) => {
+              const failure = failures.get(id) as ProductActionError | undefined;
+              const reason = failure?.status === 409 && failure.errorCode !== "PRODUCT_SALES_MODE_CONFLICT"
+                ? "商品状态或发布条件有冲突，请打开商品编辑页核对。"
+                : getProductActionErrorMessage(failure, "修改销售方式");
+              return <li key={id}>{name} · {code} · {reason}</li>;
+            })}
+          </ul>
+        ),
+        okText: "关闭",
+      });
+    } finally {
+      salesModeInProgress.current = false;
+      setBatchProcessing(false);
+    }
+  };
+
+  const confirmBatchRestore = () => {
+    const targets = selectedTrashProducts;
+    if (!canRestoreTrash || batchUnavailable || !targets.length) return;
+    if (targets.length > MAX_BATCH_SELECTION) {
+      message.warning(`一次最多恢复 ${MAX_BATCH_SELECTION} 件商品，请减少勾选数量。`);
+      return;
+    }
+    const epoch = currentSessionEpoch("admin");
+    const isSameSession = () => isCurrentSessionEpoch("admin", epoch);
+    modal.confirm({
+      title: `恢复选中的 ${targets.length} 件商品为草稿？`,
+      content: (
+        <>
+          <p>恢复后可重新编辑，商品不会自动上架。</p>
+          <ul className="product-manage__permanent-delete-list" aria-label="待恢复商品">
+            {targets.map(({ id, name, code }) => <li key={id}>{name} · {code}</li>)}
+          </ul>
+        </>
+      ),
+      okText: `恢复 ${targets.length} 件商品`,
+      cancelText: ADMIN_COPY.actions.cancel,
+      onOk: async () => {
+        if (batchRestoreInProgress.current || !isSameSession()) return;
+        batchRestoreInProgress.current = true;
+        setBatchProcessing(true);
+        try {
+          const { succeeded, failed } = await runBatch(targets.map(({ id }) => id), (id) => {
+            if (!isSameSession()) throw new StaleSessionResponseError("admin");
+            return productApi.restore(id, { suppressGlobalError: true });
+          });
+          if (!isSameSession()) return;
+          const completed = new Set(succeeded);
+          setSelectedIds((ids) => ids.filter((id) => !completed.has(Number(id))));
+          await Promise.all([
+            loadProductsRef.current(undefined, { clampToLastPage: true }),
+            loadCounts(),
+          ]);
+          if (!isSameSession()) return;
+          if (!failed.length) {
+            message.success(`已恢复 ${succeeded.length} 件商品为草稿。`);
+            return;
+          }
+          const failures = new Map(failed.map(({ id, error }) => [id, error]));
+          modal.warning({
+            title: `已恢复 ${succeeded.length} 件商品，${failed.length} 件未恢复`,
+            content: (
+              <ul className="product-manage__permanent-delete-list" aria-label="未恢复商品">
+                {targets.filter(({ id }) => failures.has(id)).map(({ id, name, code }) => (
+                  <li key={id}>{name} · {code}：{getProductActionErrorMessage(failures.get(id), "恢复草稿")}</li>
+                ))}
+              </ul>
+            ),
+            okText: "关闭",
+          });
+        } finally {
+          batchRestoreInProgress.current = false;
+          setBatchProcessing(false);
+        }
+      },
+    });
+  };
+
+  const permanentlyDeleteProducts = async (targets: Product[], sessionEpoch: number) => {
+    const hasConfirmedSession = () =>
+      isCurrentSessionEpoch("admin", sessionEpoch) && useAuthStore.getState().user?.role === "SUPER_ADMIN";
+    if (permanentDeleteInProgress.current || !hasConfirmedSession()) return;
+    permanentDeleteInProgress.current = true;
+    setBatchProcessing(true);
+    try {
+      const { succeeded, failed } = await runBatch(targets.map(({ id }) => id), (id) => {
+        if (!hasConfirmedSession()) throw new StaleSessionResponseError("admin");
+        return productApi.permanentlyDelete(id);
+      });
+      if (!hasConfirmedSession()) return;
+      const succeededIds = new Set(succeeded);
+      setSelectedIds((ids) => ids.filter((id) => !succeededIds.has(Number(id))));
+      await Promise.all([
+        loadProductsRef.current(undefined, { clampToLastPage: true }),
+        loadCounts(),
+      ]);
+      if (!hasConfirmedSession()) return;
+
+      if (failed.length === 0) {
+        message.success(targets.length === 1
+          ? `「${targets[0].name}」已永久删除。`
+          : `已永久删除 ${succeeded.length} 件商品。`);
+        return;
+      }
+
+      const failedById = new Map(failed.map(({ id, error }) => [id, error]));
+      modal.warning({
+        title: succeeded.length
+          ? `已永久删除 ${succeeded.length} 件商品，${failed.length} 件未完成`
+          : "永久删除未完成",
+        content: (
+          <ul className="product-manage__permanent-delete-list">
+            {targets.filter(({ id }) => failedById.has(id)).map(({ id, name }) => (
+              <li key={id}>「{name}」{getPermanentDeleteErrorMessage(failedById.get(id))}</li>
+            ))}
+          </ul>
+        ),
+        okText: "关闭",
+      });
+    } finally {
+      permanentDeleteInProgress.current = false;
+      setBatchProcessing(false);
+    }
+  };
+
+  const confirmPermanentDelete = (targets: Product[]) => {
+    if (
+      !canPermanentlyDelete || !targets.length || loading || batchProcessing || pendingProductId !== null
+    ) return;
+    if (targets.length > MAX_BATCH_SELECTION) {
+      message.warning(`一次最多永久删除 ${MAX_BATCH_SELECTION} 件商品，请减少勾选数量。`);
+      return;
+    }
+    const sessionEpoch = currentSessionEpoch("admin");
+    modal.confirm({
+      title: targets.length === 1
+        ? `永久删除「${targets[0].name}」？`
+        : `永久删除选中的 ${targets.length} 件商品？`,
+      content: (
+        <>
+          <p>{PERMANENT_DELETE_CONSEQUENCE}</p>
+          {targets.length > 1 && (
+            <ul className="product-manage__permanent-delete-list" aria-label="勾选的商品">
+              {targets.map(({ id, name }) => <li key={id}>{name}</li>)}
+            </ul>
+          )}
+        </>
+      ),
+      okText: PERMANENT_DELETE_ACTION,
+      okButtonProps: { danger: true, size: "large" },
+      cancelText: ADMIN_COPY.actions.cancel,
+      cancelButtonProps: { size: "large" },
+      autoFocusButton: "cancel",
+      onOk: () => permanentlyDeleteProducts(targets, sessionEpoch),
+    });
+  };
 
   const openBatchStock = async () => {
     const ids = selectedProductIds();
@@ -880,7 +1190,7 @@ export default function ProductManage() {
     }
     modal.confirm({
       title: "批量移入回收站",
-      content: `将选中的 ${selectedIds.length} 件商品移入回收站？之后可逐件恢复。`,
+      content: `将选中的 ${selectedIds.length} 件商品移入回收站？之后可在回收站恢复为草稿。`,
       okText: "确认移入",
       okButtonProps: { danger: true },
       cancelText: "取消",
@@ -933,6 +1243,7 @@ export default function ProductManage() {
           craftTechnique: pick("craftTechnique"),
           sortOrder: pick("sortOrder"),
           salesMode: pick("salesMode"),
+          priceMin: pick("priceMin"),
           inventoryPolicy: pick("inventoryPolicy") || "STANDARD",
           visibility: pick("visibility"),
           purchaseRegion: pick("purchaseRegion"),
@@ -1052,6 +1363,7 @@ export default function ProductManage() {
               aria-selected={selected}
               className={`product-manage__tab${selected ? " is-active" : ""}`}
               onClick={() => {
+                if (!selected && (isTrash || tab.key === "ARCHIVED")) setSelectedIds([]);
                 setActiveStatus(
                   tab.key === "all" ? undefined : (tab.key as ProductStatus),
                 );
@@ -1065,205 +1377,275 @@ export default function ProductManage() {
         {/* 违规商品维度暂无真实数据来源，入口已移除；接入审核体系后再恢复，避免假计数误导运营 */}
       </div>
 
-      <div className="product-manage__quality-notice" role="status">
-        当前页资料不完整商品（{qualityIssueCount}） <InfoCircleOutlined aria-hidden="true" />
-      </div>
-
-      <div className="product-manage__filters">
-        <div className="product-manage__filter-fields">
-          <Input
-            placeholder="搜索商品标题"
-            value={titleKeyword}
-            allowClear
-            onChange={(event) => setTitleKeyword(event.target.value)}
-            onPressEnter={search}
-          />
-          <Input
-            placeholder="搜索商品 ID，多个 ID 以逗号或空格分隔"
-            value={codeKeyword}
-            allowClear
-            onChange={(event) => setCodeKeyword(event.target.value)}
-            onPressEnter={search}
-          />
+      <div className="product-manage__scroll" role="region" aria-label="商品筛选与列表" tabIndex={0}>
+        <div className="product-manage__filters">
+          <div className="product-manage__filter-fields">
+            <Input
+              placeholder="搜索商品标题"
+              value={titleKeyword}
+              allowClear
+              onChange={(event) => setTitleKeyword(event.target.value)}
+              onPressEnter={search}
+            />
+            <Input
+              placeholder="搜索商品 ID，多个 ID 以逗号或空格分隔"
+              value={codeKeyword}
+              allowClear
+              onChange={(event) => setCodeKeyword(event.target.value)}
+              onPressEnter={search}
+            />
+          </div>
+          <div className="product-manage__filter-actions">
+            <Space size={8}>
+              <Button type="primary" className="product-manage__search-button" onClick={search}>
+                {ADMIN_COPY.actions.search}
+              </Button>
+              <Button className="product-manage__secondary-button" onClick={resetFilters}>{ADMIN_COPY.actions.reset}</Button>
+            </Space>
+            <Space className="product-manage__filter-more" size={4}>
+              <Dropdown
+                overlayClassName="product-manage__dropdown"
+                menu={{
+                  selectable: true,
+                  selectedKeys: [sortBy],
+                  items: [
+                    { key: "updated_desc", label: "按最近更新排序" },
+                    { key: "sortOrder", label: "按自定义排序" },
+                  ],
+                  onClick: ({ key }) => {
+                    setSortBy(
+                      key as NonNullable<ProductAdminQuery["sortBy"]>,
+                    );
+                    setPage(1);
+                  },
+                }}
+              >
+                <Button type="text" className="product-manage__text-button">
+                  排序 <DownOutlined />
+                </Button>
+              </Dropdown>
+              <Button
+                type="text"
+                className="product-manage__text-button"
+                onClick={() => setIsAdvancedOpen((value) => !value)}
+                aria-expanded={isAdvancedOpen}
+                aria-controls="product-advanced-filters"
+              >
+                {isAdvancedOpen ? "收起" : "展开"} <DownOutlined rotate={isAdvancedOpen ? 180 : 0} />
+              </Button>
+            </Space>
+          </div>
         </div>
-        <div className="product-manage__filter-actions">
-          <Space size={8}>
-            <Button type="primary" className="product-manage__search-button" onClick={search}>
-              {ADMIN_COPY.actions.search}
+
+        {isAdvancedOpen && (
+          <div id="product-advanced-filters" className="product-manage__advanced-filters">
+            <Select
+              placeholder="店铺分类"
+              value={categoryId}
+              onChange={(value) => {
+                setCategoryId(value);
+                setIncludeDescendants(false);
+                setPage(1);
+              }}
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              options={categoryOptions}
+            />
+            <span>资料完整度按当前页返回的商品信息展示；直接销售还会检查成交价。</span>
+          </div>
+        )}
+
+        <div className="product-manage__toolbar">
+          <Space className="product-manage__toolbar-actions" wrap size={12}>
+            <Button
+              type="primary"
+              className="product-manage__publish-button"
+              icon={<PlusOutlined />}
+              onClick={() => void openCreate()}
+              disabled={!categoriesLoaded}
+            >
+              新建商品
             </Button>
-            <Button className="product-manage__secondary-button" onClick={resetFilters}>{ADMIN_COPY.actions.reset}</Button>
-          </Space>
-          <Space className="product-manage__filter-more" size={4}>
-            <Dropdown
+            {canImport && !isTrash && (
+              <Button disabled={!categoriesLoaded} onClick={() => setFolderImportOpen(true)}>
+                按文件夹导入商品草稿
+              </Button>
+            )}
+            {canGovernPublic && !isTrash && (
+              <Button disabled={loading || batchProcessing || pendingProductId !== null}
+                onClick={() => setCustomPricingOpen(true)}>
+                统一设置预约定制
+              </Button>
+            )}
+            {canRestoreTrash && (
+              <Button
+                className="product-manage__secondary-button"
+                disabled={!selectedTrashProducts.length || batchUnavailable}
+                onClick={confirmBatchRestore}
+              >
+                批量恢复草稿
+              </Button>
+            )}
+            {canPermanentlyDelete && (
+              <Button
+                danger
+                className="product-manage__permanent-delete-button"
+                disabled={!selectedTrashProducts.length || loading || batchProcessing || pendingProductId !== null}
+                onClick={() => confirmPermanentDelete(selectedTrashProducts)}
+              >
+                批量永久删除
+              </Button>
+            )}
+            {!isTrash && <Dropdown
               overlayClassName="product-manage__dropdown"
               menu={{
-                selectable: true,
-                selectedKeys: [sortBy],
                 items: [
-                  { key: "updated_desc", label: "按最近更新排序" },
-                  { key: "sortOrder", label: "按自定义排序" },
+                  ...(canImport ? [
+                    { key: "move-category", label: "批量改分类", onClick: openCategoryMove },
+                    { key: "sales-mode", label: "批量改销售方式", onClick: openSalesModeBatch },
+                    { type: "divider" as const },
+                  ] : []),
+                  {
+                    key: "price",
+                    label: "批量设置成交价",
+                    disabled: batchProcessing,
+                    onClick: () => void openBatchPrice(),
+                  },
+                  ...(canInventory ? [{
+                    key: "inventory",
+                    label: "批量设置库存",
+                    disabled: batchProcessing,
+                    onClick: () => void openBatchStock(),
+                  }] : []),
+                  { type: "divider" },
+                  ...(canGovernPublic ? [
+                    {
+                      key: "published",
+                      label: "批量上架",
+                      disabled: batchProcessing,
+                      onClick: () => requestSelectedStatusChange("PUBLISHED"),
+                    },
+                    {
+                      key: "offline",
+                      label: "批量下架",
+                      disabled: batchProcessing,
+                      onClick: () => requestSelectedStatusChange("OFFLINE"),
+                    },
+                    {
+                      key: "delete",
+                      label: "移入回收站",
+                      danger: true,
+                      disabled: batchProcessing,
+                      onClick: confirmBatchArchive,
+                    },
+                  ] : [
+                    {
+                      key: "submit-review",
+                      label: "批量提交审核",
+                      disabled: batchProcessing || activeStatus === "PUBLISHED" || activeStatus === "OFFLINE",
+                      onClick: () => void submitSelectedForReview(),
+                    },
+                    {
+                      key: "archive-drafts",
+                      label: "将草稿移入回收站",
+                      danger: true,
+                      disabled: batchProcessing || activeStatus !== "DRAFT",
+                      onClick: confirmBatchArchive,
+                    },
+                  ]),
                 ],
-                onClick: ({ key }) => {
-                  setSortBy(
-                    key as NonNullable<ProductAdminQuery["sortBy"]>,
-                  );
-                  setPage(1);
-                },
               }}
             >
-              <Button type="text" className="product-manage__text-button">
-                排序 <DownOutlined />
+              <Button className="product-manage__secondary-button" disabled={!selectedProducts.length || batchUnavailable} loading={batchProcessing}>
+                更多批量操作 <DownOutlined />
               </Button>
-            </Dropdown>
-            <Button
-              type="text"
-              className="product-manage__text-button"
-              onClick={() => setIsAdvancedOpen((value) => !value)}
-              aria-expanded={isAdvancedOpen}
-              aria-controls="product-advanced-filters"
-            >
-              {isAdvancedOpen ? "收起" : "展开"} <DownOutlined rotate={isAdvancedOpen ? 180 : 0} />
-            </Button>
+            </Dropdown>}
+            {(!isTrash || canRestoreTrash) && (
+              <Space size={4} wrap>
+                <span className="product-manage__selected-count" role="status">
+                  已选 {selectedProducts.length} 件
+                </span>
+                {selectedProducts.length > 0 && (
+                  <Button type="link" disabled={batchUnavailable} onClick={() => setSelectedIds([])}>
+                    清除选择
+                  </Button>
+                )}
+              </Space>
+            )}
           </Space>
+          <span className="product-manage__total-count">共 {total} 件商品</span>
         </div>
-      </div>
 
-      {isAdvancedOpen && (
-        <div id="product-advanced-filters" className="product-manage__advanced-filters">
-          <Select
-            placeholder="店铺分类"
-            value={categoryId}
-            onChange={(value) => {
-              setCategoryId(value);
-              setIncludeDescendants(false);
-              setPage(1);
-            }}
-            allowClear
-            showSearch
-            optionFilterProp="label"
-            options={categoryOptions}
+        {error ? (
+          <AdminErrorState
+            subject="商品"
+            message={error}
+            onRetry={() => void loadProducts()}
           />
-          <span>资料完整度按当前页返回的商品信息展示；直接销售还会检查成交价。</span>
-        </div>
-      )}
+        ) : loading && products.length === 0 ? (
+          <AdminLoadingState subject="商品" />
+        ) : (
+          <ProductManageTable
+            products={visibleProducts}
+            loading={loading}
+            selectedIds={selectedProducts.map(({ id }) => id)}
+            batchProcessing={batchProcessing}
+            pendingProductId={pendingProductId}
+            hasFilters={hasFilters}
+            canGovernPublic={canGovernPublic}
+            onSelectionChange={!isTrash || canRestoreTrash ? setSelectedIds : undefined}
+            onOpenEdit={openEdit}
+            onClone={cloneProduct}
+            onRequestStatusChange={requestStatusChange}
+            onConfirmArchive={confirmArchive}
+            onConfirmRestore={confirmRestore}
+            onConfirmPermanentDelete={canPermanentlyDelete ? (product) => confirmPermanentDelete([product]) : undefined}
+            onSubmitForReview={(product) => void submitForReview(product)}
+          />
+        )}
 
-      <div className="product-manage__toolbar">
-        <Space className="product-manage__toolbar-actions" wrap size={12}>
-          <Button
-            type="primary"
-            className="product-manage__publish-button"
-            icon={<PlusOutlined />}
-            onClick={() => void openCreate()}
-            disabled={!categoriesLoaded}
-          >
-            新建商品
-          </Button>
-          <Dropdown
-            overlayClassName="product-manage__dropdown"
-            menu={{
-              items: [
-                {
-                  key: "price",
-                  label: "批量设置成交价",
-                  disabled: batchProcessing || activeStatus === "ARCHIVED",
-                  onClick: () => void openBatchPrice(),
-                },
-                ...(canInventory ? [{
-                  key: "inventory",
-                  label: "批量设置库存",
-                  disabled: batchProcessing || activeStatus === "ARCHIVED",
-                  onClick: () => void openBatchStock(),
-                }] : []),
-                { type: "divider" },
-                ...(canGovernPublic ? [
-                  {
-                    key: "published",
-                    label: "批量上架",
-                    disabled: batchProcessing || activeStatus === "ARCHIVED",
-                    onClick: () => requestSelectedStatusChange("PUBLISHED"),
-                  },
-                  {
-                    key: "offline",
-                    label: "批量下架",
-                    disabled: batchProcessing || activeStatus === "ARCHIVED",
-                    onClick: () => requestSelectedStatusChange("OFFLINE"),
-                  },
-                  {
-                    key: "delete",
-                    label: "移入回收站",
-                    danger: true,
-                    disabled: batchProcessing || activeStatus === "ARCHIVED",
-                    onClick: confirmBatchArchive,
-                  },
-                ] : [
-                  {
-                    key: "submit-review",
-                    label: "批量提交审核",
-                    disabled: batchProcessing || activeStatus === "ARCHIVED" || activeStatus === "PUBLISHED" || activeStatus === "OFFLINE",
-                    onClick: () => void submitSelectedForReview(),
-                  },
-                  {
-                    key: "archive-drafts",
-                    label: "将草稿移入回收站",
-                    danger: true,
-                    disabled: batchProcessing || activeStatus !== "DRAFT",
-                    onClick: confirmBatchArchive,
-                  },
-                ]),
-              ],
-            }}
-          >
-            <Button className="product-manage__secondary-button" disabled={!selectedIds.length || batchProcessing || pendingProductId !== null || activeStatus === "ARCHIVED"} loading={batchProcessing}>
-              更多批量操作 <DownOutlined />
-            </Button>
-          </Dropdown>
-          <span className="product-manage__selected-count">已选 {selectedIds.length} 件</span>
-        </Space>
-        <span className="product-manage__total-count">共 {total} 件商品</span>
+        {!error && total > 0 && (
+          <div className="product-manage__pagination">
+            <Pagination
+              current={page}
+              pageSize={pageSize}
+              total={total}
+              showSizeChanger
+              showQuickJumper
+              showTotal={(value) => `共 ${value} 件商品`}
+              onChange={(nextPage, nextSize) => {
+                setPage(nextPage);
+                setPageSize(nextSize);
+              }}
+            />
+          </div>
+        )}
       </div>
-
-      {error ? (
-        <AdminErrorState
-          subject="商品"
-          message={error}
-          onRetry={() => void loadProducts()}
-        />
-      ) : loading && products.length === 0 ? (
-        <AdminLoadingState subject="商品" />
-      ) : (
-        <ProductManageTable
-          products={visibleProducts}
-          loading={loading}
-          selectedIds={selectedIds}
-          batchProcessing={batchProcessing}
-          pendingProductId={pendingProductId}
-          hasFilters={hasFilters}
-          canGovernPublic={canGovernPublic}
-          onSelectionChange={setSelectedIds}
-          onOpenEdit={openEdit}
-          onClone={cloneProduct}
-          onRequestStatusChange={requestStatusChange}
-          onConfirmArchive={confirmArchive}
-          onConfirmRestore={confirmRestore}
-          onSubmitForReview={(product) => void submitForReview(product)}
+      {canImport && categoryMoveTargets.length > 0 && (
+        <CategoryBatchMoveDialog
+          key={staffId}
+          products={categoryMoveTargets}
+          tree={categoryTree}
+          onCancel={() => setCategoryMoveTargets([])}
+          onBusyChange={setBatchProcessing}
+          onApplied={async (completedIds, moved, failed) => {
+            const completed = new Set(completedIds);
+            setSelectedIds((ids) => ids.filter((id) => !completed.has(Number(id))));
+            setCategoryMoveTargets((targets) => targets.filter(({ id }) => !completed.has(id)));
+            if (!failed) message.success(`已更新 ${moved} 件商品的分类。`);
+            else message.warning(`已更新 ${moved} 件商品的分类，${failed} 件未更新。`);
+            await loadProductsRef.current(undefined, { clampToLastPage: true });
+          }}
         />
       )}
-
-      {!error && total > 0 && (
-        <div className="product-manage__pagination">
-          <Pagination
-            current={page}
-            pageSize={pageSize}
-            total={total}
-            showSizeChanger
-            showQuickJumper
-            showTotal={(value) => `共 ${value} 件商品`}
-            onChange={(nextPage, nextSize) => {
-              setPage(nextPage);
-              setPageSize(nextSize);
-            }}
-          />
-        </div>
+      {canImport && salesModeBatch && (
+        <ProductBatchSalesModeModal
+          products={salesModeBatch.products}
+          applying={batchProcessing}
+          onCancel={() => { if (!salesModeInProgress.current) setSalesModeBatch(null); }}
+          onApply={applySalesModeBatch}
+        />
       )}
       <ProductBatchPriceModal
         open={priceModalOpen}
@@ -1278,6 +1660,21 @@ export default function ProductManage() {
         }}
         onApply={(updates) => void applyBatchPrice(updates)}
       />
+      {customPricingOpen && canGovernPublic && <ProductCustomPricingModal
+        selectedIds={selectedProductIds()}
+        onCancel={() => setCustomPricingOpen(false)}
+        onUpdated={() => { void loadProducts(); }}
+      />}
+      {folderImportOpen && canImport && (
+        <ProductFolderImportModal
+          key={staffId}
+          categories={importCategories}
+          canPublish={canGovernPublic}
+          canAuthorizeImages={role === "SUPER_ADMIN"}
+          onClose={() => setFolderImportOpen(false)}
+          onChanged={() => { void Promise.all([loadProductsRef.current(), loadCounts()]); }}
+        />
+      )}
       <ProductBatchStockModal
         open={stockModalOpen}
         loading={stockModalLoading}

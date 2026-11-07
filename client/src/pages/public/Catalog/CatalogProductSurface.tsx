@@ -5,6 +5,7 @@ import { useSelectionStore } from "@/store/selectionStore";
 import { publicProductInquiryPath, publicProductPath } from "@/utils/publicProductPath";
 import { getListingImage } from "@/utils/productImage";
 import { withPublicMediaWidth } from "@/utils/publicMediaWidth";
+import { getPublicProductTitle } from "@/utils/publicProductTitle";
 import { SecureImage } from "@/components/common/SecureImage";
 import { trackAddToSelection, trackRemoveFromSelection } from "@/hooks/useAnalytics";
 import { salesModeCta } from "@/store/featureFlags";
@@ -107,16 +108,10 @@ function CatalogProductAction({
   product,
   selected,
   onToggle,
-  commerceAllowed,
-  productIndex,
-  catalogUrl,
 }: {
   product: CatalogProduct;
   selected: boolean;
   onToggle: () => void;
-  commerceAllowed: boolean;
-  productIndex: number;
-  catalogUrl: string | null;
 }) {
   const actionClass = "catalog-product-card__action";
 
@@ -133,39 +128,23 @@ function CatalogProductAction({
     );
   }
 
-  if (product.salesMode === "APPOINTMENT" || product.salesMode === "CUSTOM_INQUIRY") {
-    const inquiryType = product.salesMode === "APPOINTMENT" ? "appointment" : "custom";
+  if (product.salesMode === "APPOINTMENT") {
     return (
-      <Link className={actionClass} to={publicProductInquiryPath(product, inquiryType)}>
+      <Link className={actionClass} to={publicProductInquiryPath(product, "appointment")}>
         {salesModeCta(product.salesMode)}
       </Link>
     );
   }
 
-  return (
-    <Link
-      className={actionClass}
-      to={productPathWithCatalogReturn(publicProductPath(product), catalogUrl)}
-      data-catalog-detail-entry
-      onClick={() => rememberDetailEntry(product, productIndex, catalogUrl)}
-    >
-      {commerceAllowed &&
-      product.salesMode === "DIRECT_PURCHASE" &&
-      product.isAvailableForPurchase === true
-        ? "查看并购买"
-        : "查看作品"}
-    </Link>
-  );
+  return null;
 }
 
 function ProductCard({
   product,
-  commerceAllowed,
   productIndex,
   catalogUrl,
 }: {
   product: CatalogProduct;
-  commerceAllowed: boolean;
   productIndex: number;
   catalogUrl: string | null;
 }) {
@@ -196,20 +175,13 @@ function ProductCard({
     ? product.price && product.price > 0
       ? `¥ ${product.price.toLocaleString()} 起`
       : "价格暂不可用"
-    : "";
+    : product.salesMode === "CUSTOM_INQUIRY" && Number(product.priceMin) > 0
+      ? `¥ ${Number(product.priceMin).toLocaleString()} 起`
+      : "";
 
   const fullName = product.name || product.sku;
   const productCode = product.sku.trim();
-  const nameRemainder = fullName.slice(productCode.length);
-  // 只拆出与真实货号匹配的前缀；原名与货号不一致时完整保留原名。
-  const title = productCode
-    && fullName.toLocaleLowerCase().startsWith(productCode.toLocaleLowerCase())
-    && /^[\s·:：_-]*[\u3400-\u9fff]/u.test(nameRemainder)
-      ? nameRemainder.replace(/^[\s·:：_-]+/u, "")
-      : fullName;
-  const subInfo = [title === productCode ? "" : productCode, product.categoryName, product.material]
-    .filter(Boolean)
-    .join(" · ");
+  const title = getPublicProductTitle(fullName);
   const detailHref = productPathWithCatalogReturn(publicProductPath(product), catalogUrl);
   const openDetail = () => rememberDetailEntry(product, productIndex, catalogUrl, "card");
 
@@ -243,60 +215,59 @@ function ProductCard({
           <button
             type="button"
             className="catalog-image-next"
-            aria-label={`下一张图片，当前第 ${imgIdx + 1} 张，共 ${allImages.length} 张`}
-            onClick={() => setImgIdx((index) => (index + 1) % allImages.length)}
+            data-catalog-image-next
+            aria-label={`下一张作品图，当前第 ${imgIdx + 1} 张，共 ${allImages.length} 张`}
+            onClick={(event) => {
+              event.stopPropagation();
+              setImgIdx((index) => (index + 1) % allImages.length);
+            }}
           >
             <span aria-hidden="true" />
           </button>
         ) : null}
         {allImages.length > 1 ? (
-          <div
-            className="catalog-image-marks"
-            role="group"
-            aria-label={`${fullName} 的图片`}
+          <button
+            type="button"
+            className="catalog-image-dots"
+            data-catalog-image-dots
+            aria-label={`下一张图片，当前第 ${imgIdx + 1} 张，共 ${allImages.length} 张`}
+            onClick={(event) => {
+              event.stopPropagation();
+              setImgIdx((index) => (index + 1) % allImages.length);
+            }}
           >
-            {allImages.map((src, i) => (
-              <button
-                key={`${product.id}-${src}`}
-                type="button"
-                className="catalog-image-mark"
-                data-catalog-image-mark={i}
-                aria-label={`查看第 ${i + 1} 张图片，共 ${allImages.length} 张`}
-                aria-pressed={i === imgIdx}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setImgIdx(i);
-                }}
-              >
-                <span aria-hidden="true" />
-              </button>
+            {allImages.map((src, index) => (
+              <span
+                key={`${src}-${index}`}
+                className="catalog-image-dot"
+                data-active={index === imgIdx ? "true" : undefined}
+                aria-hidden="true"
+              />
             ))}
-          </div>
+          </button>
         ) : null}
       </div>
 
       <div className="catalog-product-card__copy">
         <h3 className="catalog-product-card__title">
-          <Link to={detailHref} onClick={openDetail} aria-label={fullName}>
+          <Link
+            to={detailHref}
+            data-catalog-detail-entry
+            onClick={() => rememberDetailEntry(product, productIndex, catalogUrl)}
+          >
             {title}
           </Link>
         </h3>
-        <p className="catalog-product-card__facts">{subInfo}</p>
+        {productCode ? (
+          <p className="catalog-product-card__facts">款号 {productCode}</p>
+        ) : null}
         {priceText ? (
           <p className="catalog-product-card__price">{priceText}</p>
-        ) : null}
-        {product.salesMode === "DIRECT_PURCHASE" ? (
-          <p className="catalog-product-card__status" role={product.isAvailableForPurchase === false ? "status" : undefined}>
-            {product.isAvailableForPurchase === false ? "已售罄" : ""}
-          </p>
         ) : null}
         <CatalogProductAction
           product={product}
           selected={sel}
           onToggle={handleToggle}
-          commerceAllowed={commerceAllowed}
-          productIndex={productIndex}
-          catalogUrl={catalogUrl}
         />
       </div>
     </div>
@@ -329,12 +300,10 @@ function useCatalogColumnCount(resultCount: number) {
    ══════════════════════════════════════ */
 export function ProductGrid({
   products,
-  commerceAllowed,
   catalogUrl,
   startIndex = 0,
 }: {
   products: CatalogProduct[];
-  commerceAllowed: boolean;
   catalogUrl: string | null;
   startIndex?: number;
 }) {
@@ -359,7 +328,6 @@ export function ProductGrid({
         >
           <ProductCard
             product={p}
-            commerceAllowed={commerceAllowed}
             productIndex={startIndex + index}
             catalogUrl={catalogUrl}
           />

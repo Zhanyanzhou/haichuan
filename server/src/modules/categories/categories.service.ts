@@ -3,7 +3,10 @@ import { Prisma, type Category } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { StaffPrincipal } from '../../common/security/authenticated-principal';
 import { CreateCategoryDto, UpdateCategoryDto } from './dto/category.dto';
-import { customerFacingProductWhereForVisibilities } from '../products/product-eligibility';
+import {
+  customerFacingProductWhereForVisibilities,
+  staffWorkingProductWhere,
+} from '../products/product-eligibility';
 
 type ManageCategoryNode = Category & {
   products: Array<{ id: number }>;
@@ -14,10 +17,14 @@ type ManageCategoryNode = Category & {
 type AnnotatedManageCategoryNode = Omit<ManageCategoryNode, 'products' | 'children'> & {
   children: AnnotatedManageCategoryNode[];
   hasPublicProduct: boolean;
+  manageableProductCount: number;
+  isUncategorized?: true;
 };
 
 type CategoryActor = Pick<StaffPrincipal, 'id' | 'sessionFamilyId'>;
 type CategoryDb = Prisma.TransactionClient | PrismaService;
+const UNCATEGORIZED_SLUG = 'system-uncategorized';
+const UNCATEGORIZED_NAME = '未分类';
 
 @Injectable()
 export class CategoriesService {
@@ -118,13 +125,28 @@ export class CategoriesService {
           },
         },
       });
+      const collectIds = (nodes: ManageCategoryNode[]): number[] =>
+        nodes.flatMap((node) => [node.id, ...collectIds(node.children ?? [])]);
+      const ids = collectIds(categories);
+      const counts = ids.length ? await tx.product.groupBy({
+        by: ['categoryId'],
+        where: { ...staffWorkingProductWhere, categoryId: { in: ids } },
+        _count: { _all: true },
+      }) : [];
+      const manageableCounts = new Map(counts.map((row) => [row.categoryId, row._count._all]));
       const annotate = (node: ManageCategoryNode): AnnotatedManageCategoryNode => {
         const children = (node.children ?? []).map(annotate);
         const hasPublicProduct =
           (node.products?.length ?? 0) > 0 ||
           children.some((child) => child.hasPublicProduct);
         const { products: _products, ...rest } = node;
-        return { ...rest, children, hasPublicProduct };
+        return {
+          ...rest,
+          children,
+          hasPublicProduct,
+          manageableProductCount: manageableCounts.get(node.id) ?? 0,
+          ...(node.slug === UNCATEGORIZED_SLUG ? { isUncategorized: true as const } : {}),
+        };
       };
       return categories.map(annotate);
     });
@@ -208,6 +230,9 @@ export class CategoriesService {
     }
 
     const parent = await db.category.findUnique({ where: { id } });
+    if (parent?.slug === UNCATEGORIZED_SLUG) {
+      throw new BadRequestException('不能在「未分类」下添加分类');
+    }
     if (!parent || parent.level !== expectedLevel) {
       throw new BadRequestException(
         `${expectedLevel === 1 ? '二级' : '三级'}类目只能归属到${expectedLevel === 1 ? '一级' : '二级'}类目`,
@@ -251,6 +276,9 @@ export class CategoriesService {
     excludeId?: number,
   ) {
     if (!slug) return;
+    if (slug === UNCATEGORIZED_SLUG) {
+      throw new ConflictException('该 Slug 为系统「未分类」保留');
+    }
     const existing = await db.category.findUnique({ where: { slug } });
     if (existing && existing.id !== excludeId) {
       throw new ConflictException('该 Slug 已被其他类目使用');
@@ -284,6 +312,9 @@ export class CategoriesService {
       // 创建二/三级类目
       const parentId = Number(data.parentId);
       const parent = await tx.category.findUnique({ where: { id: parentId } });
+      if (parent?.slug === UNCATEGORIZED_SLUG) {
+        throw new BadRequestException('不能在「未分类」下添加分类');
+      }
       if (!parent || ![1, 2].includes(parent.level)) {
         throw new BadRequestException('请选择一级或二级类目作为归属');
       }
@@ -310,6 +341,9 @@ export class CategoriesService {
       await this.lockAuthorizedActor(tx, actor);
       const category = await tx.category.findUnique({ where: { id } });
       if (!category) throw new NotFoundException('类目不存在');
+      if (category.slug === UNCATEGORIZED_SLUG) {
+        throw new BadRequestException('不能编辑系统「未分类」');
+      }
       if (data.level !== undefined && Number(data.level) !== category.level) {
         throw new BadRequestException('不支持调整类目层级');
       }
@@ -327,7 +361,7 @@ export class CategoriesService {
       await this.ensureSlugAvailable(categoryData.slug, tx, id);
 
       // 旧数据上的停用入口。有下级或商品时不能停用，避免导航消失但商品仍可被找到。
-      // 后台「删除」走 delete()：下级款式一并删除；仍有商品时先改到指定分类。
+      // 后台「删除」走 delete()：下级款式一并删除；仍有商品时先改归属。
       if (categoryData.isActive === false) {
         await this.assertDeactivatable(id, tx);
       }
@@ -371,6 +405,7 @@ export class CategoriesService {
       const retired = await db.category.findMany({
         where: {
           isActive: false,
+          slug: { not: UNCATEGORIZED_SLUG },
           children: { none: {} },
           products: { none: {} },
         },
@@ -403,34 +438,60 @@ export class CategoriesService {
     return ids;
   }
 
-  /**
-   * 删除分类及其下级款式。商品不删除：范围内仍有商品时，先改到范围外的分类。
-   */
+  /** 并发首次创建可能争用唯一 slug，整个删除事务可安全重试一次。 */
   async delete(id: number, actor: CategoryActor, moveTo?: number) {
+    try {
+      return await this.deleteInTransaction(id, actor, moveTo);
+    } catch (error) {
+      if (moveTo === undefined && error instanceof Prisma.PrismaClientKnownRequestError
+        && (error.code === 'P2002' || error.code === 'P2034')) {
+        return this.deleteInTransaction(id, actor, moveTo);
+      }
+      throw error;
+    }
+  }
+
+  /** 归属转移和分类删除在同一事务内完成，商品和其生命周期状态均保留。 */
+  private async deleteInTransaction(id: number, actor: CategoryActor, moveTo?: number) {
     return this.prisma.$transaction(async (tx) => {
       await this.lockAuthorizedActor(tx, actor);
       const categories = await tx.category.findMany({
-        select: { id: true, parentId: true },
+        select: { id: true, parentId: true, slug: true },
       });
       if (!categories.some((category) => category.id === id)) {
         throw new NotFoundException('分类不存在');
       }
       const subtree = this.subtreeIds(categories, id);
       const subtreeSet = new Set(subtree);
+      if (categories.some((category) => subtreeSet.has(category.id) && category.slug === UNCATEGORIZED_SLUG)) {
+        throw new BadRequestException('不能删除系统「未分类」');
+      }
       const productCount = await tx.product.count({
         where: { categoryId: { in: subtree } },
       });
+      let movedProductCount = 0;
+      let uncategorizedCategoryId: number | undefined;
       if (productCount > 0) {
-        if (!Number.isInteger(moveTo) || !moveTo || moveTo <= 0) {
-          throw new BadRequestException('这个分类下还有商品，请选择要改去的分类后再删除');
-        }
-        if (subtreeSet.has(moveTo) || !categories.some((category) => category.id === moveTo)) {
+        let destinationId = moveTo;
+        if (destinationId === undefined) {
+          const fallback = await tx.category.upsert({
+            where: { slug: UNCATEGORIZED_SLUG },
+            create: { name: UNCATEGORIZED_NAME, slug: UNCATEGORIZED_SLUG, isActive: false, sortOrder: 2_147_483_647 },
+            update: {},
+          });
+          if (fallback.name !== UNCATEGORIZED_NAME || fallback.level !== 1 || fallback.parentId !== null
+            || fallback.isActive || fallback.deletedAt) {
+            throw new ConflictException('系统「未分类」不可用，分类未删除');
+          }
+          destinationId = uncategorizedCategoryId = fallback.id;
+        } else if (subtreeSet.has(destinationId) || !categories.some((category) => category.id === destinationId)) {
           throw new BadRequestException('要改去的分类不存在，或就在即将删除的分类里');
         }
-        await tx.product.updateMany({
+        const moved = await tx.product.updateMany({
           where: { categoryId: { in: subtree } },
-          data: { categoryId: moveTo },
+          data: { categoryId: destinationId },
         });
+        movedProductCount = moved.count;
       }
 
       const childrenByParent = new Map<number, number[]>();
@@ -453,7 +514,7 @@ export class CategoriesService {
         await tx.category.deleteMany({ where: { id: { in: leaves } } });
         for (const leaf of leaves) pending.delete(leaf);
       }
-      return { success: true };
+      return { success: true, movedProductCount, ...(uncategorizedCategoryId === undefined ? {} : { uncategorizedCategoryId }) };
     });
   }
 
@@ -481,10 +542,11 @@ export class CategoriesService {
     await this.prisma.$transaction(async (tx) => {
       await this.lockAuthorizedActor(tx, actor);
       for (const it of items) {
-        await tx.category.update({
-          where: { id: it.id },
+        const updated = await tx.category.updateMany({
+          where: { id: it.id, slug: { not: UNCATEGORIZED_SLUG } },
           data: { sortOrder: it.sortOrder },
         });
+        if (updated.count !== 1) throw new BadRequestException('分类不存在或为系统「未分类」，无法调整顺序');
       }
     });
     return { success: true, updated: items.length };

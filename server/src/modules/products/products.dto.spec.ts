@@ -23,13 +23,27 @@ test('创建商品 DTO 接受最小合法载荷和多 SKU 数组', async () => {
   const multiSkuErrors = await validateCreateProduct({
     ...validProduct,
     skus: [
-      { skuCode: 'SYNTH-SKU-A', price: 12800 },
+      { skuCode: 'SYNTH-SKU-A', color: '玫瑰金', price: 12800 },
       { skuCode: 'SYNTH-SKU-B', price: 13800, isActive: false },
     ],
   });
 
   assert.equal(minimalErrors.length, 0);
   assert.equal(multiSkuErrors.length, 0);
+});
+
+test('创建商品 DTO 的 SKU 颜色最多 50 个字符', async () => {
+  const accepted = await validateCreateProduct({
+    ...validProduct,
+    skus: [{ skuCode: 'SYNTH-SKU-COLOR', color: '白色', price: 12800 }],
+  });
+  assert.equal(accepted.length, 0);
+
+  const rejected = await validateCreateProduct({
+    ...validProduct,
+    skus: [{ skuCode: 'SYNTH-SKU-COLOR', color: '金'.repeat(51), price: 12800 }],
+  });
+  assert.ok(rejected.find((error) => error.property === 'skus')?.children?.length);
 });
 
 test('创建商品 DTO 按淘宝口径限制标题：汉字计 2，字母与数字计 1，合计不超过 60', async () => {

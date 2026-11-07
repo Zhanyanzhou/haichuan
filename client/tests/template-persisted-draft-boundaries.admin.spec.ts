@@ -1,7 +1,8 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 import { installAdminSession } from "./fixtures/session-auth";
-import { saveTemplate } from "./fixtures/template-authoring-main-route";
+import { productionStageAction, saveTemplate } from "./fixtures/template-authoring-main-route";
+import { seedLaunchMasterDraft } from "./fixtures/template-launch-master-entry";
 
 const NOW = "2026-09-09T09:00:00.000Z";
 const TEMPLATE_A = "tpl_td6_exact_a";
@@ -396,7 +397,7 @@ function expectNoWrites(server: BoundaryServer) {
 async function expectCatalogStillOperable(page: Page) {
   await expect(catalogPrimaryButton(page, TEMPLATE_A, "TD6 边界模板 A", "editing")).toBeEnabled();
   await expect(catalogPrimaryButton(page, TEMPLATE_B, "TD6 边界模板 B", "open")).toBeEnabled();
-  await expect(page.getByRole("button", { name: "新建模板", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "从首发母版开始", exact: true })).toHaveCount(0);
 }
 
 const malformedCases: Array<{
@@ -681,28 +682,9 @@ test("TD6 历史来源标记不触发恢复转换，exact GET 草稿原样打开
 
 async function editTemplateName(page: Page, name: string) {
   const field = page.getByRole("textbox", { name: "模板名称", exact: true });
-  if (!await field.isVisible()) await page.getByRole("button", { name: "打开模板设置", exact: true }).click();
+  if (!await field.isVisible()) await (await productionStageAction(page, "交付信息")).click();
   await field.fill(name);
   await field.press("Tab");
-}
-
-async function createUnsavedTemplate(page: Page) {
-  await page
-    .getByRole("complementary", { name: "模板组件库" })
-    .getByRole("button", { name: "新建模板", exact: true })
-    .click();
-  const dialog = page.getByRole("dialog", { name: "创建模板", exact: true });
-  // 创建向导第 1 步已按区块角色组织（D.40：创建类型即区块角色），"商品促销"不再是选项。
-  // 这条用例只借向导造一份未保存草稿，角色本身不参与断言。
-  await dialog.getByRole("button", { name: "页面首屏", exact: true }).click();
-  await dialog.getByRole("button", { name: "下一步", exact: true }).click();
-  await dialog.getByRole("button", { name: /竖向卡片 4:5/ }).click();
-  await dialog.getByRole("button", { name: "下一步", exact: true }).click();
-  await dialog.getByRole("button", { name: /上图下文/ }).click();
-  await dialog.getByRole("button", { name: "下一步", exact: true }).click();
-  await dialog.getByRole("button", { name: "前往确认（未配置项用推荐值）", exact: true }).click();
-  await dialog.getByRole("button", { name: "创建模板", exact: true }).click();
-  await expect(dialog).toBeHidden();
 }
 
 test.describe("普通保存响应恢复（自有 API Mock）", () => {
@@ -710,7 +692,7 @@ test.describe("普通保存响应恢复（自有 API Mock）", () => {
     test(`${mode} 响应丢失后恢复保存身份并保留新编辑`, async ({ page }) => {
       const server = await installBoundaryServer(page);
       await enterTemplateCatalog(page, server);
-      if (mode === "create") await createUnsavedTemplate(page);
+      if (mode === "create") await seedLaunchMasterDraft(page);
       else await openTemplate(page, server, TEMPLATE_A, "TD6 边界模板 A");
       await editTemplateName(page, `响应恢复 ${mode}`);
       const before = await readSessionSnapshot(page);
@@ -765,7 +747,7 @@ test.describe("普通保存响应恢复（自有 API Mock）", () => {
       const server = await installBoundaryServer(page);
       await enterTemplateCatalog(page, server);
       const newTemplate = ["同名", "同ID内容冲突", "混合冲突核验失败"].includes(scenario);
-      if (newTemplate) await createUnsavedTemplate(page);
+      if (newTemplate) await seedLaunchMasterDraft(page);
       else await openTemplate(page, server, TEMPLATE_A, "TD6 边界模板 A");
       await editTemplateName(page, "保留本地输入");
       const before = await readSessionSnapshot(page);

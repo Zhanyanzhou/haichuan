@@ -1,7 +1,35 @@
+.admin-main:has(> .product-manage) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-block-end: 0;
+}
+
 .product-manage {
-  padding: 10px 18px 48px;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 10px 18px 0;
   color: var(--adm-ink);
   background: var(--adm-content-bg);
+}
+
+.product-manage > header,
+.product-manage__tabs {
+  flex-shrink: 0;
+}
+
+.product-manage__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-block: 16px 48px;
+}
+
+.product-manage__scroll:focus-visible {
+  outline: 2px solid var(--adm-action);
+  outline-offset: -2px;
 }
 
 .product-manage__tabs {
@@ -49,20 +77,6 @@
   color: var(--adm-text) !important;
   font-size: 19px;
   letter-spacing: 2px;
-}
-
-.product-manage__quality-notice {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 28px;
-  margin: 16px 0 18px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: 4px;
-  color: var(--adm-text);
-  background: var(--adm-neutral-bg);
-  font-size: 12px;
 }
 
 .product-manage__filters {
@@ -277,6 +291,24 @@
   color: var(--adm-text);
   font-size: 13px;
   white-space: nowrap;
+}
+
+.product-manage__permanent-delete-button {
+  height: 36px;
+}
+
+.product-manage__permanent-delete-list,
+.product-manage__batch-list {
+  max-height: 50vh;
+  overflow: auto;
+  padding-inline-start: 20px;
+  overflow-wrap: anywhere;
+}
+
+.product-manage__sales-mode-fields {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
 }
 
 .product-manage__table .ant-table {

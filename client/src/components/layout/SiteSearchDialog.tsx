@@ -2,9 +2,10 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router-dom";
 import { SecureImage } from "@/components/common/SecureImage";
-import { expandCategoryIds, type RealCategory } from "@/hooks/useProductData";
+import { expandCategoryIds, fetchPublicProductSearchPage, type RealCategory } from "@/hooks/useProductData";
 import { getPrimaryCats, getRealSubs } from "@/pages/public/Catalog/catalogCategories";
-import { categoryApi, productApi } from "@/services/api";
+import { getCatalogSearchQuery } from "@/pages/public/Catalog/catalogQuery";
+import { categoryApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { withPublicMediaWidth } from "@/utils/publicMediaWidth";
 import { publicProductPath } from "@/utils/publicProductPath";
@@ -22,6 +23,7 @@ type SearchWork = {
   name: string;
   categoryId: number;
   price: number;
+  priceMin: number;
   salesMode?: string;
   image?: string;
 };
@@ -62,6 +64,7 @@ function parseWork(value: unknown): SearchWork | null {
   const images = Array.isArray(record.images) ? record.images : [];
   const image = mediaOf(record.listingImage) || mediaOf(record.primaryImage) || mediaOf(images[0]);
   const price = Number(record.price);
+  const priceMin = Number(record.priceMin);
   const code = textOf(record.code);
   return {
     id,
@@ -69,12 +72,13 @@ function parseWork(value: unknown): SearchWork | null {
     name: textOf(record.name) || code || "未命名作品",
     categoryId,
     price: Number.isFinite(price) ? price : 0,
+    priceMin: Number.isFinite(priceMin) ? priceMin : 0,
     salesMode: textOf(record.salesMode) || undefined,
     image: image ? withPublicMediaWidth(image, 480) : undefined,
   };
 }
 
-function readWorks(payload: unknown): SearchWork[] {
+function readWorks(payload: unknown, requireValidItems: boolean): { works: SearchWork[]; total: number } {
   const record = typeof payload === "object" && payload !== null
     ? payload as Record<string, unknown>
     : null;
@@ -90,8 +94,15 @@ function readWorks(payload: unknown): SearchWork[] {
     if (work) works.push(work);
     if (works.length >= WORK_LIMIT) break;
   }
-  if (rawList.length && !works.length) throw new Error("Invalid public search works");
-  return works;
+  const total = record?.total;
+  if (
+    (rawList.length && !works.length) ||
+    (requireValidItems && rawList.length !== works.length) ||
+    (total !== undefined && (typeof total !== "number" || !Number.isInteger(total) || total < works.length))
+  ) {
+    throw new Error("Invalid public search works");
+  }
+  return { works, total: total ?? works.length };
 }
 
 function useSearchWorks(keyword: string, categoryIds: string, enabled: boolean, revision: number) {
@@ -105,14 +116,15 @@ function useSearchWorks(keyword: string, categoryIds: string, enabled: boolean, 
   useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController();
-    productApi.getPublicList({
+    const query = getCatalogSearchQuery(keyword);
+    fetchPublicProductSearchPage({
       page: 1,
       pageSize: WORK_LIMIT,
-      ...(keyword ? { keyword } : {}),
+      sortBy: keyword ? "relevance" : "sortOrder",
+      ...(query.keyword ? { keyword: query.keyword } : {}),
       ...(categoryIds ? { categoryIds } : {}),
-    }, controller.signal).then((response) => {
+    }, query.exactCode, controller.signal, readWorks).then(({ works }) => {
       if (controller.signal.aborted) return;
-      const works = readWorks(unwrapResponse<unknown>(response));
       setResult({ key, status: "ready", works });
     }).catch((error: unknown) => {
       if (controller.signal.aborted || isCanceled(error)) return;
@@ -127,6 +139,7 @@ function useSearchWorks(keyword: string, categoryIds: string, enabled: boolean, 
 }
 
 function workPrice(work: SearchWork): string {
+  if (work.salesMode === "CUSTOM_INQUIRY" && work.priceMin > 0) return `¥${work.priceMin.toLocaleString("zh-CN")} 起`;
   if (work.salesMode !== "DIRECT_PURCHASE" || !(work.price > 0)) return "";
   return `¥${work.price.toLocaleString("zh-CN")} 起`;
 }
@@ -135,24 +148,6 @@ function primaryCategoryId(tree: RealCategory[], categoryId: number): number | n
   const includesCategory = (node: RealCategory): boolean =>
     node.id === categoryId || Boolean(node.children?.some(includesCategory));
   return tree.find(includesCategory)?.id ?? null;
-}
-
-function categoryIdsMatching(tree: RealCategory[], needle: string): string {
-  if (!needle) return "";
-  const ids = new Set<number>();
-  const visit = (nodes: RealCategory[]) => {
-    for (const node of nodes) {
-      if (node.name.toLocaleLowerCase().includes(needle)) {
-        for (const id of expandCategoryIds(tree, node.id).split(",")) {
-          const numeric = Number(id);
-          if (Number.isInteger(numeric) && numeric > 0) ids.add(numeric);
-        }
-      }
-      if (node.children?.length) visit(node.children);
-    }
-  };
-  visit(tree);
-  return [...ids].join(",");
 }
 
 function seriesOf(tree: RealCategory[], parentId: number | null): SeriesLink[] {
@@ -289,15 +284,7 @@ export default function SiteSearchDialog({ open, onClose }: SiteSearchDialogProp
   const scopedIds = !needle && activeCategoryId
     ? expandCategoryIds(categories, activeCategoryId)
     : "";
-  const primary = useSearchWorks(debouncedKeyword, scopedIds, queryCurrent, workRevision);
-  const keywordMiss = Boolean(needle) && primary.status === "ready" && primary.works.length === 0;
-  const matchedIds = keywordMiss && categoryStatus === "ready"
-    ? categoryIdsMatching(categories, needle)
-    : "";
-  const fallback = useSearchWorks("", matchedIds, queryCurrent && Boolean(matchedIds), workRevision);
-  const { works, status: workStatus } = keywordMiss && (matchedIds || categoryStatus === "loading")
-    ? fallback
-    : primary;
+  const { works, status: workStatus } = useSearchWorks(debouncedKeyword, scopedIds, queryCurrent, workRevision);
 
   if (!open) return null;
 
@@ -348,7 +335,7 @@ export default function SiteSearchDialog({ open, onClose }: SiteSearchDialogProp
           }}
         >
           <SearchGlyph />
-          <label className="sr-only" htmlFor="site-search-input">关键词或货号</label>
+          <label className="sr-only" htmlFor="site-search-input">关键词或款号</label>
           <input
             ref={inputRef}
             id="site-search-input"
@@ -356,7 +343,8 @@ export default function SiteSearchDialog({ open, onClose }: SiteSearchDialogProp
             onChange={(event) => setKeyword(event.target.value)}
             onCompositionStart={() => setComposing(true)}
             onCompositionEnd={() => setComposing(false)}
-            placeholder="搜索作品、系列、货号"
+            placeholder="搜索名称、款号或款式"
+            maxLength={100}
             autoComplete="off"
             enterKeyHint="search"
           />

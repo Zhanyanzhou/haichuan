@@ -25,7 +25,7 @@
 | `CUSTOM_INQUIRY` | 定制报价 | 否 | 否 |
 | `DIRECT_PURCHASE` | 直接购买 | 是：有效 SKU、SKU 成交价、Inventory 记录、配送方式及库存策略约束 | 仅在交易开关获批开启且库存足够时允许 |
 
-- 五种模式发布时均需满足有效名称、货号、启用分类和至少一张可读取的非视频商品图片。
+- 五种模式发布时均需满足有效名称、款号、启用分类和至少一张可读取的非视频商品图片。
 - 当前代码中，零售购物车、零售结算和直接下单只允许 `DIRECT_PURCHASE`；是否有参考价格不能改变当前边界。这只是现有零售路径的门禁，不表示未来只有 `DIRECT_PURCHASE` 才能形成订单。
 - 同一设计可以独立存在标准零售、高级定制和合作蜡模报价通道；高级定制与合作蜡模在客户本人确认有效报价后按独立状态机事务转单，不通过篡改 `SalesMode` 绕过现有零售门禁。业务定义只认 `docs/DECISIONS.md` D.19。
 - `DIRECT_PURCHASE` 的 0 库存商品可以发布并展示为售罄，但购物车和下单必须拒绝。
@@ -39,7 +39,7 @@
 
 | 字段                                                         | 含义                          | 类型                         | 必填     | 默认（create）                   | 数据来源                                 | 多写法/风险                                                                                                        |
 | ------------------------------------------------------------ | ----------------------------- | ---------------------------- | -------- | -------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `code`                                                       | 货号，全系统唯一标识          | VarChar(50) `@unique`        | **必填** | —                                | 业务给定（图片文件名前缀，如 `ATP3620`） | ⚠️ 导入脚本同款冲突自动加 `-2/-3` 后缀，事后靠 merge 脚本合并，易混图                                              |
+| `code`                                                       | 款号，全系统唯一标识          | VarChar(50) `@unique`        | **必填** | —                                | 业务给定（图片文件名前缀，如 `ATP3620`） | ⚠️ 导入脚本同款冲突自动加 `-2/-3` 后缀，事后靠 merge 脚本合并，易混图                                              |
 | `name`                                                       | 商品名称                      | VarChar(200)                 | **必填** | —                                | 业务给定                                 | ⚠️ 现脚本从图片文件名截取得名，产生残缺名（"珐琅"、"ATP1056"）；`_names.json` 有 700+ 中文名字典但**未被代码引用** |
 | `shortDescription`                                           | 简介                          | VarChar(500)                 | 可选     | `null`                           | 人工/AI 文案                             | —                                                                                                                  |
 | `description`                                                | 详情正文                      | Text                         | 可选     | `null`                           | 人工/AI 文案                             | ⚠️ `findAll` 不返回（仅 `findById` 返回）                                                                          |
@@ -48,13 +48,14 @@
 | `goldWeight`                                                 | 金重(g)                       | Decimal(8,2)                 | 可选     | `0`                              | 业务给定/称重                            | ⚠️ `=0` 时**不参与金价调价**；与 `weight`(总重)易混                                                                |
 | `craftFee`                                                   | 工费                          | Decimal(10,2)                | 可选     | `0`                              | 业务给定                                 | 金价调价公式用到；跟随父商品同步到 SKU                                                                             |
 | `price`                                                      | 有效且有价 SKU 的派生最低价缓存 | Decimal(10,2)              | 系统派生 | `0`                              | `ProductsService` 由 SKU 重算            | **禁止作为 `DIRECT_PURCHASE` 成交价事实源或由导入直接写入**；成交价只认 `ProductSKU.price`                         |
-| `priceMin` / `priceMax`                                      | 名义价格区间                  | Decimal(10,2)                | 可选     | `0`                              | —                                        | ⚠️ **死字段**：无过滤、无编辑 UI、仅 `clone` 写、仅 `priceMin` 做展示兜底。导入不应填值                            |
+| `priceMin`                                                   | 定制参考起价                  | Decimal(10,2)                | 可选     | 新建定制默认 `1000`，显式其他模式默认 `0` | 后台商品管理维护                    | 仅 `CUSTOM_INQUIRY` 且大于 0 时公开为“¥金额 起”；不是 SKU 成交价、订金或承诺最终报价；`0` 表示不公开参考价 |
+| `priceMax`                                                   | 历史名义价格上限              | Decimal(10,2)                | 保留     | `0`                              | —                                        | 未启用，不参与定制起价、公开筛选或成交价计算；不新增写入入口 |
 | `weight`                                                     | 总重量(g)                     | Decimal(8,2)                 | 可选     | `0`                              | 称重                                     | 与 `goldWeight` 不同概念                                                                                           |
 | `size`                                                       | 尺寸规格                      | VarChar(100)                 | 可选     | `null`                           | 业务给定                                 | 自由文本                                                                                                           |
 | `gemInfo`                                                    | 宝石信息                      | Json                         | 可选     | `null`                           | 人工                                     | ⚠️ 后端 `any` 无校验；**形状约束只在前端**（见第 8 节）                                                            |
 | `craftTechnique`                                             | 工艺技法                      | Json                         | 可选     | `null`（create）/ `[]`（编辑器） | 人工                                     | ⚠️ 后端 `any`；前端是 `string[]`；**空值两套写法**（`null` vs `[]`，见第 8 节）                                    |
 | `status`                                                     | 商品状态                      | enum `ProductStatus`（4 值） | 可选     | `DRAFT`                          | 状态流转                                 | 任何进入 `PUBLISHED` 的路径必须经过同一销售模式发布门禁                                                            |
-| `salesMode`                                                  | 销售模式                      | enum `SalesMode`（5 值）     | 可选     | `DISPLAY_ONLY`                   | 业务                                     | 决定发布要求与是否允许购物车/下单，见第 1、9 节                                                                    |
+| `salesMode`                                                  | 销售模式                      | enum `SalesMode`（5 值）     | 可选     | 创建 API 默认 `CUSTOM_INQUIRY`；数据库历史默认保留 | 业务                             | 决定发布要求与是否允许购物车/下单，见第 1、9 节；显式其他模式继续兼容 |
 | `inventoryPolicy`                                            | 库存策略                      | enum `InventoryPolicy`       | 可选     | `STANDARD`                       | 业务                                     | `STANDARD` 为普通库存；`SINGLE_UNIT` 只允许一个有效 SKU，库存总量与单次购买量不超过 1                               |
 | `fulfillmentType`                                            | 备货类型                      | enum `ProductFulfillmentType` | 可选    | `IN_STOCK`                       | 业务核实                                 | `IN_STOCK` / `PREORDER` / `CUSTOM` 是客户可见履约事实；当前默认值不能代替运营确认                                  |
 | `dispatchTime` / `customLeadTime`                             | 发出时间与约定备货周期        | enum + VarChar(100)          | 可选     | `WITHIN_48_HOURS` / `null`       | 业务核实                                 | `CUSTOM` 发布时必须填写真实周期；固定时效不得继续公开旧的 `customLeadTime`                                         |
@@ -67,9 +68,13 @@
 | `listingImageId`                                             | 列表图指针（可裁切派生）      | Int FK?                      | 系统     | `null`                           | `setListingImage`/裁切维护               | 与 primary 可不同；裁切生成 1200×1200 WebP                                                                         |
 | `publishedAt`                                                | 首次发布时间                  | DateTime?                    | 系统     | `null`（create 不写）            | `updateStatus`→PUBLISHED 时写            | ⚠️ `create` 即使 `status=PUBLISHED` 也不写；下架不清空（永久语义）                                                 |
 | `viewCount`/`salesCount`                                     | 浏览/销量                     | Int                          | 系统     | `0`                              | 系统累计                                 | 不得编造                                                                                                           |
-| `deletedAt`                                                  | 软删除标记                    | DateTime?                    | 系统     | `null`                           | `delete()` 写                            | `findAll` 默认 `where deletedAt:null`                                                                              |
+| `deletedAt`                                                  | 历史软删除标记                | DateTime?                    | 系统     | `null`                           | 兼容旧数据                               | 列表过滤有历史软删除标记的商品                                                                                       |
 
 **`findAll` 默认不返回的字段**（需 `findById`）：`description`、`gemInfo`、`craftTechnique`、`publishedAt`。导入校验/导出若需这些字段须走 `findById`。
+
+- 选款中心的“新品”使用公开目录查询 `sortBy=published_desc`，按首次发布时间 `publishedAt` 降序、商品 `id` 降序排列。缺少发布时间的历史作品排在末尾，旧 `updated_desc` 查询继续兼容。
+- 选款中心价格区间使用 `minPrice` / `maxPrice`，单位为元、含边界，允许零元上下限。筛选和排序比较当前公开金额：`DIRECT_PURCHASE` 的有效 SKU 最低公开成交价，或 `CUSTOM_INQUIRY` 大于零的 `priceMin` 参考起价；非公开的内部价格不参与。混合模式价格排序分别读取两条按价格和稳定 ID 排序的有界键序列后归并，再读取当前页完整记录，保持跨页顺序；游客多次读取使用 `RepeatableRead` 同一快照，会员沿用访问锁事务；深页轻量候选键读取量随页偏移增长。
+- 销量期望口径为已支付订单净售出件数并扣除退款退货。当前退款与售后记录缺少件数事实，`salesCount` 也没有成交维护链路，因此销量排序入口暂不可用，补齐数量事实后再启用。
 
 当前事实边界：
 
@@ -89,6 +94,7 @@
 | `skuCode`     | SKU 编码                                | VarChar(100) `@unique` | **必填** | —          | 业务/规则生成 | 全局唯一                                                                                                                  |
 | `material`    | 材质                                    | enum `MaterialType`    | 可选     | `GOLD_999` | 业务          | 可与父商品不同                                                                                                            |
 | `size`        | 规格                                    | VarChar(50)            | 可选     | `null`     | 业务          | 如圈口、链长                                                                                                              |
+| `imageId`     | 规格切换时展示的图片                    | Int                    | 可选     | `null`     | 商品图集      | 仅绑定同一商品的已上传图集图片。删除图片后解绑。直购详情仅返回仍可公开读取的图集图片 ID。 |
 | `goldWeight`  | 该 SKU 金重                             | Decimal(8,2)           | 可选     | `0`        | 称重          | ⚠️ `=0` 不参与金价调价                                                                                                    |
 | `price`       | `DIRECT_PURCHASE` 唯一成交价事实源       | Decimal(10,2)          | 直购必填 | `0`        | 金价引擎/人工 | 有效直购 SKU 必须大于 0；系统据有效且有价 SKU 自动派生 `Product.price`                                                       |
 | `stock`       | 遗留库存字段                            | Int                    | 禁止新增写入 | `0`     | 遗留兼容      | `@deprecated`；可售库存只认 `Inventory.quantity`，不得重新建立双轨                                                         |
@@ -128,7 +134,7 @@
 | `level`     | 层级                           | Int                    | 系统        | 由 `parentId` 推导：无父=1，父1→2，父2→3                                         |
 | `parentId`  | 父分类                         | Int?                   | 可选        | 自关联 `CategoryTree`                                                            |
 | `isActive`  | 公开可见 | Boolean | 默认 `true` | 公开分类树按此过滤。后台不保留停用；历史不在前台且没有下级和商品的分类直接删除 |
-| `deletedAt` | （死字段）                     | DateTime?              | —           | 空分类的 `delete()` 物理删除记录并释放 `slug`；有下级或商品时拒绝（见 D.5）      |
+| `deletedAt` | （死字段）                     | DateTime?              | —           | `delete()` 物理删除分类及下级并释放 `slug`；关联商品默认移入后台「未分类」（见 D.5） |
 | SEO 字段    | `seoTitle/seoDesc/seoKeywords` | 可选                   | —           | —                                                                                |
 
 **标准关系与约束**：
@@ -273,7 +279,8 @@
 - **发布（→PUBLISHED）**：创建、立即发布、定时发布和状态接口都必须经过统一 `canPublish` 门禁；首次发布写 `publishedAt`，重复校验不得重写首次发布时间。
 - **已发布商品变更**：SKU、价格、库存策略或库存变更后必须在同一事务内复核门禁；不再满足门禁时拒绝该次变更，不能留下无效的已发布状态。
 - **下架/归档**：`updateStatus` 只改 `status`，**不清空 `publishedAt`**（`publishedAt` 是"首次发布"永久语义）。
-- **软删除 `delete()`**：`status → OFFLINE` + `deletedAt → now()`，列表默认过滤。
+- **回收站**：移入回收站将状态改为 `ARCHIVED`，恢复时回到 `DRAFT`。旧 `DELETE /products/:id` 保留拒绝行为，历史 `deletedAt` 记录仍从列表过滤。
+- **永久删除**：超级管理员可通过 `DELETE /products/:id/permanent` 将任意回收站商品永久移出商品管理。无历史关联的商品物理删除；有关联的商品写入 `deletedAt` 并保留底层记录和款号，退出公开目录、后台商品列表和回收站，无法恢复。订单、报价、库存及页面历史可继续读取原关联，已建立的库存预占仍可正常释放。商品删除和操作审计同事务提交，批量操作逐件确认结果。
 
 ### 9.2 `SalesMode` 语义
 
@@ -347,7 +354,7 @@ Inventory (skuId+warehouseId 唯一) → Warehouse (SHOWROOM/FACTORY/STORE)
 8. **categoryId 硬编码**：脚本用 `1`/`9`，4000+ 全堆 1-2 个分类。
 9. **AI 分类不回写**：`confirmClassification` 不改 `Product.categoryId`，记录不带 `productId`。
 10. **历史发布门禁缺口已收敛**：所有进入 `PUBLISHED` 的路径必须经过统一、按 `SalesMode` 分支的门禁；旧脚本仍不得执行。
-11. **priceMin/priceMax 死字段**：导入填值无业务效果，反而误导展示兜底。
+11. **定制起价与成交价分离**：`priceMin` 已用于定制参考起价；导入定制作品默认 1000 元起，修改后须由后台保存并同步公开端。`priceMax` 继续保留而不启用，不得用两字段替代 SKU 成交价。
 12. **goldWeight=0 不调价**：未填金重的商品/SKU 价格凝固。
 13. **gemInfo 形状**：后端不校验，导入写中文/数组/对象 → 编辑器回填错位。
 14. **craftTechnique 形状**：导入非 `string[]` → 详情页 `.map` 崩溃；空值 `null` vs `[]` 不统一。
@@ -378,7 +385,7 @@ Inventory (skuId+warehouseId 唯一) → Warehouse (SHOWROOM/FACTORY/STORE)
 - 🟡 **13.5 图片角度方案**：`ImageType` 是否新增 `BACK`？还是 BACK 统一归 `DETAIL`/用 `sortOrder`+约定区分？现有背面图如何回填？
 - 🟡 **13.6 gemInfo 空值约定**：`null` vs 不写 vs `{}`？
 - 🟡 **13.7 craftTechnique 空值约定**：`[]` vs `null`？预设词表是否封闭？
-- 🟡 **13.8 priceMin/priceMax 去留**：保留（并补过滤/UI）还是废弃？
+- ✅ **13.8 定制参考起价**（2026-11-07）：用户明确要求全商品 1000 元起并通过后台同步预约定制，启用现有 `priceMin` 字段并接通维护与公开展示；既有记录经后台明确批量应用后生效，不通过数据库迁移或读时兜底伪造已修改。`priceMax` 暂维持历史保留。
 - ✅ **13.9 发布门禁已收口**：任何进入 `PUBLISHED` 的路径均执行按 `SalesMode` 分支的统一门禁。
 - ✅ **13.10 价格关系已确定**：SKU 维护成交价，Product 自动派生有效且有价 SKU 的最低价。
 - 🟡 **13.11 同款拆分处理**：导入时如何避免同款被拆成多商品（改 `variantKey` 逻辑 or 预先按 CODE 聚合）？

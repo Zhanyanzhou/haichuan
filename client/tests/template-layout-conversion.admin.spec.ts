@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { installNewTemplateServer, openTemplateDesignWithoutDraft, readSession } from "./fixtures/template-authoring-main-route";
+import { seedLaunchMasterDraft } from "./fixtures/template-launch-master-entry";
 async function mount(page: Page) {
   await page.route("**/__template-layout-conversion", (route) => route.fulfill({ contentType: "text/html", body: `<!doctype html><html><head><script type="module">import RefreshRuntime from '/@react-refresh'; RefreshRuntime.injectIntoGlobalHook(window); window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type; window.__vite_plugin_react_preamble_installed__ = true;</script></head><body><div id="root"></div><script type="module" src="/tests/fixtures/template-layout-conversion.tsx"></script></body></html>` }));
   await page.route("**/api/**", (route) => route.abort());
@@ -75,10 +76,7 @@ async function launchMasterOnMainRoute(page: Page, name: "左右图文" | "作�
   await page.setViewportSize({ width: 1600, height: 1000 });
   const server = await installNewTemplateServer(page);
   await openTemplateDesignWithoutDraft(page);
-  await page.getByRole("button", { name: "从首发母版开始", exact: true }).click();
-  await page.getByRole("button", { name: `母版 ${name}`, exact: true }).click();
-  await page.getByRole("button", { name: "用这块母版开始", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "选择首发母版", exact: true })).toBeHidden();
+  await seedLaunchMasterDraft(page, name);
   const state = await readSession(page);
   expect(state.definition!.name).toBe(name);
   await expect(page.frameLocator("iframe.template-editor__viewport-frame").locator(`[data-template-node-id="${state.definition!.rootNodeId}"]`)).toBeVisible();
@@ -157,8 +155,6 @@ test("首发主路由真实几何：只有一个直接子区域的模板整体�
   expect(definition.nodes[definition.rootNodeId].childIds).toHaveLength(1);
   await page.getByRole("button", { name: "模板整体", exact: true }).click();
   const inspector = page.getByRole("region", { name: "对象设计属性", exact: true });
-  const rootLayout = inspector.locator('details[data-template-property-group="排列与分栏"]');
-  if (await rootLayout.count()) await rootLayout.locator(":scope > summary").click();
   const choices = inspector.getByRole("group", { name: "选择容器排列方式", exact: true }).getByRole("button");
   expect(await choices.evaluateAll((buttons) => buttons.every((button) => (button as HTMLButtonElement).disabled)), "根只有一个直接子区域，不能把无视觉效果的切换显示成可用操作；应引导选择图文分栏").toBe(true);
   const beforeLocate = await readSession(page);

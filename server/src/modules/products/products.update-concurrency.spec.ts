@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ValidationPipe } from '@nestjs/common';
 import { ProductsService } from './products.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import type { UpdateProductDto } from './dto';
+import { UpdateProductDto } from './dto';
 
 const adminActor = { id: 7, role: 'ADMIN' } as const;
 
@@ -12,13 +12,14 @@ const adminActor = { id: 7, role: 'ADMIN' } as const;
  * 条件更新命中 0 行必须以 409 拒绝，禁止后保存者静默覆盖前者。
  */
 type UpdateManyCall = {
-  where: { id: number; updatedAt?: Date };
+  where: { id: number; updatedAt?: Date; salesMode?: string };
   data: Record<string, unknown>;
 };
 
 function createUpdateService(options: {
   concurrentWrite: boolean;
   dispatchTime?: "WITHIN_48_HOURS" | "CUSTOM";
+  currentSalesMode?: string;
 }) {
   const baseUpdatedAt = new Date('2026-09-03T10:00:00.000Z');
   const updateManyCalls: UpdateManyCall[] = [];
@@ -40,7 +41,8 @@ function createUpdateService(options: {
         updateManyCalls.push(args);
         const matches =
           args.where.id === 1 &&
-          args.where.updatedAt?.getTime() === currentUpdatedAt.getTime();
+          args.where.updatedAt?.getTime() === currentUpdatedAt.getTime() &&
+          (args.where.salesMode === undefined || args.where.salesMode === options.currentSalesMode);
         return { count: matches ? 1 : 0 };
       },
       findUniqueOrThrow: async () => ({ id: 1, name: '并发测试商品' }),
@@ -96,6 +98,34 @@ test('编辑期间他人已保存时更新被 409 拒绝而非静默覆盖', asy
   );
 });
 
+test('批量销售方式按确认的原值写入，过期原值不能覆盖已保存的销售方式', async () => {
+  const { service, updateManyCalls } = createUpdateService({
+    concurrentWrite: false,
+    currentSalesMode: 'SELECTION',
+  });
+  const pipe = new ValidationPipe({ whitelist: true, transform: true });
+  const metadata = { type: 'body' as const, metatype: UpdateProductDto };
+  const changes = { salesMode: 'APPOINTMENT', expectedSalesMode: 'SELECTION' };
+  await assert.rejects(
+    pipe.transform({ ...changes, expectedSalesMode: null }, metadata),
+    BadRequestException,
+  );
+  await assert.rejects(
+    service.update(1, { expectedSalesMode: 'SELECTION' }, adminActor),
+    BadRequestException,
+  );
+  await service.update(1, await pipe.transform(changes, metadata), adminActor);
+  assert.equal(updateManyCalls[0].where.salesMode, 'SELECTION');
+  assert.equal(updateManyCalls[0].data.salesMode, 'APPOINTMENT');
+  for (const field of ['expectedSalesMode', 'price', 'priceMin', 'inventoryPolicy', 'status']) {
+    assert.equal(field in updateManyCalls[0].data, false);
+  }
+  await assert.rejects(
+    service.update(1, { salesMode: 'APPOINTMENT', expectedSalesMode: 'DISPLAY_ONLY' }, adminActor),
+    ConflictException,
+  );
+});
+
 test('商品关系字段以标量外键写入 updateMany', async () => {
   const { service, updateManyCalls } =
     createUpdateService({ concurrentWrite: false });
@@ -142,4 +172,16 @@ test('CUSTOM 发出时效保留经核实的自定义周期', async () => {
     updateManyCalls[0].data.customLeadTime,
     '确认规格后 15 个工作日',
   );
+});
+
+test('定制起价通过商品条件更新保存，允许归零且不改SKU价格', async () => {
+  const { service, updateManyCalls } = createUpdateService({ concurrentWrite: false });
+  await service.update(1, { salesMode: 'CUSTOM_INQUIRY', priceMin: 1000 }, adminActor);
+  assert.equal(updateManyCalls[0].data.priceMin, 1000);
+  assert.equal(updateManyCalls[0].data.salesMode, 'CUSTOM_INQUIRY');
+  assert.equal('price' in updateManyCalls[0].data, false);
+  await service.update(1, { priceMin: 0 }, adminActor);
+  assert.equal(updateManyCalls[1].data.priceMin, 0);
+  await service.update(1, { priceMin: null }, adminActor);
+  assert.equal(updateManyCalls[2].data.priceMin, null);
 });

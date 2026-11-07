@@ -42,8 +42,8 @@ export interface Product {
   goldWeight?: number;
   craftFee?: number;
   price?: number;
-  /** @deprecated 价格区间已废弃,展示价统一用 price(=活跃 SKU 最低价) */
-  priceMin?: number;
+  /** CUSTOM_INQUIRY 的定制参考起价，不作为成交价或定金。 */
+  priceMin?: number | null;
   priceMax?: number;
   weight?: number;
   size?: string;
@@ -171,10 +171,13 @@ export interface ProductImage {
 
 export interface ProductSKU {
   id: number;
+  /** 仅指向当前作品图集中已授权的图片。 */
+  imageId?: number | null;
   productId: number;
   skuCode: string;
   material: MaterialType;
   size?: string;
+  color?: string;
   goldWeight?: number;
   price: number;
   /** 公开详情按实时库存派生的规格级可售状态；不得暴露库存数量。 */

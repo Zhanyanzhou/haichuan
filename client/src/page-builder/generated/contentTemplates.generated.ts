@@ -1,7 +1,7 @@
 /**
  * 自动生成，禁止手改。
  * 来源：contracts/page-builder/content-templates.contract.json
- * SHA-256：7b3c5da4fcf10e1d513abf4ad808955299e5f503d8661801d4fa6f66ffaea4a0
+ * SHA-256：3de3c9c3e47559d76ebb53eb51be9a16578489f4abce9622a62c1f67233f5ddd
  */
 
 export const CONTENT_TEMPLATE_REGISTRY_VERSION = 19;
@@ -502,8 +502,8 @@ export type ContentTemplatePageRule = {
   pageRole: string;
   contentPlacement: "root-only";
   allowedTemplateKeys: readonly ContentTemplateKey[];
+  allowedSectionRoles: readonly string[];
   businessRegionCount: 0 | 1;
-  businessRegionPosition?: "after-first-brand-block";
   headerMode: {
     configured: "overlay-light" | "solid";
     overlayRequiresFirstTemplate?: "hero";
@@ -513,6 +513,14 @@ export type ContentTemplatePageRule = {
 
 export const CONTENT_TEMPLATE_PAGE_RULES = {
   "about": {
+    "allowedSectionRoles": [
+      "page-hero",
+      "page-intro",
+      "editorial-split",
+      "craft-detail",
+      "maison-fact",
+      "video-story"
+    ],
     "allowedTemplateKeys": [
       "hero"
     ],
@@ -528,11 +536,14 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
     "publicPath": "/about"
   },
   "catalog": {
+    "allowedSectionRoles": [
+      "page-hero",
+      "page-intro"
+    ],
     "allowedTemplateKeys": [
       "hero"
     ],
     "businessRegionCount": 1,
-    "businessRegionPosition": "after-first-brand-block",
     "contentPlacement": "root-only",
     "headerMode": {
       "configured": "overlay-light",
@@ -544,11 +555,16 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
     "publicPath": "/catalog"
   },
   "contact": {
+    "allowedSectionRoles": [
+      "page-hero",
+      "page-intro",
+      "editorial-split",
+      "service-invitation"
+    ],
     "allowedTemplateKeys": [
       "hero"
     ],
     "businessRegionCount": 1,
-    "businessRegionPosition": "after-first-brand-block",
     "contentPlacement": "root-only",
     "headerMode": {
       "configured": "overlay-light",
@@ -560,6 +576,12 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
     "publicPath": "/contact"
   },
   "custom": {
+    "allowedSectionRoles": [
+      "page-hero",
+      "page-intro",
+      "editorial-split",
+      "service-invitation"
+    ],
     "allowedTemplateKeys": [
       "hero"
     ],
@@ -575,6 +597,17 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
     "publicPath": "/custom"
   },
   "home": {
+    "allowedSectionRoles": [
+      "page-hero",
+      "page-intro",
+      "collection-story",
+      "editorial-split",
+      "craft-detail",
+      "creation-grid",
+      "maison-fact",
+      "service-invitation",
+      "video-story"
+    ],
     "allowedTemplateKeys": [
       "hero"
     ],
@@ -590,6 +623,15 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
     "publicPath": "/"
   },
   "products": {
+    "allowedSectionRoles": [
+      "page-hero",
+      "page-intro",
+      "collection-story",
+      "editorial-split",
+      "craft-detail",
+      "creation-grid",
+      "video-story"
+    ],
     "allowedTemplateKeys": [
       "hero"
     ],
@@ -2546,6 +2588,12 @@ export function contentTemplateObjectHasCapability(
 
 export function getContentTemplatePageRule(pageKey: string) {
   return (CONTENT_TEMPLATE_PAGE_RULES as Record<string, ContentTemplatePageRule | undefined>)[pageKey];
+}
+
+/** 旧版本可能没有区块角色，继续沿用既有目录准入。显式声明的角色按页面合同匹配。 */
+export function isContentTemplateSectionRoleAllowedOnPage(pageKey: string, sectionRole: string | undefined): boolean {
+  if (!Object.prototype.hasOwnProperty.call(CONTENT_TEMPLATE_PAGE_RULES, pageKey)) return false;
+  return sectionRole === undefined || getContentTemplatePageRule(pageKey)?.allowedSectionRoles.includes(sectionRole) === true;
 }
 
 const CONTENT_TEMPLATE_PAGE_PATH_SET = new Set<string>(

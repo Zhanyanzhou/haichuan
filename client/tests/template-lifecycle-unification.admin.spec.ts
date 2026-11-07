@@ -20,6 +20,7 @@ import type {
 } from "../src/services/clients/dynamicTemplateClient";
 import { installAdminSession } from "./fixtures/session-auth";
 import { productionStageAction } from "./fixtures/template-authoring-main-route";
+import { seedLaunchMasterDraft } from "./fixtures/template-launch-master-entry";
 
 const NOW = "2026-09-09T10:00:00.000Z";
 const CREATED_CHECKSUM = "c".repeat(64);
@@ -36,7 +37,7 @@ const HERO_TEMPLATE_ID = "tpl_repository_hero_4_3";
 const HERO_TEMPLATE_NAME = "首屏";
 const CAMPAIGN_TEMPLATE_ID = "tpl_repository_campaign_wide";
 const CAMPAIGN_TEMPLATE_NAME = "限时活动";
-const NEW_TEMPLATE_NAME = "唯一入口新建模板";
+const NEW_TEMPLATE_NAME = "首发母版派生草稿";
 const MAX_CANVAS_VIEWPORT_MULTIPLIER = 4;
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const SOURCE_LEVEL_WORDS = /内置模板|系统模板|系统必填内容|动态模板|个人模板|自定义模板/;
@@ -868,16 +869,6 @@ async function markCurrentTemplateDirty(page: Page) {
 }
 
 async function fillNewTemplateIdentity(page: Page) {
-  const creator = page.getByRole("dialog", { name: "创建模板", exact: true });
-  await creator.getByRole("button", { name: "页面首屏", exact: true }).click();
-  await creator.getByRole("button", { name: "下一步", exact: true }).click();
-  await creator.getByRole("button", { name: /方形卡片 1:1/ }).click();
-  await creator.getByRole("button", { name: "下一步", exact: true }).click();
-  await creator.getByRole("button", { name: /上图下文/ }).click();
-  await creator.getByRole("button", { name: "1 张主图", exact: true }).click();
-  await creator.getByRole("button", { name: "前往确认（未配置项用推荐值）", exact: true }).click();
-  await creator.getByRole("button", { name: "创建模板", exact: true }).click();
-  await expect(creator).toBeHidden();
   await (await productionStageAction(page, "交付信息")).click();
   const name = page.locator('[data-template-inspector-field="name"]')
     .getByRole("textbox", { name: "模板名称", exact: true });
@@ -887,7 +878,7 @@ async function fillNewTemplateIdentity(page: Page) {
   const purpose = page.locator('[data-template-inspector-field="metadata.purpose"]')
     .getByRole("textbox", { name: "用途", exact: true });
   await expect(purpose).toHaveCount(1);
-  await purpose.fill("验证 Repository 模板只能由新建模板入口建立");
+  await purpose.fill("验证首发母版派生草稿的首次保存");
   await purpose.press("Tab");
 }
 
@@ -1437,7 +1428,7 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
     await expect(productionGuide).toHaveCount(0);
 
     await expect(page.getByRole("button", { name: "顶部新建模板", exact: true })).toBeHidden();
-    await expect(page.getByRole("button", { name: "新建模板", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "从首发母版开始", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "打开模板设置", exact: true })).toHaveCount(0);
     await page.getByRole("button", { name: "更多模板操作", exact: true }).click();
     await menuItemByAction(page, "模板设置").click();
@@ -1767,14 +1758,14 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
     expect(session.dirty).toBe(true);
   });
 
-  test("只有新建模板入口触发 Repository create，且请求不携带兼容来源", async ({ page }) => {
+  test("未持久化的兼容草稿只在首次保存时触发 Repository create，且请求不携带兼容来源", async ({ page }) => {
     const server = await installLifecycleServer(page, { includeStandardRecords: true });
     await openDesignCatalog(page);
-    const library = page.getByRole("complementary", { name: "模板组件库" });
-    await library.getByRole("button", { name: "新建模板", exact: true }).click();
+    await seedLaunchMasterDraft(page);
     await fillNewTemplateIdentity(page);
     const beforeSave = await readTemplateSession(page);
-    if (!beforeSave.definition) throw new Error("新建模板入口没有建立内存草稿");
+    if (!beforeSave.definition) throw new Error("兼容夹具没有装入内存草稿");
+    expect(server.allWrites).toEqual([]);
 
     await page.getByRole("button", { name: "保存模板", exact: true }).click();
     await expect.poll(() => server.writes.filter((write) => (

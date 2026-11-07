@@ -181,22 +181,15 @@
   overflow-wrap: anywhere;
 }
 
-.template-editor__header-compatibility summary {
-  min-height: 32px;
-  padding: 4px 0;
-  cursor: pointer;
+.template-editor__root-usage > h3,
+.template-editor__header-compatibility > h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .template-editor__header-compatibility > div {
   margin: 8px 0;
-}
-
-.template-editor__root-usage > .ant-btn {
-  width: fit-content;
-  max-width: 100%;
-  height: auto;
-  min-height: 32px;
-  white-space: normal;
 }
 
 .template-editor__page-form-field input,

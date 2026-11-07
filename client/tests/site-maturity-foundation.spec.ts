@@ -7,6 +7,7 @@ import {
   normalizePublicSiteOrigin,
 } from "../src/utils/publicSiteUrl";
 import { isNonIndexablePublicRoute } from "../src/utils/publicSeoPolicy";
+import { createContentTemplateMarker } from "../src/page-builder/generated/contentTemplates.generated";
 import {
   PUBLIC_ENGLISH_ROUTES_ENABLED,
   resolveRetiredEnglishRedirect,
@@ -149,6 +150,10 @@ for (const viewport of [
     const pendingPublishedRoutes: Route[] = [];
     let pageDocumentRequested = false;
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await page.route("**/uploads/maturity-hero.svg", (route) => route.fulfill({
+      contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><rect width="1600" height="900" fill="#DDE1E2"/></svg>',
+    }));
 
     await page.route("**/api/**", async (route) => {
       const url = new URL(route.request().url());
@@ -198,7 +203,12 @@ for (const viewport of [
             puckData: {
               content: [{
                 type: "首屏主视觉",
-                props: { title: "已发布首页" },
+                props: {
+                  id: "maturity-hero",
+                  title: "已发布首页",
+                  desktopImage: "/uploads/maturity-hero.svg",
+                  __contentTemplate: createContentTemplateMarker("首屏主视觉"),
+                },
               }],
             },
           },
@@ -226,6 +236,7 @@ test("预渲染首页在公开接口返回前不展示构建快照，接口失�
     pageKey: "home",
     status: "PUBLISHED",
     metadata: {},
+    mediaFacts: { "/uploads/static-hero.jpg": { displayWidth: 2880, displayHeight: 1620 } },
     puckData: {
       content: [{
         type: "首屏主视觉",
@@ -254,13 +265,15 @@ test("预渲染首页在公开接口返回前不展示构建快照，接口失�
       import ReactDOM from '/node_modules/.vite/deps/react-dom_client.js';
       import { usePublishedPageDocument } from '/src/page-builder/runtime/usePublishedPageDocument.ts';
       import { HomeFirstFold } from '/src/pages/public/Home/index.tsx';
+      import { PublicImageFactsProvider, readPublicImageFacts } from '/src/page-builder/runtime/publicImageFacts.tsx';
       function App() {
         const resource = usePublishedPageDocument('home');
         return React.createElement(
           React.Fragment,
           null,
           React.createElement('output', null, resource.pageDocument?.puckData.content[0].props.title ?? resource.status),
-          React.createElement(HomeFirstFold, { data: resource.pageDocument?.puckData }),
+          React.createElement(PublicImageFactsProvider, { facts: readPublicImageFacts(resource.pageDocument) },
+            React.createElement(HomeFirstFold, { data: resource.pageDocument?.puckData })),
         );
       }
       ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
@@ -277,36 +290,30 @@ test("预渲染首页在公开接口返回前不展示构建快照，接口失�
       json: { code: 503, message: "fixture unavailable" },
     });
   });
+  await page.route("**/uploads/static-hero.jpg*", (route) => route.fulfill({
+    contentType: "image/svg+xml",
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><rect width="1600" height="900" fill="#DDE1E2"/></svg>',
+  }));
 
   await page.goto("/__prerendered-home-bootstrap", { waitUntil: "commit" });
   await expect(page.locator("output")).toHaveText("loading", { timeout: 30_000 });
-  await expect(page.locator('section[aria-label="首页首屏"] img')).toHaveCount(0);
+  const preloadPicture = page.locator('section[aria-label="首页首屏"] picture');
+  await expect(preloadPicture).toHaveCount(0);
   await expect(page.getByText("首页内容正在准备")).toBeVisible();
   releaseRead();
   await expect(page.locator("output")).toHaveText("静态首屏");
   await expect(page.getByRole("heading", { name: "静态首屏" })).toHaveCount(0);
-  await expect(page.getByText("稳定首屏副标题")).toBeVisible();
-  const heroSrcSet = "/uploads/static-hero.jpg?width=480 480w, /uploads/static-hero.jpg?width=800 800w, /uploads/static-hero.jpg?width=1200 1200w, /uploads/static-hero.jpg?width=1680 1680w, /uploads/static-hero.jpg?width=2400 2400w, /uploads/static-hero.jpg?width=2880 2880w";
-  await expect(page.locator('section[aria-label="首页首屏"] source')).toHaveAttribute(
-    "srcset",
-    heroSrcSet,
-  );
-  await expect(page.locator('section[aria-label="首页首屏"] img')).toHaveAttribute(
-    "src",
-    "/uploads/static-hero.jpg?width=1680",
-  );
-  await expect(page.locator('section[aria-label="首页首屏"] img')).toHaveAttribute(
-    "srcset",
-    heroSrcSet,
-  );
-  await expect(page.locator('section[aria-label="首页首屏"] img')).toHaveAttribute(
-    "sizes",
-    "100vw",
-  );
-  await expect(page.locator('section[aria-label="首页首屏"] img')).toHaveAttribute(
-    "fetchpriority",
-    "high",
-  );
+  await expect(page.getByText("稳定首屏副标题")).toHaveCount(0);
+  const heroSrcSet = [480, 800, 1200, 1680, 2400, 2880].map((width) => `/uploads/static-hero.jpg?width=${width}&rv=2 ${width}w`).join(", ");
+  const preloadImage = preloadPicture.locator("img");
+  await expect(preloadImage).toBeAttached();
+  await expect(preloadImage).toBeHidden();
+  await expect(preloadPicture.locator("source")).toHaveAttribute("srcset", heroSrcSet);
+  await expect(preloadImage).toHaveAttribute("src", "/uploads/static-hero.jpg?width=1680&rv=2");
+  await expect(preloadImage).toHaveAttribute("srcset", heroSrcSet);
+  await expect(preloadImage).toHaveAttribute("sizes", /100vw/);
+  await expect(preloadImage).toHaveAttribute("fetchpriority", "high");
+  await expect.poll(() => preloadImage.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
   expect(unknownPropWarnings).toEqual([]);
 });
 

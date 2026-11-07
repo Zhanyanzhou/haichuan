@@ -268,26 +268,24 @@ export default function VideoField({
           </span>
         </div>
       ) : null}
-      <details className="homepage-editor__current-page-media">
-        <summary>本页与本次会话视频 · {currentPageVideos.length}</summary>
-        {currentPageVideos.length ? (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 4 }}>
+      {currentPageVideos.length > 0 ? (
+        <div className="homepage-editor__current-page-media" role="group" aria-label="可复用视频">
+          <strong>可复用视频 · {currentPageVideos.length}</strong>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 4 }}>
             {currentPageVideos.map((url) => (
               <button
                 key={url}
                 type="button"
                 className={url === value ? "is-current" : ""}
-                style={{ aspectRatio: "auto", padding: 6, textAlign: "left" }}
+                style={{ aspectRatio: "auto", padding: 6, textAlign: "left", overflowWrap: "anywhere" }}
                 onClick={() => onChange?.(url)}
               >
                 {url === value ? "当前视频 · " : "使用 · "}{url}
               </button>
             ))}
           </div>
-        ) : (
-          <p>当前页面还没有可复用视频。</p>
-        )}
-      </details>
+        </div>
+      ) : null}
     </div>
   );
 }

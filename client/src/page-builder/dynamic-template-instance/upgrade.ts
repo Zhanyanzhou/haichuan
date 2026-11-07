@@ -6,6 +6,8 @@ import {
   type DynamicTemplateSlotDefinition,
   type TemplateInstanceLayoutOverride,
 } from "../template-definition";
+import { getWorkGridImageSlotIds } from "../template-definition/layoutAuthoring";
+import { normalizePublicProductReference } from "@/utils/publicProductPath";
 import {
   DYNAMIC_TEMPLATE_BLOCK_TYPE,
   DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY,
@@ -137,7 +139,7 @@ function validateLayoutOverride(input: {
                       ? ["left", "center", "right"].includes(String(value))
                       : field === "marginTopPx" || field === "marginBottomPx"
                         ? finiteInRange(value, 0, policy.maxSpacingPx ?? 120)
-                        : false;
+                        : field === "visuallyCollapsed" && value === true;
     if (!valid) {
       add(field, `${device === "desktop" ? "桌面端" : "移动端"}节点“${node.name}”的 ${field} 无法由目标版本完整表达。`);
     }
@@ -188,12 +190,23 @@ export function analyzeDynamicTemplateUpgrade(input: {
   const nextContent: Record<string, unknown> = {};
   const preservedContentSlotIds: string[] = [];
   const discardedContentSlotIds: string[] = [];
+  const targetWorkSlotIds = getWorkGridImageSlotIds(targetDefinition);
   for (const [slotId, value] of Object.entries(currentContent)) {
     const currentSlot = currentDefinition.slots[slotId];
     const targetSlot = targetDefinition.slots[slotId];
     if (currentSlot && targetSlot && slotCompatible(currentSlot, targetSlot)) {
       nextContent[slotId] = structuredClone(value);
       preservedContentSlotIds.push(slotId);
+      if (currentSlot.type === "image" && value && typeof value === "object"
+        && "workProductCode" in value && normalizePublicProductReference(value.workProductCode)
+        && !targetWorkSlotIds.has(slotId)) {
+        destructiveBlockers.push({
+          kind: "content",
+          slotId,
+          nodeId: findSlotNodeId(currentDefinition, slotId),
+          reason: `槽位“${targetSlot.label}”已移出作品网格，原作品跳转无法无损保留。`,
+        });
+      }
     } else {
       discardedContentSlotIds.push(slotId);
       if (hasMeaningfulContent(value)) {
