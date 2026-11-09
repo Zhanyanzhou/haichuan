@@ -152,3 +152,4 @@ client/vite.config.d.ts
 
 # 根目录设计 QA 工作笔记（引用本机临时路径；正式结论沉淀进 docs/）
 /design-qa.md
+/design-qa-product-detail.md

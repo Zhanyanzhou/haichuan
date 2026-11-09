@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "mcp__chrome-devtools__take_snapshot|mcp__chrome-devtools__take_screenshot|mcp__playwright__browser_take_screenshot|mcp__playwright__browser_snapshot",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .codex/hooks/token-guard.cjs"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .codex/hooks/token-guard.cjs"
+          }
+        ]
+      }
+    ]
+  }
+}
