@@ -12,6 +12,7 @@ type PublicationQualityStatus = "QUARANTINED" | "READY";
 
 interface SkuRecord {
   id: number;
+  skuCode?: string;
   isActive: boolean;
   material?: string;
   size?: string | null;
@@ -81,6 +82,7 @@ interface ProductRecord {
   publicationQualityStatus: PublicationQualityStatus;
   publicationQualityHash?: string | null;
   publicationQualityCheckedAt?: Date | null;
+  publicationRulesAcceptedAt?: Date | null;
   name: string;
   code: string;
   shortDescription: string;
@@ -92,10 +94,11 @@ interface ProductRecord {
   size: string | null;
   gemInfo: unknown;
   craftTechnique: unknown;
-  category: { isActive: boolean; deletedAt: Date | null };
+  category: { isActive: boolean; deletedAt: Date | null; publicationRules?: string[] };
   salesMode: "DISPLAY_ONLY" | "SELECTION" | "APPOINTMENT" | "DIRECT_PURCHASE" | "CUSTOM_INQUIRY";
   inventoryPolicy: "STANDARD" | "SINGLE_UNIT";
   fulfillmentType: "IN_STOCK" | "PREORDER" | "CUSTOM";
+  fulfillmentConfirmed: boolean;
   dispatchTime: "SAME_DAY" | "WITHIN_24_HOURS" | "WITHIN_48_HOURS" | "OVER_48_HOURS" | "CUSTOM";
   deliveryMethods: string[];
   shippingTemplate: {
@@ -205,6 +208,7 @@ function product(
     salesMode: "DIRECT_PURCHASE",
     inventoryPolicy: "STANDARD",
     fulfillmentType: "IN_STOCK",
+    fulfillmentConfirmed: true,
     dispatchTime: "WITHIN_48_HOURS",
     deliveryMethods: ["EXPRESS"],
     shippingTemplate: {
@@ -219,7 +223,7 @@ function product(
     },
     requiresInsuredShipping: true,
     requiresSignature: true,
-    includesCertificate: true,
+    includesCertificate: false,
     packageType: null,
     customLeadTime: null,
     isHot: false,
@@ -376,9 +380,19 @@ function createService(initial: ProductRecord[], mediaReadable = true) {
       },
     },
     productSKU: {
+      create: async ({ data }: { data: Omit<SkuRecord, "id"> & { productId: number } }) => {
+        const record = records.find((r) => r.id === data.productId);
+        if (!record) throw new Error("测试商品不存在");
+        const sku = { ...data, id: 100 + record.skus.length };
+        record.skus.push(sku);
+        return sku;
+      },
       findFirst: async ({ where }: any) => {
         const record = records.find((r) => r.id === where.productId);
-        const sku = record?.skus.find((item) => item.id === where.id);
+        const sku = record?.skus.find((item) =>
+          (where.id === undefined || item.id === where.id) &&
+          (where.isActive === undefined || item.isActive === where.isActive),
+        );
         return sku ? { ...sku, productId: record!.id } : null;
       },
       findMany: async ({ where }: any) => {
@@ -396,6 +410,17 @@ function createService(initial: ProductRecord[], mediaReadable = true) {
           }
         }
         throw new Error("测试 SKU 不存在");
+      },
+      updateMany: async ({ where, data }: any) => {
+        const record = records.find((r) => r.id === where.productId);
+        const sku = record?.skus.find((item) => item.id === where.id && item.isActive === where.isActive &&
+          (where.price === undefined || item.price === where.price),
+        );
+        if (!sku) return { count: 0 };
+        for (const [key, value] of Object.entries(data)) {
+          if (value !== undefined) Object.assign(sku, { [key]: value });
+        }
+        return { count: 1 };
       },
       count: async ({ where }: any) => {
         const record = records.find((r) => r.id === where.productId);
@@ -424,6 +449,12 @@ function createService(initial: ProductRecord[], mediaReadable = true) {
       },
     },
     inventory: {
+      create: async ({ data }: { data: { skuId: number; warehouseId: number; quantity: number } }) => {
+        const sku = records.flatMap((record) => record.skus).find((item) => item.id === data.skuId);
+        if (!sku) throw new Error("测试 SKU 不存在");
+        (sku.inventories ??= []).push({ quantity: data.quantity });
+        return { ...data, id: 1, updatedAt: new Date() };
+      },
       aggregate: async ({ where }: any) => {
         const record = records.find((r) => r.id === where.sku.productId);
         const quantity = (record?.skus || []).reduce(
@@ -433,6 +464,7 @@ function createService(initial: ProductRecord[], mediaReadable = true) {
         return { _sum: { quantity } };
       },
     },
+    warehouse: { findFirst: async () => ({ id: 1 }) },
     operationLog: {
       findFirst: async () => null,
       create: async ({ data }: any) => data,
@@ -948,6 +980,9 @@ test("重复校验已上架商品不会重写首次发布时间", async () => {
 
   await service.updateStatus(10, "PUBLISHED", adminActor);
   assert.equal(records[0].publishedAt, firstPublishedAt);
+  await service.updateStatus(10, "OFFLINE", adminActor);
+  await service.updateStatus(10, "PUBLISHED", adminActor);
+  assert.equal(records[0].publishedAt, firstPublishedAt);
 });
 
 test("资料完整度按销售方式给出可解释的缺失项", () => {
@@ -1031,7 +1066,7 @@ test("DIRECT_PURCHASE 库存为 0 仍可发布，SINGLE_UNIT 多有效 SKU 返�
       skus: [{ id: 34, isActive: true, price: 100, inventories: [] }],
     }),
   ]);
-  await assert.doesNotReject(() => priceOnly.service.canPublish(302));
+  await assert.rejects(() => priceOnly.service.canPublish(302), /至少一种配送方式/);
 
   const missingTemplate = createService([
     product({
@@ -1090,6 +1125,70 @@ test("DIRECT_PURCHASE 库存为 0 仍可发布，SINGLE_UNIT 多有效 SKU 返�
   await assert.rejects(() => invalidSingle.service.canPublish(301), ConflictException);
 });
 
+test("上架拒绝草稿占位标题和只用于分组的类目", async () => {
+  const { service } = createService([
+    product({ id: 308, status: "DRAFT", salesMode: "SELECTION", name: "未命名商品-HC-308", primaryImageId: 1 }),
+    product({
+      id: 309, status: "DRAFT", salesMode: "SELECTION", primaryImageId: 1,
+      category: { isActive: true, deletedAt: null, publicationRules: ["GROUP_ONLY"] },
+    }),
+  ]);
+  await assert.rejects(() => service.canPublish(308), /未命名商品/);
+  await assert.rejects(() => service.canPublish(309), /允许上架的具体类目/);
+});
+
+test("直购类目校验每个有效 SKU 的尺寸和净金重，并检查材质、主石、备货和证书", async () => {
+  const category = {
+    isActive: true,
+    deletedAt: null,
+    publicationRules: ["RING_SIZE", "PRECIOUS_METAL", "GOLD_WEIGHT", "GEMSTONE", "GEM_DISCLOSURE", "GEM_CARAT", "GEM_GRADING", "CERTIFICATE"],
+  };
+  const { service, records } = createService([
+    product({
+      id: 315, status: "DRAFT", category, primaryImageId: 1, price: 100,
+      materialType: "OTHER", fulfillmentConfirmed: false, deliveryMethods: [],
+      skus: [
+        { id: 1, isActive: true, material: "GOLD_999", size: "圈口 14", goldWeight: 1, price: 100 },
+        { id: 2, isActive: true, material: "OTHER", size: "待定", goldWeight: 0, price: 100 },
+        { id: 3, isActive: false, material: "OTHER", goldWeight: 0, price: 0 },
+      ],
+      certificates: [{ id: 1, certType: "GIA", certNumber: "OLD", expireDate: new Date(0) }],
+    }),
+  ]);
+  await assert.rejects(() => service.canPublish(315), (error: unknown) => {
+    assert.ok(error instanceof BadRequestException);
+    for (const label of ["主要材质", "贵金属材质和纯度", "净金重", "戒指圈口", "主石种类", "镶托材质", "宝石来源", "宝石处理", "主石克拉", "主石等级", "配送方式", "备货状态", "有效鉴定证书"]) {
+      assert.match(error.message, new RegExp(label));
+    }
+    return true;
+  });
+  const [record] = records;
+  record.materialType = "GOLD_999";
+  record.fulfillmentConfirmed = true;
+  record.deliveryMethods = ["EXPRESS"];
+  record.gemInfo = { type: "钻石", settingMaterial: "GOLD_999", origin: "天然", treatment: "未经处理", carat: 0.8, clarity: "VS1" };
+  Object.assign(record.skus[1], { material: "GOLD_999", size: "圈口 15", goldWeight: 1.2 });
+  record.certificates = [{ id: 2, certType: "GIA", certNumber: "CURRENT", expireDate: null }];
+  await service.canPublish(315);
+  assert.ok(record.publicationRulesAcceptedAt instanceof Date);
+  record.deliveryMethods = [];
+  await assert.rejects(() => service.canPublish(315, undefined, false), /至少一种配送方式/);
+});
+
+test("历史已发布商品兼容原有配送资料，重新发布则执行新规则", async () => {
+  const { service, records } = createService([
+    product({
+      id: 316, status: "PUBLISHED", primaryImageId: 1, price: 100,
+      fulfillmentConfirmed: false, deliveryMethods: [], includesCertificate: true,
+      skus: [{ id: 1, isActive: true, price: 100 }],
+    }),
+  ]);
+  await service.updateStatus(316, "PUBLISHED", adminActor);
+  assert.equal(records[0].publicationRulesAcceptedAt, undefined);
+  await service.updateStatus(316, "OFFLINE", adminActor);
+  await assert.rejects(() => service.updateStatus(316, "PUBLISHED", adminActor), /至少一种配送方式/);
+});
+
 test("五种销售模式共通拒绝仅视频或不可读取的受控媒体", async () => {
   const videoOnly = createService([
     product({
@@ -1139,6 +1238,95 @@ test("已发布商品 SKU 更新破坏门禁时返回 409，并由事务回滚�
   );
   assert.equal(records[0].skus[0].price, 100);
   assert.equal(records[0].price, 100);
+});
+
+test("商品转为直购时规格与商品资料一起通过门禁或回滚", async () => {
+  const { service, records } = createService([
+    product({
+      id: 325,
+      status: "PUBLISHED",
+      salesMode: "DISPLAY_ONLY",
+      price: 100,
+      primaryImageId: 1,
+      category: { isActive: true, deletedAt: null, publicationRules: ["RING_SIZE"] },
+      skus: [{ id: 45, isActive: true, price: 100 }],
+    }),
+  ]);
+  const original = structuredClone(records[0]);
+  const changes = { name: "海川典藏足金戒指", salesMode: "DIRECT_PURCHASE" } as const;
+  await assert.rejects(() => service.update(325, {
+    ...changes, editorSkuUpdates: [{ id: 45, expectedPrice: 100, price: 200 }],
+  }, adminActor), /所有有效 SKU 的戒指圈口/);
+  assert.deepEqual(records[0], original);
+
+  await service.update(325, {
+    ...changes, editorSkuUpdates: [{ id: 45, expectedPrice: 100, price: 200, size: "圈口 15" }],
+  }, adminActor);
+  assert.equal(records[0].status, "PUBLISHED");
+  assert.equal(records[0].name, changes.name);
+  assert.equal(records[0].salesMode, "DIRECT_PURCHASE");
+  assert.equal(records[0].price, 200);
+  assert.equal(records[0].skus[0].size, "圈口 15");
+  assert.notEqual(records[0].publicationQualityHash, original.publicationQualityHash);
+  assert.ok(records[0].publicationRulesAcceptedAt instanceof Date);
+});
+
+test("SKU 已改价或不属于当前商品时回滚整次商品保存", async () => {
+  const { service, records } = createService([
+    product({
+      id: 326, status: "PUBLISHED", price: 100, primaryImageId: 1,
+      skus: [{ id: 46, isActive: true, price: 100 }],
+    }),
+    product({ id: 327, status: "DRAFT", skus: [{ id: 47, isActive: true, price: 200 }] }),
+  ]);
+  const original = structuredClone(records);
+  await assert.rejects(() => service.update(326, {
+    editorSkuUpdates: [{ id: 46, expectedPrice: 99, price: 300 }],
+  }, adminActor), /商品规格或价格已发生变化/);
+  await assert.rejects(() => service.update(326, {
+    editorSkuUpdates: [{ id: 46, expectedPrice: 100, price: 300 }, { id: 47, expectedPrice: 200, price: 400 }],
+  }, adminActor), /商品规格或价格已发生变化/);
+  await assert.rejects(() => service.update(326, {
+    editorDefaultSku: { skuCode: "HC-326-DEFAULT", price: 300 },
+  }, adminActor), /商品已有有效 SKU/);
+  assert.deepEqual(records, original);
+});
+
+test("已发布商品可随直购资料建立默认 SKU 并初始化零库存", async () => {
+  const { service, records } = createService([
+    product({ id: 329, status: "PUBLISHED", salesMode: "DISPLAY_ONLY", primaryImageId: 1 }),
+  ]);
+  const defaultSku = { skuCode: "HC-329-DEFAULT", material: "GOLD_999", price: 200 } as const;
+  await assert.rejects(() => service.update(329, {
+    salesMode: "DIRECT_PURCHASE", deliveryMethods: [], editorDefaultSku: defaultSku,
+  }, adminActor), /至少一种配送方式/);
+  assert.equal(records[0].salesMode, "DISPLAY_ONLY");
+  assert.equal(records[0].skus.length, 0);
+
+  await service.update(329, { salesMode: "DIRECT_PURCHASE", editorDefaultSku: defaultSku }, adminActor);
+  const [sku] = records[0].skus;
+  assert.equal(records[0].status, "PUBLISHED");
+  assert.equal(records[0].price, 200);
+  assert.equal(sku.skuCode, "HC-329-DEFAULT");
+  assert.equal(sku.isActive, true);
+  assert.deepEqual(sku.inventories, [{ quantity: 0 }]);
+});
+
+test("历史内部作品转为对客可见时必须通过新发布门禁", async () => {
+  const { service, records } = createService([
+    product({
+      id: 328, status: "PUBLISHED", salesMode: "DISPLAY_ONLY", visibility: "INTERNAL", primaryImageId: 1,
+      category: { isActive: true, deletedAt: null, publicationRules: ["CERTIFICATE"] },
+    }),
+  ]);
+  await assert.rejects(() => service.update(328, { visibility: "MEMBER" }, adminActor), /有效鉴定证书/);
+  assert.equal(records[0].visibility, "INTERNAL");
+  assert.equal(records[0].publicationRulesAcceptedAt, undefined);
+
+  records[0].certificates = [{ id: 1, certType: "GIA", certNumber: "HC328", expireDate: null }];
+  const updated = await service.update(328, { visibility: "MEMBER" }, adminActor);
+  assert.equal(updated.visibility, "MEMBER");
+  assert.ok(updated.publicationRulesAcceptedAt instanceof Date);
 });
 
 for (const salesMode of ["DISPLAY_ONLY", "DIRECT_PURCHASE"] as const) {

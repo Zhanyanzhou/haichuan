@@ -109,6 +109,7 @@ test('真实 Nest HTTP + 一次性 MySQL：客户结算、微信模拟支付、�
       categoryId: category.id, goldWeight: 1, weight: 1,
       price: 88.8, salesMode: 'DIRECT_PURCHASE', visibility: 'PUBLIC',
       shippingTemplateId: shipping.id, deliveryMethods: ['EXPRESS'],
+      fulfillmentType: 'IN_STOCK', dispatchTime: 'WITHIN_48_HOURS', fulfillmentConfirmed: true,
     } });
     const sku = await prisma.productSKU.create({ data: {
       productId: product.id, skuCode: `PAY-SKU-${runId}`, price: 88.8, goldWeight: 1,

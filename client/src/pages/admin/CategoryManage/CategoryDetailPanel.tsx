@@ -1,6 +1,8 @@
 import { useRef, useState } from "react";
-import { Button, Drawer, Input, Select, Space, type InputRef } from "antd";
+import { App as AntdApp, Button, Drawer, Input, Select, Space, type InputRef } from "antd";
+import type { CategoryPublicationRule } from "@/types";
 import { CategoryImageUpload } from "./CategoryFormModal";
+import CategoryPublicationRules from "./CategoryPublicationRules";
 import {
   countProductsRecursive,
   findNode,
@@ -15,16 +17,19 @@ type CategoryDetailPanelProps = {
   onClose: () => void;
   onRename: (name: string) => Promise<boolean>;
   onCoverChange: (url: string) => Promise<boolean>;
+  onPublicationRulesChange: (rules: CategoryPublicationRule[], expected: CategoryPublicationRule[] | null) => Promise<boolean>;
   onMove: (parentId: number) => Promise<boolean>;
   onDelete: () => void;
 };
 
 export default function CategoryDetailPanel({
-  node, tree, saving, onClose, onRename, onCoverChange, onMove, onDelete,
+  node, tree, saving, onClose, onRename, onCoverChange, onPublicationRulesChange, onMove, onDelete,
 }: Readonly<CategoryDetailPanelProps>) {
+  const { modal } = AntdApp.useApp();
   const [name, setName] = useState<string>();
   const nameInput = useRef<InputRef>(null);
   const [uploading, setUploading] = useState(false);
+  const [rulesDirty, setRulesDirty] = useState(false);
   const [operation, setOperation] = useState<"edit" | "delete" | "move">("edit");
   const [destination, setDestination] = useState<number>();
   const parent = node.parentId ? findNode(tree, node.parentId) : undefined;
@@ -44,8 +49,22 @@ export default function CategoryDetailPanel({
 
   function cancel() {
     if (busy) return;
-    if (operation === "edit") onClose();
-    else setOperation("edit");
+    if (operation !== "edit") {
+      setOperation("edit");
+      return;
+    }
+    if (!rulesDirty) {
+      onClose();
+      return;
+    }
+    modal.confirm({
+      title: "放弃未保存的修改？",
+      content: "本次修改的商品发布规则尚未保存。",
+      okText: "放弃修改",
+      cancelText: "继续编辑",
+      autoFocusButton: "cancel",
+      onOk: onClose,
+    });
   }
 
   async function saveName() {
@@ -115,7 +134,7 @@ export default function CategoryDetailPanel({
                 <Select
                   aria-label="所属品类"
                   value={node.parentId}
-                  disabled={busy}
+                  disabled={busy || rulesDirty}
                   options={rootOptions}
                   onChange={(value) => {
                     setDestination(value);
@@ -139,8 +158,15 @@ export default function CategoryDetailPanel({
               </Space>
             </section>
 
+            <CategoryPublicationRules
+              saved={node.publicationRules}
+              disabled={busy}
+              onDirtyChange={setRulesDirty}
+              onSave={onPublicationRulesChange}
+            />
+
             <section className="cat-editor__section" aria-label="删除分类">
-              <Button danger disabled={busy} onClick={() => setOperation("delete")}>删除分类</Button>
+              <Button danger disabled={busy || rulesDirty} onClick={() => setOperation("delete")}>删除分类</Button>
             </section>
           </>
         )}

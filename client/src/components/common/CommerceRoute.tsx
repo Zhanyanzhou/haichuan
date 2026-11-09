@@ -10,9 +10,9 @@ import RouteLoading from "./RouteLoading";
 const SelectionBag = lazy(() => import("@/pages/public/Cart/SelectionBag"));
 
 /**
- * 结算在交易或支付关闭时仍回到咨询页。
- * 购物袋保持可打开：开关关闭时展示已选作品并交给顾问，不进入结算。
- * 服务端 CustomerCommerceGuard 仍拒绝加购、改数量和结算写入。
+ * 购物车和结算核对跟随购物车准备开关。
+ * 准备关闭时，购物车展示本地选款，结算回到咨询页。
+ * 提交订单和支付仍由成交开关与服务端守卫拦截。
  */
 export default function CommerceRoute({
   children,
@@ -32,10 +32,7 @@ export default function CommerceRoute({
   }, [flags, loading, load]);
 
   if (!flags) return <RouteLoading />;
-  const allowed = capability === "cart"
-    ? flags.commerceEnabled && flags.cartEnabled
-    : flags.commerceEnabled && flags.cartEnabled && flags.paymentEnabled;
-  if (!allowed) {
+  if (!flags.cartEnabled) {
     if (capability === "cart") {
       return (
         <Suspense fallback={<RouteLoading />}>

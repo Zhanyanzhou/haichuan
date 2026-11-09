@@ -659,6 +659,19 @@ button.cat-product__link:hover .cat-product__name {
   justify-items: start;
 }
 
+.cat-editor__rule-field {
+  min-inline-size: 0;
+  padding: 0;
+  margin: 4px 0;
+  border: 0;
+}
+
+.cat-editor__rule-field legend {
+  width: auto;
+  margin-block-end: 4px;
+  font: var(--adm-type-body);
+}
+
 .cat-create-modal .ant-modal-content {
   padding: 24px 32px;
 }

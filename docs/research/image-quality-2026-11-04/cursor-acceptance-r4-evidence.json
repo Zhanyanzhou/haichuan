@@ -1,0 +1,101 @@
+{
+  "round": "r4",
+  "reviewDate": "2026-11-04",
+  "reviewer": "Codex independent read-only review",
+  "verdict": "Core A-C fixes and test teardown accepted at tested layers; full upload/save/reopen/publish closure remains unverified; stop-script cleanup guard needs correction.",
+  "scope": {
+    "businessCodeChanged": false,
+    "gitWrites": false,
+    "databaseWrites": false,
+    "userServicesRestarted": false,
+    "cursorRuntimeArtifactOverwritten": false,
+    "browserRuntimeReplayedThisRound": false
+  },
+  "environment": {
+    "node": "v22.23.2",
+    "head": "207f2c382056442cb1382472c7891fefa45309f4",
+    "ports": {
+      "3000": [
+        65740
+      ],
+      "3018": [],
+      "5173": [
+        16412
+      ],
+      "5176": []
+    }
+  },
+  "independentChecks": [
+    {
+      "command": "node --test responsiveUploadsImage.spec.ts imageDeliveryGeometry.spec.ts trustedMediaSize.spec.ts tests/media-picker-image-quality.unit.mjs",
+      "cwd": "G:\\海川珠宝官方网站开发\\client",
+      "exitCode": 0,
+      "passed": 19,
+      "failed": 0,
+      "skipped": 0,
+      "durationMs": 2342.5519,
+      "naturalExit": true,
+      "output": "TAP version 13\n# Subtest: 竖框铺满横图按绘制宽度而不是画框宽度选图\nok 1 - 竖框铺满横图按绘制宽度而不是画框宽度选图\n  ---\n  duration_ms: 0.9437\n  type: 'test'\n  ...\n# Subtest: 同比例铺满和横图完整放入竖框都不放大绘制宽度\nok 2 - 同比例铺满和横图完整放入竖框都不放大绘制宽度\n  ---\n  duration_ms: 0.141\n  type: 'test'\n  ...\n# Subtest: 941 宽竖图在手机画框里标成像素不足，不按 1200 档假装够用\nok 3 - 941 宽竖图在手机画框里标成像素不足，不按 1200 档假装够用\n  ---\n  duration_ms: 0.282\n  type: 'test'\n  ...\n# Subtest: 足够的 3840 源在 1920 宽 2 倍屏下够用，首屏 sizes 按视口盒子铺满\nok 4 - 足够的 3840 源在 1920 宽 2 倍屏下够用，首屏 sizes 按视口盒子铺满\n  ---\n  duration_ms: 0.1613\n  type: 'test'\n  ...\n# Subtest: 半栏推荐宽按 1440 设计画布换算到 1920 参考视口，不把设计像素当 CSS 宽\nok 5 - 半栏推荐宽按 1440 设计画布换算到 1920 参考视口，不把设计像素当 CSS 宽\n  ---\n  duration_ms: 0.1391\n  type: 'test'\n  ...\n# Subtest: 全幅 1440 设计宽在 1920 参考视口下仍按整页 1920 CSS 估算\nok 6 - 全幅 1440 设计宽在 1920 参考视口下仍按整页 1920 CSS 估算\n  ---\n  duration_ms: 0.0745\n  type: 'test'\n  ...\n# Subtest: 真实竖图规格 810×1440 在手机上按 390 宽检查，不把上传短边当成 CSS 宽\nok 7 - 真实竖图规格 810×1440 在手机上按 390 宽检查，不把上传短边当成 CSS 宽\n  ---\n  duration_ms: 0.3183\n  type: 'test'\n  ...\n# Subtest: 半栏槽位在两端都按设计画布占比换算，横图铺满竖框不截到 390\nok 8 - 半栏槽位在两端都按设计画布占比换算，横图铺满竖框不截到 390\n  ---\n  duration_ms: 0.1753\n  type: 'test'\n  ...\n# Subtest: 没有原图展示尺寸或动图时不生成 srcset\nok 9 - 没有原图展示尺寸或动图时不生成 srcset\n  ---\n  duration_ms: 0.6687\n  type: 'test'\n  ...\n# Subtest: srcset 描述符是实际输出宽度，并在原图宽度处截断\nok 10 - srcset 描述符是实际输出宽度，并在原图宽度处截断\n  ---\n  duration_ms: 0.5194\n  type: 'test'\n  ...\n# Subtest: 派生单 URL 追加当前策略版本；已带 width 保持原样\nok 11 - 派生单 URL 追加当前策略版本；已带 width 保持原样\n  ---\n  duration_ms: 0.1464\n  type: 'test'\n  ...\n# Subtest: 前后端宽度档和策略版本来自各自源码且一致\nok 12 - 前后端宽度档和策略版本来自各自源码且一致\n  ---\n  duration_ms: 1.4316\n  type: 'test'\n  ...\n# Subtest: 模板设计和页面装修都把换框规格交给同一上传字段\nok 13 - 模板设计和页面装修都把换框规格交给同一上传字段\n  ---\n  duration_ms: 1.0093\n  type: 'test'\n  ...\n# Subtest: MediaPickerField 图片质量\n    # Subtest: 真实父规格 810×1440 在手机 9:16 框里建议约 1171，而不是 2431\n    ok 1 - 真实父规格 810×1440 在手机 9:16 框里建议约 1171，而不是 2431\n      ---\n      duration_ms: 134.5769\n      type: 'test'\n      ...\n    # Subtest: 半栏、作者缩放和横图铺满竖框各自计算\n    ok 2 - 半栏、作者缩放和横图铺满竖框各自计算\n      ---\n      duration_ms: 379.7043\n      type: 'test'\n      ...\n    # Subtest: route-Mock：unknown 旧宽高、无尺寸、失败重试、缓存再读、EXIF 和迟到响应\n    ok 3 - route-Mock：unknown 旧宽高、无尺寸、失败重试、缓存再读、EXIF 和迟到响应\n      ---\n      duration_ms: 797.3729\n      type: 'test'\n      ...\n    1..3\nok 14 - MediaPickerField 图片质量\n  ---\n  duration_ms: 1867.5474\n  type: 'suite'\n  ...\n# Subtest: unknown 带着旧宽高或旧展示尺寸时不能判断清晰度\nok 15 - unknown 带着旧宽高或旧展示尺寸时不能判断清晰度\n  ---\n  duration_ms: 0.8514\n  type: 'test'\n  ...\n# Subtest: 没有展示尺寸、以及缺省状态只有数据库宽高时保持未知\nok 16 - 没有展示尺寸、以及缺省状态只有数据库宽高时保持未知\n  ---\n  duration_ms: 0.0949\n  type: 'test'\n  ...\n# Subtest: 已测量和缺省的成对展示尺寸可以判断，EXIF 展示尺寸优先于原始宽高\nok 17 - 已测量和缺省的成对展示尺寸可以判断，EXIF 展示尺寸优先于原始宽高\n  ---\n  duration_ms: 0.0856\n  type: 'test'\n  ...\n1..17\n# tests 19\n# suites 1\n# pass 19\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 2342.5519\n"
+    },
+    {
+      "command": "node --test -r ts-node/register src/modules/upload/page-media-by-url.direct.spec.ts",
+      "cwd": "G:\\海川珠宝官方网站开发\\server",
+      "exitCode": 0,
+      "passed": 4,
+      "failed": 0,
+      "durationMs": 2895.5038,
+      "boundary": "Direct controller/guard/service tests using in-memory staff queries and temporary image files; not authenticated database-backed HTTP.",
+      "output": "TAP version 13\n# \u001b[32m✔\u001b[0m \u001b[33mConsole Ninja\u001b[0m extension is connected to \u001b[33mNest.js\u001b[0m, see \u001b[36mhttps://tinyurl.com/2vt8jxzw\u001b[0m\n# Subtest: 页面素材 by-url 直接鉴权与读取\n    # Subtest: 控制器声明员工角色，客户和缺用户不能通过角色守卫\n    ok 1 - 控制器声明员工角色，客户和缺用户不能通过角色守卫\n      ---\n      duration_ms: 0.9606\n      type: 'test'\n      ...\n    # Subtest: 该路由不是公开路由，没有 JWT 策略时不能放行\n    ok 2 - 该路由不是公开路由，没有 JWT 策略时不能放行\n      ---\n      duration_ms: 0.1957\n      type: 'test'\n      ...\n    # Subtest: 非法地址在进入服务前被拒绝\n    ok 3 - 非法地址在进入服务前被拒绝\n      ---\n      duration_ms: 0.5663\n      type: 'test'\n      ...\n    # Subtest: 缺失、归档、文件缺失、测量成功和失败恢复都不写库\n    ok 4 - 缺失、归档、文件缺失、测量成功和失败恢复都不写库\n      ---\n      duration_ms: 15.511\n      type: 'test'\n      ...\n    1..4\nok 1 - 页面素材 by-url 直接鉴权与读取\n  ---\n  duration_ms: 17.9156\n  type: 'suite'\n  ...\n1..1\n# tests 4\n# suites 1\n# pass 4\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 2895.5038\n"
+    },
+    {
+      "command": "npm.cmd run contracts:check",
+      "exitCode": 0,
+      "output": "\n> jewelry-platform@1.0.0 contracts:check\n> node scripts/generate-content-template-contract.mjs --check && node scripts/generate-template-definition-contract.mjs --check\n\n内容模板合同一致：目录 1 个，权威 SHA-256 7b3c5da4fcf1（客户端/服务端产物一致）。\n动态模板合同一致：schema v3 · 19 种节点 · 11 种槽位 · SHA-256 829234be9442\n"
+    },
+    {
+      "check": "node --check for start-isolated-read.mjs, verify-isolated-read.mjs, stop-isolated-read.mjs",
+      "exitCode": 0
+    }
+  ],
+  "cursorRuntimeRecord": {
+    "path": "docs/research/image-quality-2026-11-04/cursor-acceptance-r4-runtime.json",
+    "generatedAt": "2026-11-04T15:40:29.694Z",
+    "recordedExitCode": 0,
+    "recordedPassedChecks": 10,
+    "independentlyVerifiedCurrentHashes": {
+      "uploadService": "83746119a97b67aa1da6c977347d7f08d1667d01d40053a79be6704dfad6f61d",
+      "gateway": "a811d184ec08bd9c47f163447933c95744eb258f35d1dc76bb1a014704ce26a4",
+      "pageModules": "11bfed62cac9bae3691112a5774fde730916379bf0b00bddd46af4e30368fadb"
+    },
+    "allThreeHashesMatch": true,
+    "boundary": "Real compiled services and public document query; manually registered Express document routes; image authorization rows and locks from memory snapshot; temporary image/cache copies; no full Nest or real write lifecycle."
+  },
+  "finding": {
+    "id": "R4-01",
+    "priority": "P2",
+    "file": "scripts/image-quality-acceptance/stop-isolated-read.mjs",
+    "line": 47,
+    "issue": "Substring-only check before recursive deletion does not restrict the absolute target to the exact temporary directory for this run.",
+    "nonDestructiveProbe": {
+      "candidate": "G:\\outside-acceptance\\haichuan-image-r4-unrelated",
+      "passesCurrentGuard": true,
+      "outsideExpectedTempRoot": true,
+      "deletionPerformed": false
+    },
+    "requiredFix": "Validate canonical absolute target, exact run directory, temporary-root containment and no unexpected junction/symlink; reject before destructive operations. Bind process termination to exact repository/run identity."
+  },
+  "notVerified": [
+    "Authenticated by-url HTTP with disposable database",
+    "Upload, asset-library reread, save, reopen, test publish, published reread",
+    "Logged-in editor desktop/mobile/zoom/unsaved-state behavior in full application",
+    "Database-backed authorization revocation propagation",
+    "Current user 3000/5173 running latest A-C behavior",
+    "Production proxy/CDN"
+  ],
+  "excluded": [
+    "D original-ratio mode",
+    "Old-template migration",
+    "Real homepage publication",
+    "Git commit/push/deployment"
+  ]
+}

@@ -40,7 +40,7 @@ Browser
 - `PageDocument` 保存页面实例及发布快照；`TemplateDefinitionV2` 保存母模板结构和不可变版本。
 - 页面装修和模板设计复用 Shared Editor Core、Repository 与 Renderer，但选择、历史、脏状态、保存对象和发布结果相互隔离。
 - 内容模板兼容合同与模板结构合同各自承担明确职责，Renderer、Inspector、目录和测试只消费，不复制合同。
-- 详细产品语义见 `docs/page-builder/template-design-framework.md`，当前调用链见 `docs/architecture/page-builder-boundary.md`。
+- 产品入口见 `docs/page-builder/README.md`：页面职责与发布验收由 `store-decoration.md` 定义，模板角色与几何由 `section-template-standard.md` 定义，创建和模板侧编辑由 `template-creation-rules.md` 定义；`template-design-framework.md` 只补充从属操作与交接。当前调用链见 `docs/architecture/page-builder-boundary.md`，功能启停按 `docs/DECISIONS.md` 核对。
 
 ## 运行与发布边界
 

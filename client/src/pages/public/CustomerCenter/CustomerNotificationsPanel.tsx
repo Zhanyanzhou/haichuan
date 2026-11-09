@@ -77,6 +77,7 @@ export default function CustomerNotificationsPanel({
       id="my-notifications"
       className="my-account__panel my-account__panel--wide"
       aria-labelledby="my-notifications-title"
+      tabIndex={-1}
     >
       <div className="my-account__panel-head">
         <div>

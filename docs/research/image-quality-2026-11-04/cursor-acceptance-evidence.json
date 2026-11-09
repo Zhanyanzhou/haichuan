@@ -1,0 +1,398 @@
+{
+  "date": "2026-11-04",
+  "conclusion": "REWORK",
+  "scope": "Read-only code review, public GET and isolated deterministic actual-component fixtures. No business source, database, upload, save or publish mutations.",
+  "wide": {
+    "viewport": [
+      1920,
+      1080,
+      2
+    ],
+    "currentSrc": "http://127.0.0.1:5173/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png",
+    "src": "/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png",
+    "srcset": "",
+    "sizes": "",
+    "decoded": [
+      3840,
+      2160
+    ],
+    "bytes": 9041795,
+    "type": "image/png",
+    "status": 200,
+    "etag": "\"f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad\"",
+    "cacheControl": "public, max-age=0, must-revalidate",
+    "box": [
+      1920,
+      1080
+    ],
+    "position": [
+      0,
+      -700
+    ],
+    "fit": "cover",
+    "source": "desktop",
+    "natural": [
+      3840,
+      2160
+    ],
+    "images": [
+      {
+        "currentSrc": "http://127.0.0.1:5173/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png",
+        "box": [
+          1920,
+          1080
+        ],
+        "hasSrcset": false
+      },
+      {
+        "currentSrc": "http://127.0.0.1:5173/uploads/page-assets/2895abcfbd4c347984b4ce296036737736d97031a04a7471fa765c68cd672700.png",
+        "box": [
+          1920,
+          1080
+        ],
+        "hasSrcset": false
+      },
+      {
+        "currentSrc": "http://127.0.0.1:5173/uploads/page-assets/c32653afea6087e8583b0215a28894b8a729213786a624b774e76c8fe40e2e41.png",
+        "box": [
+          1920,
+          1080
+        ],
+        "hasSrcset": false
+      }
+    ],
+    "imageRequests": [
+      {
+        "url": "http://127.0.0.1:5173/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png",
+        "transfer": 9042095,
+        "encoded": 9041795,
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5173/uploads/page-assets/2895abcfbd4c347984b4ce296036737736d97031a04a7471fa765c68cd672700.png",
+        "transfer": 5082749,
+        "encoded": 5082449,
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5173/uploads/page-assets/c32653afea6087e8583b0215a28894b8a729213786a624b774e76c8fe40e2e41.png",
+        "transfer": 5414059,
+        "encoded": 5413759,
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5173/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png",
+        "transfer": 9042095,
+        "encoded": 9041795,
+        "status": 200
+      }
+    ]
+  },
+  "mobile": {
+    "viewport": [
+      390,
+      844,
+      3
+    ],
+    "currentSrc": "http://127.0.0.1:5173/uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png",
+    "src": "/uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png",
+    "srcset": "",
+    "sizes": "",
+    "decoded": [
+      941,
+      1672
+    ],
+    "bytes": 2232719,
+    "type": "image/png",
+    "status": 200,
+    "etag": "\"908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0\"",
+    "cacheControl": "public, max-age=0, must-revalidate",
+    "box": [
+      390,
+      693.328125
+    ],
+    "position": [
+      0,
+      0
+    ],
+    "fit": "cover",
+    "source": "mobile",
+    "natural": [
+      941,
+      1672
+    ],
+    "images": [
+      {
+        "currentSrc": "http://127.0.0.1:5173/uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png",
+        "box": [
+          390,
+          693
+        ],
+        "hasSrcset": false
+      },
+      {
+        "currentSrc": "http://127.0.0.1:5173/uploads/page-assets/0ee8e3108dc570bdd5d2110d7f6ebd71d5ad6ca4c30095788ee97d5d7c4ce2a6.png",
+        "box": [
+          390,
+          693
+        ],
+        "hasSrcset": false
+      },
+      {
+        "currentSrc": "http://127.0.0.1:5173/uploads/page-assets/eb8636ac838b80400530c0a845f77a76b70d2d515bd5a497144546848c41e05b.png",
+        "box": [
+          390,
+          693
+        ],
+        "hasSrcset": false
+      }
+    ],
+    "imageRequests": [
+      {
+        "url": "http://127.0.0.1:5173/uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png",
+        "transfer": 2233019,
+        "encoded": 2232719,
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5173/uploads/page-assets/0ee8e3108dc570bdd5d2110d7f6ebd71d5ad6ca4c30095788ee97d5d7c4ce2a6.png",
+        "transfer": 1941897,
+        "encoded": 1941597,
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5173/uploads/page-assets/eb8636ac838b80400530c0a845f77a76b70d2d515bd5a497144546848c41e05b.png",
+        "transfer": 2052836,
+        "encoded": 2052536,
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5173/uploads/page-assets/066d937975d86891e68a10c5eaf1202aea266913fc43cd5ffbe4ff0515f8c2f6.png",
+        "transfer": 2054379,
+        "encoded": 2054079,
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5173/uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png",
+        "transfer": 300,
+        "encoded": 2232719,
+        "status": 200
+      }
+    ]
+  },
+  "endpoints": {
+    "documents": [
+      {
+        "url": "/api/page-modules/document/published?pageKey=home",
+        "status": 200,
+        "keys": [
+          "pageKey",
+          "locale",
+          "puckData",
+          "metadata",
+          "status",
+          "publishedAt",
+          "updatedAt",
+          "version",
+          "contentHash"
+        ],
+        "mediaFactsCount": 0,
+        "firstFact": null
+      },
+      {
+        "url": "/api/page-modules/document/published?pageKey=home&locale=zh-CN",
+        "status": 200,
+        "keys": [
+          "pageKey",
+          "locale",
+          "puckData",
+          "metadata",
+          "status",
+          "publishedAt",
+          "updatedAt",
+          "version",
+          "contentHash"
+        ],
+        "mediaFactsCount": 0,
+        "firstFact": null
+      }
+    ],
+    "versionedDerivative": {
+      "status": 404,
+      "type": "application/json; charset=utf-8",
+      "pixels": null
+    }
+  },
+  "runtimeVersionProbe": [
+    {
+      "width": 480,
+      "rv": 2,
+      "status": 200,
+      "image": {
+        "pixels": [
+          480,
+          853
+        ],
+        "bytes": 40166,
+        "type": "image/webp"
+      }
+    },
+    {
+      "width": 480,
+      "rv": 999,
+      "status": 200,
+      "image": {
+        "pixels": [
+          480,
+          853
+        ],
+        "bytes": 40166,
+        "type": "image/webp"
+      }
+    },
+    {
+      "width": 3840,
+      "rv": 2,
+      "status": 404,
+      "image": null
+    }
+  ],
+  "playwright": {
+    "kind": "read-only public GET plus explicitly labelled component fixture",
+    "samples": [
+      {
+        "viewport": [
+          1440,
+          1000,
+          2
+        ],
+        "currentSrc": "http://127.0.0.1:5173/uploads/page-assets/c32653afea6087e8583b0215a28894b8a729213786a624b774e76c8fe40e2e41.png",
+        "srcset": "",
+        "sizes": "",
+        "pixels": [
+          3840,
+          2160
+        ],
+        "bytes": 5413759,
+        "type": "image/png",
+        "box": [
+          1440,
+          810
+        ],
+        "source": "desktop",
+        "fit": "cover"
+      },
+      {
+        "viewport": [
+          767,
+          1024,
+          2
+        ],
+        "currentSrc": "http://127.0.0.1:5173/uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png",
+        "srcset": "",
+        "sizes": "",
+        "pixels": [
+          941,
+          1672
+        ],
+        "bytes": 2232719,
+        "type": "image/png",
+        "box": [
+          520,
+          1363.546875
+        ],
+        "source": "mobile",
+        "fit": "cover"
+      },
+      {
+        "viewport": [
+          768,
+          1024,
+          2
+        ],
+        "currentSrc": "http://127.0.0.1:5173/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png",
+        "srcset": "",
+        "sizes": "",
+        "pixels": [
+          3840,
+          2160
+        ],
+        "bytes": 9041795,
+        "type": "image/png",
+        "box": [
+          768,
+          432
+        ],
+        "source": "desktop",
+        "fit": "cover"
+      },
+      {
+        "viewport": [
+          390,
+          844,
+          3
+        ],
+        "currentSrc": "http://127.0.0.1:5173/uploads/page-assets/0ee8e3108dc570bdd5d2110d7f6ebd71d5ad6ca4c30095788ee97d5d7c4ce2a6.png",
+        "srcset": "",
+        "sizes": "",
+        "pixels": [
+          941,
+          1672
+        ],
+        "bytes": 1941597,
+        "type": "image/png",
+        "box": [
+          390,
+          693.328125
+        ],
+        "source": "mobile",
+        "fit": "cover"
+      }
+    ],
+    "fixture": [
+      {
+        "panel": "missing-device",
+        "text": "missing-device\n设计画框\n设计参考 810×1440，不是上传上限。画框 9:16。\n原图像素\n941×1672。\n清晰度\n按 810 宽、2 倍屏检查，像素偏低，建议源宽约 1621。\n构图\n适合当前构图。\n按 810 宽、2 倍屏检查，像素偏低，建议源宽约 1621。\n查看图片信息",
+        "quality": "warning",
+        "imageLoaded": true
+      },
+      {
+        "panel": "explicit-mobile",
+        "text": "explicit-mobile\n设计画框\n设计参考 810×1440，不是上传上限。画框 9:16。\n原图像素\n941×1672。\n清晰度\n按 390 宽、3 倍屏检查，像素偏低，建议源宽约 1171。\n构图\n适合当前构图。\n按 390 宽、3 倍屏检查，像素偏低，建议源宽约 1171。\n查看图片信息",
+        "quality": "warning",
+        "imageLoaded": true
+      },
+      {
+        "panel": "half-column",
+        "text": "half-column\n设计画框\n设计参考 720×405，不是上传上限。画框 16:9。\n原图像素\n1600×900。\n清晰度\n按 720 宽、2 倍屏展示，建议源宽 1440。当前像素够用。\n构图\n适合当前构图。",
+        "quality": "good",
+        "imageLoaded": true
+      },
+      {
+        "panel": "no-cached-metadata",
+        "text": "no-cached-metadata\n设计画框\n设计参考 1440×810，不是上传上限。画框 16:9。\n原图像素\n原图像素待检测。预览里的尺寸不是原图像素。\n清晰度\n按 1920 宽、2 倍屏检查。还不能确认原图是否够用。\n构图\n构图待原图像素确认后再判断。",
+        "quality": "loading",
+        "imageLoaded": true
+      }
+    ]
+  },
+  "checks": {
+    "node": "22.23.2",
+    "clientPure": {
+      "passed": 9,
+      "failed": 0
+    },
+    "serverTarget": {
+      "passed": 16,
+      "failed": 0
+    },
+    "clientTypecheck": 0,
+    "serverTypecheck": 0,
+    "contractsCheck": 0
+  },
+  "limitations": [
+    "No real upload-save-publish write-path verification.",
+    "Current service parameter behavior differs from source; no service restarted.",
+    "Component fixtures use synthetic metadata and neutral SVGs; they are not full admin integration."
+  ]
+}

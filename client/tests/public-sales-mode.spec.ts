@@ -278,7 +278,7 @@ test("Catalog 在交易能力加载前后都通过商品名称进入详情", asy
   flagsBarrier.release();
   expect((await flagsResponse).ok()).toBe(true);
   await expect(detail).toHaveAttribute("href", "/products/HC-4?from=%2Fcatalog");
-  await expect(page.locator(".catalog-product-card__action")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "加入购物车", exact: true })).toBeVisible();
 });
 
 test("Catalog 在交易能力读取失败时不承诺购买", async ({ page }) => {
@@ -321,6 +321,7 @@ for (const viewport of [
       .toHaveAttribute("href", "/products/HC-6?from=%2Fcatalog");
     await expect(recovery).toHaveCount(0);
     await expect(page.getByRole("link", { name: "查看并购买" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "加入购物车", exact: true })).toBeVisible();
     expect(flagsRequestCount.value).toBe(2);
     await expect.poll(() => page.evaluate(
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
@@ -345,7 +346,7 @@ for (const viewport of [
     expect(flagsRequestCount.value).toBe(1);
 
     await recovery.getByRole("button", { name: "重新检查购买状态" }).click();
-    await page.getByRole("combobox", { name: "选择作品规格" }).selectOption({ index: 1 });
+    await page.locator("label").filter({ has: page.locator('input[name="product-sku"]') }).first().click();
     await expect(page.getByRole("button", { name: /加入购物车/ })).toBeEnabled();
     await expect(recovery).toHaveCount(0);
     expect(flagsRequestCount.value).toBe(2);
@@ -354,6 +355,45 @@ for (const viewport of [
     )).toBe(true);
   });
 }
+
+test("Catalog 直接销售仅一个可售规格时可以加入购物车", async ({ page }) => {
+  const requestCounts = { add: 0, update: 0, checkout: 0 };
+  await mockPublicSales(page, {
+    products: [product(8, "DIRECT_PURCHASE", { available: true })],
+    requestCounts,
+  });
+  await page.goto("/catalog");
+  const add = page.getByRole("button", { name: "加入购物车", exact: true });
+  await expect(add).toBeEnabled();
+  await add.click();
+  await expect.poll(() => requestCounts.add).toBe(1);
+  await expect(page.getByText("已加入购物车")).toBeVisible();
+});
+
+test("Catalog 多个可售规格时进入作品详情，不直接加购", async ({ page }) => {
+  const base = product(9, "DIRECT_PURCHASE", { available: true });
+  const item = {
+    ...base,
+    skus: [
+      ...base.skus,
+      {
+        id: 91,
+        productId: 9,
+        material: "AU750",
+        price: 13600,
+        isActive: true,
+        isAvailableForPurchase: true,
+      },
+    ],
+  };
+  const requestCounts = { add: 0, update: 0, checkout: 0 };
+  await mockPublicSales(page, { products: [item], requestCounts });
+  await page.goto("/catalog");
+  await page.getByRole("button", { name: "加入购物车", exact: true }).click();
+  await expect(page).toHaveURL(/\/products\/HC-9$/);
+  expect(requestCounts.add).toBe(0);
+  await expect(page.getByRole("button", { name: /加入购物车/ })).toHaveCount(0);
+});
 
 test("DIRECT_PURCHASE 有货时使用 SKU 价格且重复点击只提交一次", async ({ page }) => {
   const antdConsoleProblems = captureAntdConsoleProblems(page);
@@ -364,7 +404,7 @@ test("DIRECT_PURCHASE 有货时使用 SKU 价格且重复点击只提交一次",
   });
   await page.goto("/products/10");
 
-  await page.getByRole("combobox", { name: "选择作品规格" }).selectOption({ index: 1 });
+  await page.locator("label").filter({ has: page.locator('input[name="product-sku"]') }).first().click();
   await expect(page.getByText("¥12,800", { exact: true })).toBeVisible();
   const addButton = page.getByRole("button", { name: /加入购物车/ });
   await expect(addButton).toBeEnabled();
@@ -410,13 +450,13 @@ test("SINGLE_UNIT 在详情和购物车都固定数量上限 1", async ({ page }
   });
 
   await page.goto("/products/12");
-  await page.getByRole("combobox", { name: "选择作品规格" }).selectOption({ index: 1 });
+  await page.locator("label").filter({ has: page.locator('input[name="product-sku"]') }).first().click();
   await expect(page.getByRole("button", { name: "增加数量" })).toBeDisabled();
   await expect(page.getByText("一物一件，每位顾客的购物车最多保留 1 件。")).toBeVisible();
 
   await page.goto("/cart");
   await expect(page.getByRole("button", { name: `增加${single.name}数量` })).toBeDisabled();
-  await expect(page.getByText("一物一件，购物车数量上限为 1。")).toBeVisible();
+  await expect(page.getByText("一物一件，购物袋数量上限为 1。")).toBeVisible();
 });
 
 test("四种非直购模式只提供真实可达的浏览、选款、预约或定制入口", async ({ page }) => {
@@ -426,7 +466,12 @@ test("四种非直购模式只提供真实可达的浏览、选款、预约或�
     { id: 22, mode: "APPOINTMENT" as const, text: "预约鉴赏此款", href: "/contact?type=appointment&productRef=HC-22" },
     { id: 23, mode: "CUSTOM_INQUIRY" as const, text: "预约定制", href: "/custom?type=custom&productRef=HC-23" },
   ];
-  await mockPublicSales(page, { products: cases.map((item) => product(item.id, item.mode)) });
+  await mockPublicSales(page, {
+    products: cases.map((item) => ({
+      ...product(item.id, item.mode),
+      priceMin: item.mode === "CUSTOM_INQUIRY" ? 15000 : null,
+    })),
+  });
 
   for (const item of cases) {
     await page.goto(`/products/${item.id}`);
@@ -452,7 +497,7 @@ test("详情加购 409 显示服务端原因且不伪造成功", async ({ page }
     requestCounts,
   });
   await page.goto("/products/30");
-  await page.getByRole("combobox", { name: "选择作品规格" }).selectOption({ index: 1 });
+  await page.locator("label").filter({ has: page.locator('input[name="product-sku"]') }).first().click();
   await page.getByRole("button", { name: /加入购物车/ }).click();
 
   await expect(page.getByRole("alert")).toContainText("一物一件商品在购物车中最多保留 1 件");
@@ -492,6 +537,41 @@ test("购物车更新 409 与重复点击都不产生假数量", async ({ page }
   expect(antdConsoleProblems).toEqual([]);
 });
 
+for (const { initialQuantity, unavailableStatus, inventoryPolicy } of [
+  { initialQuantity: 0, unavailableStatus: "QUANTITY_INVALID", inventoryPolicy: "SINGLE_UNIT" },
+  { initialQuantity: 3, unavailableStatus: "QUANTITY_INVALID", inventoryPolicy: "SINGLE_UNIT" },
+  { initialQuantity: 5, unavailableStatus: "INSUFFICIENT_STOCK", inventoryPolicy: "STANDARD" },
+] as const) test(`购物袋 ${unavailableStatus} 数量 ${initialQuantity} 可一次修复至 1 并重新核对`, async ({ page }) => {
+  const single = product(38, "DIRECT_PURCHASE", { available: true, inventoryPolicy: "SINGLE_UNIT" });
+  await mockPublicSales(page, { products: [single] });
+  let quantity = initialQuantity;
+  await page.route(/\/api\/cart(?:\/95)?$/, async (route) => {
+    if (route.request().method() === "PUT") {
+      quantity = route.request().postDataJSON().quantity;
+      return fulfill(route, { id: 95 });
+    }
+    return fulfill(route, [{
+      id: 95,
+      productId: single.id,
+      skuId: single.skus[0].id,
+      quantity,
+      product: { name: single.name, code: single.code, inventoryPolicy },
+      sku: { material: "AU750", size: "12 号", goldWeight: 5.2, price: 12800 },
+      availability: quantity === 1
+        ? { available: true, status: "AVAILABLE", message: null }
+        : { available: false, status: unavailableStatus, message: "请调整数量后重试" },
+    }]);
+  });
+
+  await page.goto("/cart");
+  await expect(page.getByRole("link", { name: single.name })).toHaveAttribute("href", `/products/${single.code}`);
+  await expect(page.getByRole("button", { name: "暂不可结算" })).toBeDisabled();
+  await page.getByRole("button", { name: `将${single.name}调整至 1 件` }).click();
+  await expect(page.getByRole("link", { name: "前往结算" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "需要选款帮助？" }).getByRole("link", { name: "联系顾问" })).toHaveAttribute("href", "/contact");
+  expect(quantity).toBe(1);
+});
+
 test("购物车加载与错误状态可理解且可重试", async ({ page }) => {
   const cartBarrier = createRouteBarrier();
   await mockPublicSales(page, {
@@ -503,10 +583,15 @@ test("购物车加载与错误状态可理解且可重试", async ({ page }) => 
   await cartBarrier.reached;
   await expect(page.getByRole("status")).toHaveText("购物车加载中…");
   cartBarrier.release();
-  await expect(page.getByText("购物车暂时无法加载")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "购物袋暂时无法加载" })).toBeVisible();
   await page.getByRole("button", { name: "重新加载" }).click();
-  await expect(page.getByText("购物车为空")).toBeVisible();
-  await expect(page.getByText("购物车暂时无法加载")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "您的购物袋目前是空的" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "购物袋暂时无法加载" })).toHaveCount(0);
+  const emptyState = page.getByRole("region", { name: "您的购物袋目前是空的" });
+  await expect(emptyState.getByRole("link")).toHaveCount(2);
+  await expect(emptyState.getByRole("link", { name: "探索珠宝系列", exact: true })).toHaveAttribute("href", "/catalog");
+  await expect(emptyState.getByRole("link", { name: "查看新品", exact: true })).toHaveAttribute("href", "/catalog?sort=newest");
+  await expect(page.getByRole("region", { name: "需要选款帮助？" }).getByRole("link", { name: "联系顾问" })).toHaveAttribute("href", "/contact");
 });
 
 test("库存策略无法读取时安全暂停增量与结算", async ({ page }) => {
@@ -522,8 +607,8 @@ test("库存策略无法读取时安全暂停增量与结算", async ({ page }) 
     }],
   });
   await page.goto("/cart");
-  await expect(page.getByRole("alert")).toContainText("数量规则暂时无法确认");
-  await expect(page.getByRole("button", { name: "增加库存规则未知作品数量" })).toBeDisabled();
+  await expect(page.getByRole("alert")).toContainText("规格、数量规则、金额或库存暂时无法确认");
+  await expect(page.getByRole("button", { name: "增加库存规则未知作品数量" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "暂不可结算" })).toBeDisabled();
 });
 
@@ -553,7 +638,9 @@ test("购物车读取到下架或库存变化时解释原因并阻止结算", as
   await page.goto("/cart");
 
   await expect(page.getByText("商品已下架或不再支持直接购买，请移除后重新选购")).toBeVisible();
-  await expect(page.getByRole("button", { name: `增加${stale.name}数量` })).toBeDisabled();
+  await expect(page.getByRole("button", { name: `增加${stale.name}数量` })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "重新选款" })).toHaveAttribute("href", "/catalog");
+  await expect(page.getByRole("button", { name: `移除${stale.name}` })).toBeEnabled();
   await expect(page.getByRole("button", { name: "暂不可结算" })).toBeDisabled();
 });
 
@@ -583,19 +670,37 @@ test("购物车与支付开关关闭时不能进入交易或创建订单", async
   expect(requestCounts.checkout).toBe(0);
 });
 
-test("支付关闭但购物车开启时仍禁止进入结算", async ({ page }) => {
+test("支付关闭时仍可核对结算但不能提交订单", async ({ page }) => {
   const requestCounts = { add: 0, update: 0, checkout: 0 };
+  const item = product(41, "DIRECT_PURCHASE", { available: true });
   await mockPublicSales(page, {
-    products: [product(41, "DIRECT_PURCHASE", { available: true })],
+    products: [item],
     flags: { commerceEnabled: true, cartEnabled: true, paymentEnabled: false },
+    cartItems: [{
+      id: 94,
+      productId: item.id,
+      skuId: item.skus[0].id,
+      quantity: 1,
+      product: { name: item.name, goldWeight: item.goldWeight, inventoryPolicy: "STANDARD" },
+      sku: { material: "AU750", goldWeight: 5.2, price: 12800 },
+      availability: { available: true, status: "AVAILABLE", message: null },
+    }],
     requestCounts,
   });
+  await page.goto("/cart");
+  await expect(page.getByRole("link", { name: "核对结算" })).toBeVisible();
+  await expect(page.getByRole("status").getByText(
+    "您可以核对此处的作品与金额。暂时不能提交订单或付款。",
+  )).toBeVisible();
   await page.goto("/checkout");
-  await expect(page).toHaveURL(/\/contact$/);
+  await expect(page).toHaveURL(/\/checkout$/);
+  await expect(page.getByRole("button", { name: "暂时不能提交订单" })).toBeDisabled();
+  await expect(page.getByText("线上成交尚未开放")).toBeVisible();
+  await expect(page.getByRole("button", { name: /提交订单并支付/ })).toHaveCount(0);
   expect(requestCounts.checkout).toBe(0);
 });
 
-test("总交易开关关闭时详情不提供加购且交易页面不可达", async ({ page }) => {
+test("总交易开关关闭时仍可加购但不能提交订单", async ({ page }) => {
   const requestCounts = { add: 0, update: 0, checkout: 0 };
   await mockPublicSales(page, {
     products: [product(42, "DIRECT_PURCHASE", { available: true })],
@@ -603,12 +708,19 @@ test("总交易开关关闭时详情不提供加购且交易页面不可达", as
     requestCounts,
   });
   await page.goto("/products/42");
-  await expect(page.getByRole("link", { name: "购买暂未开放，联系顾问" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /加入购物车/ })).toHaveCount(0);
+  await page.locator("label").filter({ has: page.locator('input[name="product-sku"]') }).first().click();
+  await expect(page.getByRole("button", { name: /加入购物车/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: "立即购买" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "购买暂未开放，联系顾问" })).toHaveCount(0);
+  await page.getByRole("button", { name: /加入购物车/ }).click();
+  await expect.poll(() => requestCounts.add).toBe(1);
   await page.goto("/cart");
   await expect(page).toHaveURL(/\/cart$/);
-  await expect(page.getByText("线上购买尚未开放")).toBeVisible();
-  expect(requestCounts.add).toBe(0);
+  await expect(page.getByRole("heading", { level: 2, name: "您的购物袋目前是空的" })).toBeVisible();
+  await page.goto("/checkout");
+  await expect(page).toHaveURL(/\/checkout$/);
+  await expect(page.getByRole("heading", { level: 1, name: "购物车为空" })).toBeVisible();
+  expect(requestCounts.checkout).toBe(0);
 });
 
 for (const viewport of [
@@ -637,12 +749,12 @@ for (const viewport of [
     const checks = [
       { path: "/catalog", role: "link" as const, name: single.name },
       { path: "/products/50", role: "button" as const, name: "加入购物车" },
-      { path: "/cart", role: "link" as const, name: /去结算/ },
+      { path: "/cart", role: "link" as const, name: /前往结算/ },
     ];
     for (const check of checks) {
       await page.goto(check.path);
       if (check.path.startsWith("/products/")) {
-        await page.getByRole("combobox", { name: "选择作品规格" }).selectOption({ index: 1 });
+        await page.locator("label").filter({ has: page.locator('input[name="product-sku"]') }).first().click();
       }
       const target = page.getByRole(check.role, { name: check.name }).first();
       await target.focus();

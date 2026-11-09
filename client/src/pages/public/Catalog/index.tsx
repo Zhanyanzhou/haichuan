@@ -1,4 +1,4 @@
-﻿import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+﻿import { useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { usePageMetaStore } from "@/store/pageMetaStore";
 import { App as AntdApp } from "antd";
@@ -40,7 +40,7 @@ import {
 import { getCatalogPriceError } from "./CatalogFilterDrawer";
 import { CatalogPathways, ProductGrid } from "./CatalogProductSurface";
 import SelectionTray, { type SelectionLookupState } from "./SelectionTray";
-import { catNameById, getPrimaryCats } from "./catalogCategories";
+import { getPrimaryCats } from "./catalogCategories";
 import {
   applyCategoryDrafts,
   CatalogCanvasPrimary,
@@ -182,106 +182,6 @@ function PBtn({
 }
 
 /* ══════════════════════════════════════
-   组件：吸顶工具栏
-   ══════════════════════════════════════ */
-function StickyBar({
-  category,
-  total,
-  sort,
-  selCount,
-  filterCount,
-  onSort,
-  onOpenFilter,
-  categories,
-}: {
-  category: string;
-  total: number;
-  sort: string;
-  selCount: number;
-  filterCount: number;
-  onSort: (s: string) => void;
-  onOpenFilter: (trigger: HTMLButtonElement) => void;
-  categories: RealCategory[];
-}) {
-  const parentName = catNameById(categories, Number(category));
-  const path = category ? parentName : "全部款式";
-  return (
-    <div
-      className="catalog-sticky-bar"
-      style={{
-        position: "fixed",
-        left: 0,
-        right: 0,
-        zIndex: 40,
-        background: "rgba(255,255,255,0.95)",
-        borderBottom: `1px solid ${T.line}`,
-      }}
-    >
-      <div
-        className="catalog-sticky-bar__inner"
-        style={{
-          maxWidth: 1280,
-          marginInline: "auto",
-          paddingInline: "clamp(48px,5vw,80px)",
-          height: 52,
-          display: "flex",
-          alignItems: "center",
-          gap: 16,
-        }}
-      >
-        <span style={{ fontSize: 12, color: T.txt }}>{path}</span>
-        {total > 0 ? (
-          <span style={{ fontSize: 11, color: T.sec }}>{total} 件</span>
-        ) : null}
-        <div style={{ flex: 1 }} />
-        <button
-          type="button"
-          onClick={(event) => onOpenFilter(event.currentTarget)}
-          aria-label={filterCount > 0 ? `筛选，已选 ${filterCount} 项` : "筛选"}
-          style={{
-            minHeight: 44,
-            padding: "0 8px",
-            border: 0,
-            background: "transparent",
-            cursor: "pointer",
-            fontSize: 12,
-            color: T.txt,
-            whiteSpace: "nowrap",
-          }}
-        >
-          {filterCount > 0 ? `筛选 ${filterCount}` : "筛选"}
-        </button>
-        <span style={{ fontSize: 12, color: T.txt }}>排序</span>
-        <select
-          aria-label="作品排序方式"
-          value={sort}
-          onChange={(e) => onSort(e.target.value)}
-          style={{
-            background: "transparent",
-            border: 0,
-            outline: "none",
-            fontSize: 12,
-            color: T.txt,
-            cursor: "pointer",
-            WebkitAppearance: "none",
-            appearance: "none",
-          }}
-        >
-          <option value="recommended">综合</option>
-          <option value="newest">新品</option>
-          <option value="price_asc">价格从低到高</option>
-          <option value="price_desc">价格从高到低</option>
-          <option value="sku">款号升序</option>
-        </select>
-        {selCount > 0 && (
-          <span style={{ fontSize: 11, color: T.sec }}>已选 {selCount}</span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ══════════════════════════════════════
    主页面
    ══════════════════════════════════════ */
 export type CatalogProps = {
@@ -296,6 +196,7 @@ export default function Catalog({
   const { message } = AntdApp.useApp();
   const location = useLocation();
   const {
+    flags: commerceFlags,
     error: commerceFlagsError,
     reload: reloadCommerceFlags,
   } = useCommerceCapabilities();
@@ -823,62 +724,64 @@ export default function Catalog({
     pendingPageFocusRef.current = page;
     update("page", String(page));
   }, [params.page, update]);
-  const [stickyVisible, setStickyVisible] = useState(false);
-  const sentinelRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (editorPreview) {
-      setStickyVisible(false);
-      return;
-    }
-    const sentinel = sentinelRef.current;
-    if (!sentinel) return;
-    const Observer = window.IntersectionObserver;
-    if (typeof Observer !== "function") {
-      setStickyVisible(false);
-      return;
-    }
-    const header = sentinel.ownerDocument.querySelector<HTMLElement>(".site-header");
-    let observer: IntersectionObserver | null = null;
-    let observedOffset = -1;
-    let generation = 0;
-    const connect = () => {
-      const concealed = header?.classList.contains("is-concealed") ?? false;
-      const offset = concealed ? 0 : Math.round(header?.getBoundingClientRect().height || 0);
-      if (observer && offset === observedOffset) return;
-      observedOffset = offset;
-      const current = ++generation;
-      observer?.disconnect();
-      try {
-        observer = new Observer(
-          ([entry]) => {
-            if (current !== generation) return;
-            // 正常工具栏完全越过页头后才显示吸顶条；回滚碰到边界时即收起。
-            // 相交判定负责退出边界，位置判定排除工具栏还在视口下方的情况。
-            setStickyVisible(
-              !entry.isIntersecting && entry.boundingClientRect.bottom <= offset + 1,
-            );
-          },
-          { rootMargin: `-${offset}px 0px 0px 0px`, threshold: 0 },
-        );
-        observer.observe(sentinel);
-      } catch {
-        // 吸顶筛选仅是渐进增强；观察器被禁用或脚本构造异常时，
-        // 保留正常目录、搜索与选款业务，不升级为整页错误。
-        setStickyVisible(false);
-      }
+  const pinRef = useRef<HTMLDivElement>(null);
+  const leadRef = useRef<HTMLDivElement>(null);
+  const pinSpacerRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (editorPreview) return;
+    const pin = pinRef.current;
+    const lead = leadRef.current;
+    const spacer = pinSpacerRef.current;
+    const root = pin?.closest<HTMLElement>(".catalog-page");
+    const ownerWindow = pin?.ownerDocument.defaultView;
+    if (!pin || !lead || !spacer || !root || !ownerWindow) return;
+    const header = pin.ownerDocument.querySelector<HTMLElement>(".site-header");
+    let frame = 0;
+    let follow = 0;
+    const apply = () => {
+      const headerBottom = header ? Math.max(0, header.getBoundingClientRect().bottom) : 0;
+      const top = Math.max(headerBottom, lead.getBoundingClientRect().bottom);
+      pin.style.top = `${top}px`;
+      const height = Math.ceil(pin.getBoundingClientRect().height);
+      spacer.style.height = `${height}px`;
+      root.style.setProperty("--catalog-pin-height", `${height}px`);
     };
-    connect();
+    const schedule = () => {
+      if (frame) return;
+      frame = ownerWindow.requestAnimationFrame(() => {
+        frame = 0;
+        apply();
+      });
+    };
+    apply();
+    ownerWindow.addEventListener("scroll", schedule, { passive: true });
+    ownerWindow.addEventListener("resize", schedule);
     let classObserver: MutationObserver | null = null;
     if (header) {
-      classObserver = new MutationObserver(connect);
-      classObserver.observe(header, { attributes: true, attributeFilter: ["class"] });
+      const observer = new ownerWindow.MutationObserver(() => {
+        const started = ownerWindow.performance.now();
+        const step = (now: number) => {
+          apply();
+          follow = now - started < 400 ? ownerWindow.requestAnimationFrame(step) : 0;
+        };
+        if (follow) ownerWindow.cancelAnimationFrame(follow);
+        follow = ownerWindow.requestAnimationFrame(step);
+      });
+      observer.observe(header, { attributes: true, attributeFilter: ["class", "style"] });
+      classObserver = observer;
     }
-    const ownerWindow = sentinel.ownerDocument.defaultView;
-    ownerWindow?.addEventListener("resize", connect);
+    const resizeObserver = typeof ownerWindow.ResizeObserver === "function"
+      ? new ownerWindow.ResizeObserver(schedule)
+      : null;
+    resizeObserver?.observe(pin);
     return () => {
-      observer?.disconnect();
+      if (frame) ownerWindow.cancelAnimationFrame(frame);
+      if (follow) ownerWindow.cancelAnimationFrame(follow);
+      ownerWindow.removeEventListener("scroll", schedule);
+      ownerWindow.removeEventListener("resize", schedule);
       classObserver?.disconnect();
-      ownerWindow?.removeEventListener("resize", connect);
+      resizeObserver?.disconnect();
+      root.style.removeProperty("--catalog-pin-height");
     };
   }, [editorPreview]);
 
@@ -943,7 +846,6 @@ export default function Catalog({
         background: T.bg,
         minHeight: editorPreview ? "auto" : "100vh",
         paddingBottom: 160,
-        overflowX: "clip",
       }}
     >
       <style>{`
@@ -958,16 +860,36 @@ export default function Catalog({
           background: #FFFFFF;
           border-bottom: 1px solid #DDE1E2;
         }
+        .catalog-page__discovery-lead {
+          height: calc(32px + var(--site-header-height, 88px));
+        }
+        .catalog-page__discovery-lead.is-compact {
+          height: 32px;
+        }
+        .catalog-pin {
+          position: fixed;
+          top: var(--site-header-offset, var(--site-header-height, 88px));
+          right: 0;
+          left: 0;
+          z-index: 30;
+          background: #FFFFFF;
+        }
+        .catalog-page.is-editor-preview .catalog-pin {
+          position: static;
+        }
+        .catalog-page.is-editor-preview .catalog-pin-spacer {
+          display: none;
+        }
         .catalog-page__discovery-main {
           max-width: 1440px;
           margin-inline: auto;
-          padding: calc(32px + var(--site-header-height, 88px)) clamp(32px, 5.55vw, 80px) 20px;
+          padding: 0 clamp(32px, 5.55vw, 80px) 20px;
           display: grid;
           gap: 28px;
         }
         .catalog-page__discovery.is-compact .catalog-page__discovery-main {
           max-width: 720px;
-          padding-block: 32px 20px;
+          padding-block: 0 20px;
         }
         .catalog-search {
           min-width: 0;
@@ -1172,12 +1094,18 @@ export default function Catalog({
           }
         }
         @media (max-width: 720px) {
+          .catalog-page__discovery-lead {
+            height: calc(28px + var(--site-header-height, 64px));
+          }
+          .catalog-page__discovery-lead.is-compact {
+            height: 28px;
+          }
           .catalog-page__discovery-main {
-            padding: calc(28px + var(--site-header-height, 64px)) 20px 16px;
+            padding: 0 20px 16px;
             gap: 24px;
           }
           .catalog-page__discovery.is-compact .catalog-page__discovery-main {
-            padding: 28px 20px 16px;
+            padding: 0 20px 16px;
           }
           .catalog-search__input {
             font-size: 14px;
@@ -1207,105 +1135,94 @@ export default function Catalog({
           }
         }
       `}</style>
-      <section
-        className={`catalog-page__discovery${hasLeadingDecoration ? " is-compact" : ""}`}
-        aria-label={hasLeadingDecoration || decorationState.ownsPrimaryHeading ? "选款中心检索" : undefined}
-        aria-labelledby={hasLeadingDecoration || decorationState.ownsPrimaryHeading ? undefined : "catalog-page-title"}
-      >
-        <div className="catalog-page__discovery-main">
-          {decorationState.ownsPrimaryHeading ? null : <h1 id="catalog-page-title" className="sr-only">选款中心</h1>}
-          <CatalogSearch
-            query={params.query}
-            resolvedQuery={suggestionsReady ? params.query : null}
-            products={suggestionProducts}
-            categories={displayCategories}
-            materials={materialOptions}
-            onSearch={(value) => update("query", value, { replace: true })}
-          />
-        </div>
-        {showCatalogTools ? (
-          editorPreview ? (
-            <CatalogCanvasPrimary
-              categories={displayCategories}
-              savedNames={savedCategoryNames}
-              active={params.category}
-              note={categoryEditNote}
-              onChange={(id) => update("category", id)}
-              onDraft={setCategoryDraft}
-              onRename={renameCanvasCategory}
-            />
-          ) : (
-            <PrimaryNav
-              active={params.category}
-              onChange={(c) => update("category", c)}
-              categories={categories}
-            />
-          )
-        ) : null}
-      </section>
-      {showCatalogTools ? (
-        <>
-          {params.category ? (
-            editorPreview ? (
-              <CatalogCanvasSecondary
+      <div
+        ref={leadRef}
+        className={`catalog-page__discovery-lead${hasLeadingDecoration ? " is-compact" : ""}`}
+      />
+      <div className="catalog-pin-spacer" ref={pinSpacerRef} />
+      <div className="catalog-pin" ref={pinRef}>
+          <section
+            className={`catalog-page__discovery${hasLeadingDecoration ? " is-compact" : ""}`}
+            aria-label={hasLeadingDecoration || decorationState.ownsPrimaryHeading ? "选款中心检索" : undefined}
+            aria-labelledby={hasLeadingDecoration || decorationState.ownsPrimaryHeading ? undefined : "catalog-page-title"}
+          >
+            <div className="catalog-page__discovery-main">
+              {decorationState.ownsPrimaryHeading ? null : <h1 id="catalog-page-title" className="sr-only">选款中心</h1>}
+              <CatalogSearch
+                query={params.query}
+                resolvedQuery={suggestionsReady ? params.query : null}
+                products={suggestionProducts}
                 categories={displayCategories}
-                savedNames={savedCategoryNames}
-                parentId={params.category}
-                active={params.subcategory}
-                onChange={(id) => update("subcategory", id)}
-                onDraft={setCategoryDraft}
-                onRename={renameCanvasCategory}
+                materials={materialOptions}
+                onSearch={(value) => update("query", value, { replace: true })}
               />
-            ) : (
-            <SecondaryNav
-              parentId={params.category}
-              active={params.subcategory}
-              onChange={(s) => update("subcategory", s)}
-              categories={categories}
-            />
-            )
+            </div>
+            {showCatalogTools ? (
+              editorPreview ? (
+                <CatalogCanvasPrimary
+                  categories={displayCategories}
+                  savedNames={savedCategoryNames}
+                  active={params.category}
+                  note={categoryEditNote}
+                  onChange={(id) => update("category", id)}
+                  onDraft={setCategoryDraft}
+                  onRename={renameCanvasCategory}
+                />
+              ) : (
+                <PrimaryNav
+                  active={params.category}
+                  onChange={(c) => update("category", c)}
+                  categories={categories}
+                />
+              )
+            ) : null}
+          </section>
+          {showCatalogTools ? (
+            <>
+              {params.category ? (
+                editorPreview ? (
+                  <CatalogCanvasSecondary
+                    categories={displayCategories}
+                    savedNames={savedCategoryNames}
+                    parentId={params.category}
+                    active={params.subcategory}
+                    onChange={(id) => update("subcategory", id)}
+                    onDraft={setCategoryDraft}
+                    onRename={renameCanvasCategory}
+                  />
+                ) : (
+                  <SecondaryNav
+                    parentId={params.category}
+                    active={params.subcategory}
+                    onChange={(s) => update("subcategory", s)}
+                    categories={categories}
+                  />
+                )
+              ) : null}
+              <Toolbar
+                values={filterValues}
+                total={visibleResultTotal}
+                materialOptions={materialOptions}
+                craftOptions={craftOptions}
+                sizeOptions={sizeOptions}
+                sort={params.sort}
+                selCount={selCount}
+                loading={apiLoading || productsRefreshing || !catalogResponseCurrent}
+                onChange={changeFilters}
+                onSort={(s) => update("sort", s)}
+                onOpenFilter={openFilter}
+              />
+            </>
           ) : null}
-          <div ref={sentinelRef}>
-            <Toolbar
-              values={filterValues}
-              total={visibleResultTotal}
-              materialOptions={materialOptions}
-              craftOptions={craftOptions}
-              sizeOptions={sizeOptions}
-              sort={params.sort}
-              selCount={selCount}
-              loading={apiLoading || productsRefreshing || !catalogResponseCurrent}
-              onChange={changeFilters}
-              onSort={(s) => update("sort", s)}
-              onOpenFilter={openFilter}
-            />
-          </div>
-          {stickyVisible ? (
-            <StickyBar
-              category={params.category}
-              total={visibleResultTotal}
-              sort={params.sort}
-              selCount={selCount}
-              filterCount={
-                params.materials.length
-                + params.crafts.length
-                + params.weights.length
-                + params.sizes.length
-                + Number(Boolean(params.minPrice || params.maxPrice))
-              }
-              onSort={(s) => update("sort", s)}
-              onOpenFilter={openFilter}
-              categories={categories}
-            />
-          ) : null}
-          <ActiveFilters
-            values={filterValues}
-            priceOnly={priceOnly}
-            onChange={changeFilters}
-            onClearAll={clearAttributeFilters}
-            onClearPriceScope={clearPriceScope}
-          />
-        </>
+        </div>
+      {showCatalogTools ? (
+        <ActiveFilters
+          values={filterValues}
+          priceOnly={priceOnly}
+          onChange={changeFilters}
+          onClearAll={clearAttributeFilters}
+          onClearPriceScope={clearPriceScope}
+        />
       ) : null}
       {categoriesError && !categoryTarget ? (
         <div
@@ -1382,7 +1299,7 @@ export default function Catalog({
         tabIndex={-1}
         aria-label="作品结果"
         aria-busy={apiLoading || productsRefreshing}
-        style={{ scrollMarginTop: "calc(var(--site-header-offset, var(--site-header-height, 88px)) + 16px)" }}
+        style={{ scrollMarginTop: "calc(var(--site-header-offset, var(--site-header-height, 88px)) + var(--catalog-pin-height, 0px) + 16px)" }}
       >
       {productsRefreshError && !virtualCatalog ? (
         <div role="alert" className="catalog-refresh-notice">
@@ -1556,6 +1473,7 @@ export default function Catalog({
           products={displayProducts}
           catalogUrl={catalogUrlForDetail}
           startIndex={(params.page - 1) * PAGE_SIZE}
+          cartReady={!editorPreview && !commerceFlagsError && commerceFlags?.cartEnabled === true}
         />
         {displayProducts.length > 0 ? (
           <CatalogPathways

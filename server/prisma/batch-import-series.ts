@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const p = new PrismaClient();
 const srcBase = "G:/AI整理文件/input/原始3D和历史资料/整理文件合集/ATP吊坠文件合集/ATP犀牛文件/按吊坠扣分类/系列";
-const destDir = "g:/网站搭建2/client/public/images/products";
+const destDir = "g:/海川珠宝官方网站开发/client/public/images/products";
 
 async function main() {
   // 收集所有图片

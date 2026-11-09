@@ -88,9 +88,16 @@ function story(role: string, variant: ContentVariant, device: "desktop" | "mobil
 export const PageHeroDesktop: Story = story("page-hero", "baseline", "desktop");
 export const PageHeroMobile: Story = story("page-hero", "baseline", "mobile");
 export const PageHeroLongTextDesktop: Story = story("page-hero", "longText", "desktop");
+export const PageHeroLongTextMobile: Story = story("page-hero", "longText", "mobile");
 export const PageHeroMissingImageDesktop: Story = story("page-hero", "missingImage", "desktop");
+export const PageHeroMissingImageMobile: Story = story("page-hero", "missingImage", "mobile");
 export const PageHeroExtremeRatioDesktop: Story = story("page-hero", "extremeRatio", "desktop");
+export const PageHeroExtremeRatioMobile: Story = story("page-hero", "extremeRatio", "mobile");
 export const CraftDetailDesktop: Story = story("craft-detail", "baseline", "desktop");
 export const CraftDetailMobile: Story = story("craft-detail", "baseline", "mobile");
 export const CraftDetailLongTextDesktop: Story = story("craft-detail", "longText", "desktop");
+export const CraftDetailLongTextMobile: Story = story("craft-detail", "longText", "mobile");
 export const CraftDetailMissingImageDesktop: Story = story("craft-detail", "missingImage", "desktop");
+export const CraftDetailMissingImageMobile: Story = story("craft-detail", "missingImage", "mobile");
+export const CraftDetailExtremeRatioDesktop: Story = story("craft-detail", "extremeRatio", "desktop");
+export const CraftDetailExtremeRatioMobile: Story = story("craft-detail", "extremeRatio", "mobile");

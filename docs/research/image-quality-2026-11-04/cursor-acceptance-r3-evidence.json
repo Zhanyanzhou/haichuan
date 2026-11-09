@@ -1,0 +1,113 @@
+{
+  "date": "2026-11-04",
+  "verdict": "Previous two functional findings closed in reviewed standard paths and actual-component fixtures; end-to-end acceptance incomplete.",
+  "cursorRuntimeRecord": "cursor-acceptance-r3-runtime.json (historical, source script not found; processes no longer reachable)",
+  "component": {
+    "layer": "actual component with synthetic image metadata and route-Mock GET; no auth/DB/upload/publish acceptance",
+    "panels": [
+      {
+        "name": "actual-mobile-spec-810",
+        "text": "actual-mobile-spec-810\n替换图片\n本页图片\n图片链接\n更多\n设计画框\n上传推荐 810×1440。模板设计基准 1440 宽。设计参考 390×693，不是上传上限。画框 9:16。\n原图像素\n941×1672。\n清晰度\n按 390 宽、3 倍屏检查，像素偏低，建议源宽约 1171。\n构图\n适合当前构图。\n按 390 宽、3 倍屏检查，像素偏低，建议源宽约 1171。\n查看图片信息",
+        "quality": "warning",
+        "factsState": "ready"
+      },
+      {
+        "name": "reference-mobile-spec-390",
+        "text": "reference-mobile-spec-390\n替换图片\n本页图片\n图片链接\n更多\n设计画框\n上传推荐 390×693。模板设计基准 1440 宽。设计参考 390×693，不是上传上限。画框 9:16。\n原图像素\n941×1672。\n清晰度\n按 390 宽、3 倍屏检查，像素偏低，建议源宽约 1171。\n构图\n适合当前构图。\n按 390 宽、3 倍屏检查，像素偏低，建议源宽约 1171。\n查看图片信息",
+        "quality": "warning",
+        "factsState": "ready"
+      },
+      {
+        "name": "half-column-720",
+        "text": "half-column-720\n替换图片\n本页图片\n图片链接\n更多\n设计画框\n上传推荐 720×405。设计参考 720×405，不是上传上限。画框 16:9。\n原图像素\n1600×900。\n清晰度\n按 960 宽、2 倍屏检查，像素偏低，建议源宽约 1920。\n构图\n适合当前构图。\n按 960 宽、2 倍屏检查，像素偏低，建议源宽约 1920。\n查看图片信息",
+        "quality": "warning",
+        "factsState": "ready"
+      },
+      {
+        "name": "uncached-auto-detect",
+        "text": "uncached-auto-detect\n替换图片\n本页图片\n图片链接\n更多\n设计画框\n上传推荐 810×1440。模板设计基准 1440 宽。设计参考 390×693，不是上传上限。画框 9:16。\n原图像素\n941×1672。\n清晰度\n按 390 宽、3 倍屏检查，像素偏低，建议源宽约 1171。\n构图\n适合当前构图。\n按 390 宽、3 倍屏检查，像素偏低，建议源宽约 1171。\n查看图片信息",
+        "quality": "warning",
+        "factsState": "ready"
+      },
+      {
+        "name": "metadata-retry",
+        "text": "metadata-retry\n替换图片\n本页图片\n图片链接\n更多\n设计画框\n上传推荐 810×1440。模板设计基准 1440 宽。设计参考 390×693，不是上传上限。画框 9:16。\n原图像素\n941×1672。\n清晰度\n按 390 宽、3 倍屏检查，像素偏低，建议源宽约 1171。\n构图\n适合当前构图。\n按 390 宽、3 倍屏检查，像素偏低，建议源宽约 1171。\n查看图片信息",
+        "quality": "warning",
+        "factsState": "ready"
+      },
+      {
+        "name": "unknown-with-old-db-size",
+        "text": "unknown-with-old-db-size\n替换图片\n本页图片\n图片链接\n更多\n设计画框\n上传推荐 1440×810。设计参考 1440×810，不是上传上限。画框 16:9。\n原图像素\n原图像素未知。外链或不在本站素材库中的图无法自动检测。 重试\n清晰度\n按 1920 宽、2 倍屏检查。还不能确认原图是否够用。\n构图\n构图待原图像素确认后再判断。",
+        "quality": "loading",
+        "factsState": "unknown"
+      }
+    ],
+    "calls": [
+      "/uploads/page-assets/acceptance-r2-uncached.png",
+      "/uploads/page-assets/acceptance-r2-retry.png",
+      "/uploads/page-assets/acceptance-r2-unknown.png",
+      "/uploads/page-assets/acceptance-r2-retry.png"
+    ],
+    "beforeRetry": "metadata-retry\n替换图片\n本页图片\n图片链接\n更多\n设计画框\n上传推荐 810×1440。模板设计基准 1440 宽。设计参考 390×693，不是上传上限。画框 9:16。\n原图像素\n原图像素读取失败。可重试，或打开本页图片后再检测。 重试\n清晰度\n按 390 宽、3 倍屏检查。还不能确认原图是否够用。\n构图\n构图待原图像素确认后再判断。"
+  },
+  "currentPublicApi": {
+    "origin": "http://127.0.0.1:5173",
+    "mediaFactsCount": 0,
+    "image": null,
+    "variants": [],
+    "isolatedApiStatus": "unavailable from this page (connection or CORS)"
+  },
+  "currentDom": {
+    "ready": "complete",
+    "url": "http://127.0.0.1:5173/",
+    "body": "跳至主内容\n海川珠宝\n联系\n购物袋\n我的账户\n菜单\n搜索\n海川珠宝\n联系与预约\n→\n珠宝作品\n选款中心\n定制服务\n品牌故事\n隐私说明\n经营主体信息\n海川珠宝\n© 2026 海川珠宝\n粤ICP备2024299538号",
+    "images": [
+      {
+        "src": "http://127.0.0.1:5173/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png",
+        "srcset": "",
+        "sizes": "",
+        "box": [
+          1920,
+          1080
+        ]
+      },
+      {
+        "src": "http://127.0.0.1:5173/uploads/page-assets/2895abcfbd4c347984b4ce296036737736d97031a04a7471fa765c68cd672700.png",
+        "srcset": "",
+        "sizes": "",
+        "box": [
+          1920,
+          1080
+        ]
+      }
+    ]
+  },
+  "portsAndVariants": [
+    {
+      "name": "isolated-api",
+      "error": "ECONNREFUSED"
+    },
+    {
+      "name": "isolated-front",
+      "error": "ECONNREFUSED"
+    },
+    {
+      "name": "current-3840",
+      "status": 404
+    },
+    {
+      "name": "current-invalid-rv",
+      "error": "TimeoutError"
+    }
+  ],
+  "checks": {
+    "node": "22.23.2",
+    "clientPurePassed": 15,
+    "serverTargetPassed": 37,
+    "componentHappyDomRunner": "Assertions printed ok; process did not terminate, interrupted with exit1; not a passing complete command.",
+    "clientTypecheck": 0,
+    "serverTypecheck": 0,
+    "contractsCheck": 0
+  },
+  "scope": "Read-only actual-public GET and explicitly labelled component GET route-Mock. No source fixes, service restarts, database writes, save, upload or publish."
+}

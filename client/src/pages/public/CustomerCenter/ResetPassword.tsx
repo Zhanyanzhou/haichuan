@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { MemberGate, RevealPasswordInput } from './MemberGate';
 import { App as AntdApp } from 'antd';
 import { customerApi } from '@/services/api';
 import {
@@ -72,6 +73,8 @@ export default function ResetPassword() {
   const attemptGenerationRef = useRef(0);
   const submittingRef = useRef(false);
   const mountedRef = useRef(true);
+  const passwordId = useId();
+  const confirmId = useId();
 
   useEffect(() => {
     mountedRef.current = true;
@@ -175,87 +178,78 @@ export default function ResetPassword() {
     }
   };
 
-  if (!token || view === 'invalid') {
-    return (
-      <div className="min-h-[70vh] flex items-center justify-center px-4 py-16">
-        <div className="w-full max-w-md bg-white border border-brand-line p-10 text-center" role="alert">
-          <h1 className="text-xl font-display font-semibold text-brand-text">重置链接无效</h1>
-          <p className="text-sm text-brand-muted mt-3">
-            {!token
-              ? '链接缺少有效令牌，请从邮件中的按钮进入，或重新发起找回。'
-              : '该链接无效、已过期或已使用，请重新发起找回。'}
-          </p>
-          <Link to="/customer/forgot" className="mt-6 inline-flex min-h-11 items-center text-sm font-medium text-brand-text underline underline-offset-4 hover:text-brand-muted">
-            重新找回密码
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
-  if (view === 'uncertain') {
-    return (
-      <div className="min-h-[70vh] flex items-center justify-center px-4 py-16">
-        <div className="w-full max-w-md bg-white border border-brand-line p-10" role="alert" aria-live="assertive">
-          <h1 className="text-xl font-display font-semibold text-brand-text">重置结果待确认</h1>
-          <p className="mt-3 text-sm leading-relaxed text-brand-muted">
-            请求响应未能确认，密码可能已经更新。请勿重复提交当前链接，先尝试使用新密码登录；若无法登录，再重新发起找回。
-          </p>
-          <div className="mt-6 flex flex-wrap gap-x-5 gap-y-3 text-sm">
-            <Link to="/customer" className="inline-flex min-h-11 items-center font-medium text-brand-text underline underline-offset-4 hover:text-brand-muted">
-              使用新密码登录
-            </Link>
-            <Link to="/customer/forgot" className="inline-flex min-h-11 items-center text-brand-muted underline underline-offset-4 hover:text-brand-text">
-              重新找回密码
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const invalid = !token || view === 'invalid';
+  const title = invalid
+    ? '重置链接无效'
+    : view === 'uncertain'
+      ? '重置结果待确认'
+      : '设置新密码';
+  const lede = invalid
+    ? (!token
+      ? '链接缺少有效令牌，请从邮件中的按钮进入，或重新发起找回。'
+      : '该链接无效、已过期或已使用，请重新发起找回。')
+    : view === 'uncertain'
+      ? '请求响应未能确认，密码可能已经更新。请勿重复提交当前链接，先尝试使用新密码登录；若无法登录，再重新发起找回。'
+      : '该链接仅可使用一次，30 分钟内有效。';
 
   return (
-    <div className="min-h-[70vh] flex items-center justify-center px-4 py-16">
-      <div className="w-full max-w-md bg-white border border-brand-line p-10">
-        <h1 className="text-2xl font-display font-semibold text-brand-text">设置新密码</h1>
-        <p className="text-sm text-brand-muted mt-2">该链接仅可使用一次，30 分钟内有效。</p>
-        <form onSubmit={handleSubmit} className="mt-8 space-y-5">
-          <label className="block">
-            <span className="text-sm text-brand-text">新密码</span>
-            <input
-              type="password"
+    <MemberGate
+      kicker="Private Membership"
+      title={title}
+      lede={<p>{lede}</p>}
+    >
+      {invalid ? (
+        <div className="member-recovery" role="alert">
+          <div className="member-recovery__links">
+            <Link to="/customer/forgot">重新找回密码</Link>
+          </div>
+        </div>
+      ) : view === 'uncertain' ? (
+        <div className="member-recovery" role="alert" aria-live="assertive">
+          <div className="member-recovery__links">
+            <Link to="/customer">使用新密码登录</Link>
+            <Link to="/customer/forgot">重新找回密码</Link>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit} className="member-recovery" noValidate>
+          <div className="member-field">
+            <label htmlFor={passwordId}>新密码</label>
+            <RevealPasswordInput
+              id={passwordId}
               value={password}
-              onChange={(event) => {
-                setPassword(event.target.value);
+              onChange={(value) => {
+                setPassword(value);
                 setFeedback(null);
               }}
+              autoComplete="new-password"
               minLength={ACCOUNT_PASSWORD_MIN_LENGTH}
               maxLength={ACCOUNT_PASSWORD_MAX_LENGTH}
               required
               autoFocus
-              className="mt-2 w-full border border-brand-line px-4 py-3 text-sm focus:border-brand-text focus:outline-none focus:ring-2 focus:ring-brand-text focus:ring-offset-2"
             />
-          </label>
-          <label className="block">
-            <span className="text-sm text-brand-text">确认新密码</span>
-            <input
-              type="password"
+          </div>
+          <div className="member-field">
+            <label htmlFor={confirmId}>确认新密码</label>
+            <RevealPasswordInput
+              id={confirmId}
               value={confirm}
-              onChange={(event) => {
-                setConfirm(event.target.value);
+              onChange={(value) => {
+                setConfirm(value);
                 setFeedback(null);
               }}
+              autoComplete="new-password"
               minLength={ACCOUNT_PASSWORD_MIN_LENGTH}
               maxLength={ACCOUNT_PASSWORD_MAX_LENGTH}
               required
-              className="mt-2 w-full border border-brand-line px-4 py-3 text-sm focus:border-brand-text focus:outline-none focus:ring-2 focus:ring-brand-text focus:ring-offset-2"
             />
-          </label>
-          <small className="block text-xs text-brand-muted">{ACCOUNT_PASSWORD_HINT}。</small>
+          </div>
+          <p className="member-note">{ACCOUNT_PASSWORD_HINT}。</p>
           <button
             type="submit"
             disabled={submitting || retryAfterSeconds > 0}
-            className="w-full bg-brand-text text-white py-3 text-sm tracking-widest hover:opacity-90 disabled:opacity-50"
+            className="account-button account-button--dark member-submit"
+            aria-busy={submitting}
           >
             {submitting
               ? '提交中…'
@@ -264,14 +258,14 @@ export default function ResetPassword() {
                 : '重置密码'}
           </button>
           {retryAfterSeconds > 0 ? (
-            <p role="alert" className="text-sm text-[#8C3F3B]">
+            <p role="alert" className="member-error">
               操作过于频繁，请在 {retryAfterSeconds} 秒后重试。
             </p>
           ) : feedback ? (
-            <p role="alert" className="text-sm text-[#8C3F3B]">{feedback}</p>
+            <p role="alert" className="member-error">{feedback}</p>
           ) : null}
         </form>
-      </div>
-    </div>
+      )}
+    </MemberGate>
   );
 }

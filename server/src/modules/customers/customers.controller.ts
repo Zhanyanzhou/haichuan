@@ -227,12 +227,18 @@ export class CustomersController {
     );
   }
 
-  /** 查询手机号当前需要的挑战等级（无副作用；仅按失败计数，与账号是否存在无关） */
+  /** 查询手机号或用户名当前需要的挑战等级（无副作用；仅按失败计数，与账号是否存在无关） */
   @Public()
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   @Get('login/challenge')
-  loginChallenge(@Query('phone') phone: string) {
-    return this.customersService.loginChallenge(phone);
+  loginChallenge(
+    @Query('phone') phone?: string,
+    @Query('username') username?: string,
+  ) {
+    if (username?.trim() && !phone?.trim()) {
+      return this.customersService.usernameLoginChallenge(username);
+    }
+    return this.customersService.loginChallenge(phone ?? '');
   }
 
   /** 一次性图形验证码（内存 5 分钟时效；点击/过期可重取） */

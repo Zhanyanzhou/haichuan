@@ -16,7 +16,7 @@ function projectFlags(profile: Profile, switches: Switches) {
   const commerceEnabled = isCustomerCommerceEnabled(profile, String(commerce));
   return {
     commerceEnabled,
-    cartEnabled: commerceEnabled,
+    cartEnabled: true,
     paymentEnabled: isPaymentGatewayTransactionsEnabled(profile, String(transactions)),
     quotationOrderingEnabled: isCustomerQuotationOrderingEnabled(profile, String(quotation)),
     refundsEnabled: isCommerceFeatureEnabled(profile, String(refunds)),
@@ -69,7 +69,7 @@ test("服务端四开关在两种发布档位的全部组合均按独立门禁�
       const flags = projectFlags(profile, switches);
       const enabled = profile === "commerce";
       expect(flags.commerceEnabled).toBe(enabled && switches[0]);
-      expect(flags.cartEnabled).toBe(flags.commerceEnabled);
+      expect(flags.cartEnabled).toBe(true);
       expect(flags.quotationOrderingEnabled).toBe(enabled && switches[1]);
       expect(flags.paymentEnabled).toBe(enabled && switches[2]);
       expect(flags.refundsEnabled).toBe(enabled && switches[3]);
@@ -78,11 +78,11 @@ test("服务端四开关在两种发布档位的全部组合均按独立门禁�
 });
 
 for (const scenario of [
-  { name: "线索型误开全部开关", profile: "lead-generation", switches: [true, true, true, true], checkout: false, cart: false },
-  { name: "交易型全部关闭", profile: "commerce", switches: [false, false, false, false], checkout: false, cart: false },
-  { name: "交易型仅开放购物车", profile: "commerce", switches: [true, true, false, false], checkout: false, cart: true },
-  { name: "交易型支付开关打开但客户交易关闭", profile: "commerce", switches: [false, true, true, true], checkout: false, cart: false },
-  { name: "交易型四开关全部开启", profile: "commerce", switches: [true, true, true, true], checkout: true, cart: true },
+  { name: "线索型误开全部开关", profile: "lead-generation", switches: [true, true, true, true], completionOpen: false },
+  { name: "交易型全部关闭", profile: "commerce", switches: [false, false, false, false], completionOpen: false },
+  { name: "交易型仅开放购物车", profile: "commerce", switches: [true, true, false, false], completionOpen: false },
+  { name: "交易型支付开关打开但客户交易关闭", profile: "commerce", switches: [false, true, true, true], completionOpen: false },
+  { name: "交易型四开关全部开启", profile: "commerce", switches: [true, true, true, true], completionOpen: true },
 ] as const) {
   test(`${scenario.name}：生产 React 与 Nginx 容器的交易路由可见性`, async ({ page }) => {
     const { flags, writes } = await attachIsolatedApi(
@@ -91,21 +91,19 @@ for (const scenario of [
     const response = await page.goto("/checkout");
     expect(response?.status()).toBe(200);
     expect(response?.headers()["x-robots-tag"]).toContain("noindex");
-    if (scenario.checkout) {
-      await expect(page).toHaveURL(/\/checkout$/);
+    await expect(page).toHaveURL(/\/checkout$/);
+    if (scenario.completionOpen) {
       await expect(page.getByRole("button", { name: /提交订单并支付/ })).toBeVisible();
+      expect(flags.commerceEnabled).toBe(true);
       expect(flags.paymentEnabled).toBe(true);
     } else {
-      await expect(page).toHaveURL(/\/contact$/);
+      await expect(page.getByRole("button", { name: "暂时不能提交订单" })).toBeDisabled();
+      await expect(page.getByText("线上成交尚未开放")).toBeVisible();
       await expect(page.getByRole("button", { name: /提交订单并支付/ })).toHaveCount(0);
     }
     await page.goto("/cart");
-    if (scenario.cart) {
-      await expect(page).toHaveURL(/\/cart$/);
-      await expect(page.getByText("隔离验收作品")).toBeVisible();
-    } else {
-      await expect(page).toHaveURL(/\/contact$/);
-    }
+    await expect(page).toHaveURL(/\/cart$/);
+    await expect(page.getByText("隔离验收作品")).toBeVisible();
     expect(writes).toEqual([]);
   });
 }

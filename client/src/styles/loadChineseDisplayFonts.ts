@@ -9,6 +9,7 @@ export function scheduleChineseDisplayFonts() {
     const load = () => {
       void import("@fontsource/noto-serif-sc/300.css").catch(() => undefined);
       void import("@fontsource/noto-serif-sc/400.css").catch(() => undefined);
+      void import("@fontsource/noto-serif-sc/500.css").catch(() => undefined);
     };
     if (typeof window.requestIdleCallback === "function") {
       window.requestIdleCallback(load, { timeout: 2000 });

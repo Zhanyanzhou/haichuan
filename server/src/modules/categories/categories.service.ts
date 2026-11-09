@@ -3,6 +3,7 @@ import { Prisma, type Category } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { StaffPrincipal } from '../../common/security/authenticated-principal';
 import { CreateCategoryDto, UpdateCategoryDto } from './dto/category.dto';
+import { CATEGORY_SIZE_RULES, readCategoryPublicationRules } from './category-publication-rules';
 import {
   customerFacingProductWhereForVisibilities,
   staffWorkingProductWhere,
@@ -25,6 +26,38 @@ type CategoryActor = Pick<StaffPrincipal, 'id' | 'sessionFamilyId'>;
 type CategoryDb = Prisma.TransactionClient | PrismaService;
 const UNCATEGORIZED_SLUG = 'system-uncategorized';
 const UNCATEGORIZED_NAME = '未分类';
+
+const PUBLIC_CATEGORY_FIELDS = {
+  id: true,
+  name: true,
+  slug: true,
+  level: true,
+  parentId: true,
+  icon: true,
+  coverImage: true,
+  sortOrder: true,
+  seoTitle: true,
+  seoDesc: true,
+  seoKeywords: true,
+  isActive: true,
+  deletedAt: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.CategorySelect;
+
+function normalizePublicationRules(value: unknown) {
+  const rules = readCategoryPublicationRules(value);
+  if (value != null && (!Array.isArray(value) || rules.length !== value.length)) {
+    throw new BadRequestException('请选择有效且不重复的商品发布规则');
+  }
+  if (rules.includes('GROUP_ONLY') && rules.length > 1) {
+    throw new BadRequestException('仅用于组织的分类不能同时设置商品资料要求');
+  }
+  if (CATEGORY_SIZE_RULES.filter((rule) => rules.includes(rule)).length > 1) {
+    throw new BadRequestException('请选择一种适用的尺寸要求');
+  }
+  return rules;
+}
 
 @Injectable()
 export class CategoriesService {
@@ -58,10 +91,12 @@ export class CategoriesService {
     return this.prisma.category.findMany({
       where: { isActive: true, deletedAt: null },
       orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
-      include: {
+      select: {
+        ...PUBLIC_CATEGORY_FIELDS,
         children: {
           where: { isActive: true, deletedAt: null },
           orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+          select: PUBLIC_CATEGORY_FIELDS,
         },
       },
     });
@@ -72,18 +107,22 @@ export class CategoriesService {
     return this.prisma.category.findMany({
       where: { level: 1, ...active },
       orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
-      include: {
+      select: {
+        ...PUBLIC_CATEGORY_FIELDS,
         children: {
           where: active,
           orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
-          include: {
+          select: {
+            ...PUBLIC_CATEGORY_FIELDS,
             children: {
               where: active,
               orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
-              include: {
+              select: {
+                ...PUBLIC_CATEGORY_FIELDS,
                 children: {
                   where: active,
                   orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+                  select: PUBLIC_CATEGORY_FIELDS,
                 },
               },
             },
@@ -260,6 +299,10 @@ export class CategoriesService {
       throw new BadRequestException('启用状态格式错误');
     }
 
+    const publicationRules = data.publicationRules === undefined
+      ? undefined
+      : normalizePublicationRules(data.publicationRules);
+
     return {
       name,
       slug,
@@ -267,6 +310,9 @@ export class CategoriesService {
       coverImage: data.coverImage === undefined ? undefined : String(data.coverImage).trim(),
       sortOrder,
       isActive: data.isActive,
+      ...(publicationRules && {
+        publicationRules: publicationRules.length ? publicationRules : Prisma.DbNull,
+      }),
     };
   }
 
@@ -339,10 +385,23 @@ export class CategoriesService {
   async update(id: number, data: UpdateCategoryDto, actor: CategoryActor) {
     return this.prisma.$transaction(async (tx) => {
       await this.lockAuthorizedActor(tx, actor);
+      if (data.publicationRules !== undefined) {
+        if (data.expectedPublicationRules === undefined) {
+          throw new BadRequestException('请重新加载分类后再保存商品发布规则');
+        }
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM categories WHERE id = ${id} FOR UPDATE`);
+      }
       const category = await tx.category.findUnique({ where: { id } });
       if (!category) throw new NotFoundException('类目不存在');
       if (category.slug === UNCATEGORIZED_SLUG) {
         throw new BadRequestException('不能编辑系统「未分类」');
+      }
+      if (
+        data.publicationRules !== undefined
+        && normalizePublicationRules(data.expectedPublicationRules).join(',')
+          !== readCategoryPublicationRules(category.publicationRules).join(',')
+      ) {
+        throw new ConflictException('商品发布规则已被其他操作更新，请重新加载分类后再试');
       }
       if (data.level !== undefined && Number(data.level) !== category.level) {
         throw new BadRequestException('不支持调整类目层级');
@@ -466,13 +525,13 @@ export class CategoriesService {
       if (categories.some((category) => subtreeSet.has(category.id) && category.slug === UNCATEGORIZED_SLUG)) {
         throw new BadRequestException('不能删除系统「未分类」');
       }
-      const productCount = await tx.product.count({
-        where: { categoryId: { in: subtree } },
-      });
+      const sourceProducts = { categoryId: { in: subtree } };
+      const productCount = await tx.product.count({ where: sourceProducts });
       let movedProductCount = 0;
       let uncategorizedCategoryId: number | undefined;
       if (productCount > 0) {
         let destinationId = moveTo;
+        let requireUnpublished = false;
         if (destinationId === undefined) {
           const fallback = await tx.category.upsert({
             where: { slug: UNCATEGORIZED_SLUG },
@@ -484,13 +543,29 @@ export class CategoriesService {
             throw new ConflictException('系统「未分类」不可用，分类未删除');
           }
           destinationId = uncategorizedCategoryId = fallback.id;
-        } else if (subtreeSet.has(destinationId) || !categories.some((category) => category.id === destinationId)) {
-          throw new BadRequestException('要改去的分类不存在，或就在即将删除的分类里');
+        } else {
+          if (subtreeSet.has(destinationId)) {
+            throw new BadRequestException('要改去的分类不存在，或就在即将删除的分类里');
+          }
+          // 锁定目标分类的当前规则，避免按事务较早的分类树快照绕过规则变更。
+          const [destination] = await tx.$queryRaw<Array<{ publicationRules: Prisma.JsonValue }>>(
+            Prisma.sql`SELECT publication_rules AS publicationRules FROM categories
+              WHERE id = ${destinationId} AND is_active = true AND deleted_at IS NULL
+                AND slug <> ${UNCATEGORIZED_SLUG} FOR SHARE`,
+          );
+          if (!destination) throw new BadRequestException('请选择已启用且不在删除范围内的目标分类');
+          const rules = readCategoryPublicationRules(destination.publicationRules);
+          if (rules.includes('GROUP_ONLY')) throw new BadRequestException('仅用于组织的分类不能接收商品');
+          requireUnpublished = rules.length > 0;
         }
         const moved = await tx.product.updateMany({
-          where: { categoryId: { in: subtree } },
+          // UPDATE 使用当前状态，拒绝刚被其他操作上架的商品一并改类目。
+          where: requireUnpublished ? { ...sourceProducts, status: { not: 'PUBLISHED' } } : sourceProducts,
           data: { categoryId: destinationId },
         });
+        if (requireUnpublished && moved.count !== productCount) {
+          throw new ConflictException('仍有已上架商品或商品归属已变化，请先在商品管理调整分类，再删除');
+        }
         movedProductCount = moved.count;
       }
 

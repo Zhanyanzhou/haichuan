@@ -1,3 +1,16 @@
+export type CategoryPublicationRule =
+  | "GROUP_ONLY"
+  | "RING_SIZE"
+  | "INNER_DIAMETER"
+  | "CHAIN_LENGTH"
+  | "PRECIOUS_METAL"
+  | "GOLD_WEIGHT"
+  | "GEMSTONE"
+  | "GEM_DISCLOSURE"
+  | "GEM_CARAT"
+  | "GEM_GRADING"
+  | "CERTIFICATE";
+
 export interface Category {
   id: number;
   name: string;
@@ -8,6 +21,7 @@ export interface Category {
   coverImage?: string;
   sortOrder: number;
   isActive?: boolean;
+  publicationRules?: CategoryPublicationRule[] | null;
   _count?: { children: number; products: number };
   children?: Category[];
 }
@@ -22,6 +36,8 @@ export interface CategoryInput {
   icon?: string;
   coverImage?: string;
   level?: number;
+  publicationRules?: CategoryPublicationRule[] | null;
+  expectedPublicationRules?: CategoryPublicationRule[] | null;
 }
 
 /** 批量排序的单条项（仅同级 sortOrder 调整）。 */
@@ -126,6 +142,16 @@ export interface GemInfo {
   color?: string;
   cut?: string;
   quantity?: number;
+  settingMaterial?: MaterialType;
+  origin?: string;
+  treatment?: string;
+  /** 以下字段保存在既有 gemInfo JSON 中，不新增数据列。前台只展示已填写的值。 */
+  brand?: string;
+  collection?: string;
+  style?: string;
+  materialNote?: string;
+  metalColor?: string;
+  measurements?: Record<string, string>;
 }
 
 export interface ProductDetailBlock {

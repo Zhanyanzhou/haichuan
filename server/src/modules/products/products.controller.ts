@@ -39,6 +39,7 @@ import { RolesGuard } from "../../common/guards/roles.guard";
 import {
   CreateProductDto,
   UpdateProductDto,
+  CorrectProductCodeDto,
   CreateCertificateDto,
   UpdateCertificateDto,
   CreateSkuDto,
@@ -304,6 +305,18 @@ export class ProductsController {
   @ApiOperation({ summary: "编辑产品" })
   async update(@Req() request: StaffRequest, @Param("id") id: string, @Body() dto: UpdateProductDto) {
     return this.productsService.update(+id, dto, request.user);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post(":id/correct-code")
+  @ApiOperation({ summary: "更正已保存商品的款号" })
+  correctCode(
+    @Req() request: StaffRequest,
+    @Param("id", ParseIntPipe) id: number,
+    @Body() dto: CorrectProductCodeDto,
+  ) {
+    return this.productsService.correctCode(id, dto.code, request.user);
   }
 
   @UseGuards(JwtAuthGuard)

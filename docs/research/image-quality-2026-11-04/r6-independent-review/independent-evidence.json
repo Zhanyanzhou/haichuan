@@ -1,0 +1,529 @@
+{
+  "generatedAt": "2026-11-04T17:38:47.127Z",
+  "node": "v22.23.2",
+  "port": 5191,
+  "proxyToUserApi": false,
+  "mockScope": "失败态只拦截本任务试样的浏览器请求，证明前端回退。不是真实网关，也不是数据库鉴权。解码尺寸是诊断服务按请求宽度生成的 PNG，真实网关解码沿用第五轮 closure。",
+  "listenersBefore": [
+    "  TCP    127.0.0.1:3000         0.0.0.0:0              LISTENING       65740",
+    "  TCP    127.0.0.1:5173         0.0.0.0:0              LISTENING       53468"
+  ],
+  "listenersAfter": [
+    "  TCP    127.0.0.1:3000         0.0.0.0:0              LISTENING       65740",
+    "  TCP    127.0.0.1:5173         0.0.0.0:0              LISTENING       53468"
+  ],
+  "userPortsUnchanged": true,
+  "failures": [
+    {
+      "name": "roundtrip-restored-derived",
+      "error": "TimeoutError: page.waitForFunction: Timeout 30000ms exceeded."
+    },
+    {
+      "name": "roundtrip-original-fails-on-return",
+      "error": "TimeoutError: page.waitForFunction: Timeout 30000ms exceeded."
+    }
+  ],
+  "cases": [
+    {
+      "name": "desktop-1920-dpr2",
+      "ok": true,
+      "hero": {
+        "mediaWidth": 1920,
+        "mediaHeight": 1080,
+        "imgSizes": "(max-width: 1023px) 100vw, calc(max(100vw, calc(max(620px, 100svh) * 1.7778)))",
+        "sourceSizes": "100vw",
+        "delivery": "derived",
+        "currentPath": "/uploads/page-assets/r6-desktop-a.png",
+        "requestWidth": 3840,
+        "naturalWidth": 1920,
+        "naturalHeight": 1080,
+        "placeholder": false
+      },
+      "file": {
+        "path": "/uploads/page-assets/r6-desktop-a.png",
+        "width": "3840",
+        "status": 200,
+        "generatedWidth": 3840,
+        "pngWidth": 3840,
+        "pngHeight": 2160
+      }
+    },
+    {
+      "name": "phone-390-dpr3",
+      "ok": true,
+      "hero": {
+        "mediaWidth": 390,
+        "mediaHeight": 487.5,
+        "imgSizes": "(max-width: 1023px) 100vw, calc(max(100vw, calc(max(620px, 100svh) * 1.7778)))",
+        "sourceSizes": "100vw",
+        "delivery": "derived",
+        "currentPath": "/uploads/page-assets/r6-mobile-a.png",
+        "requestWidth": 1200,
+        "naturalWidth": 390,
+        "naturalHeight": 487,
+        "placeholder": false
+      },
+      "file": {
+        "path": "/uploads/page-assets/r6-mobile-a.png",
+        "width": "1200",
+        "status": 200,
+        "generatedWidth": 1200,
+        "pngWidth": 1200,
+        "pngHeight": 1500
+      }
+    },
+    {
+      "name": "phone-767-dpr2",
+      "ok": true,
+      "hero": {
+        "mediaWidth": 767,
+        "mediaHeight": 958.75,
+        "imgSizes": "(max-width: 1023px) 100vw, calc(max(100vw, calc(max(620px, 100svh) * 1.7778)))",
+        "sourceSizes": "100vw",
+        "delivery": "derived",
+        "currentPath": "/uploads/page-assets/r6-mobile-a.png",
+        "requestWidth": 1680,
+        "naturalWidth": 767,
+        "naturalHeight": 958,
+        "placeholder": false
+      },
+      "file": {
+        "path": "/uploads/page-assets/r6-mobile-a.png",
+        "width": "1680",
+        "status": 200,
+        "generatedWidth": 1680,
+        "pngWidth": 1680,
+        "pngHeight": 2100
+      }
+    },
+    {
+      "name": "tablet-768-dpr2",
+      "ok": true,
+      "hero": {
+        "mediaWidth": 768,
+        "mediaHeight": 432,
+        "imgSizes": "(max-width: 1023px) 100vw, calc(max(100vw, calc(max(620px, 100svh) * 1.7778)))",
+        "sourceSizes": "100vw",
+        "delivery": "derived",
+        "currentPath": "/uploads/page-assets/r6-desktop-a.png",
+        "requestWidth": 1680,
+        "naturalWidth": 768,
+        "naturalHeight": 432,
+        "placeholder": false
+      },
+      "file": {
+        "path": "/uploads/page-assets/r6-desktop-a.png",
+        "width": "1680",
+        "status": 200,
+        "generatedWidth": 1680,
+        "pngWidth": 1680,
+        "pngHeight": 945
+      }
+    },
+    {
+      "name": "tablet-1023-dpr2",
+      "ok": true,
+      "hero": {
+        "mediaWidth": 1023,
+        "mediaHeight": 575.44,
+        "imgSizes": "(max-width: 1023px) 100vw, calc(max(100vw, calc(max(620px, 100svh) * 1.7778)))",
+        "sourceSizes": "100vw",
+        "delivery": "derived",
+        "currentPath": "/uploads/page-assets/r6-desktop-a.png",
+        "requestWidth": 2400,
+        "naturalWidth": 1023,
+        "naturalHeight": 575,
+        "placeholder": false
+      },
+      "file": {
+        "path": "/uploads/page-assets/r6-desktop-a.png",
+        "width": "2400",
+        "status": 200,
+        "generatedWidth": 2400,
+        "pngWidth": 2400,
+        "pngHeight": 1350
+      }
+    },
+    {
+      "name": "desktop-1024-dpr2",
+      "ok": true,
+      "hero": {
+        "mediaWidth": 1024,
+        "mediaHeight": 1366,
+        "imgSizes": "(max-width: 1023px) 100vw, calc(max(100vw, calc(max(620px, 100svh) * 1.7778)))",
+        "sourceSizes": "100vw",
+        "delivery": "derived",
+        "currentPath": "/uploads/page-assets/r6-desktop-a.png",
+        "requestWidth": 3840,
+        "naturalWidth": 2428,
+        "naturalHeight": 1366,
+        "placeholder": false
+      },
+      "file": {
+        "path": "/uploads/page-assets/r6-desktop-a.png",
+        "width": "3840",
+        "status": 200,
+        "generatedWidth": 3840,
+        "pngWidth": 3840,
+        "pngHeight": 2160
+      }
+    },
+    {
+      "name": "cover-1200x1800-dpr2",
+      "ok": true,
+      "hero": {
+        "mediaWidth": 1200,
+        "mediaHeight": 1800,
+        "imgSizes": "(max-width: 1023px) 100vw, calc(max(100vw, calc(max(620px, 100svh) * 1.7778)))",
+        "sourceSizes": "100vw",
+        "delivery": "derived",
+        "currentPath": "/uploads/page-assets/r6-desktop-a.png",
+        "requestWidth": 3840,
+        "naturalWidth": 3200,
+        "naturalHeight": 1800,
+        "placeholder": false
+      },
+      "file": {
+        "path": "/uploads/page-assets/r6-desktop-a.png",
+        "width": "3840",
+        "status": 200,
+        "generatedWidth": 3840,
+        "pngWidth": 3840,
+        "pngHeight": 2160
+      }
+    },
+    {
+      "name": "resize-scroll-stable",
+      "ok": true,
+      "stability": {
+        "beforeScroll": {
+          "mediaWidth": 1920,
+          "mediaHeight": 1080,
+          "imgSizes": "(max-width: 1023px) 100vw, calc(max(100vw, calc(max(620px, 100svh) * 1.7778)))",
+          "sourceSizes": "100vw",
+          "delivery": "derived",
+          "currentPath": "/uploads/page-assets/r6-desktop-a.png",
+          "requestWidth": 3840,
+          "naturalWidth": 1920,
+          "naturalHeight": 1080,
+          "placeholder": false
+        },
+        "afterScroll": {
+          "mediaWidth": 1920,
+          "mediaHeight": 1080,
+          "imgSizes": "(max-width: 1023px) 100vw, calc(max(100vw, calc(max(620px, 100svh) * 1.7778)))",
+          "sourceSizes": "100vw",
+          "delivery": "derived",
+          "currentPath": "/uploads/page-assets/r6-desktop-a.png",
+          "requestWidth": 3840,
+          "naturalWidth": 1920,
+          "naturalHeight": 1080,
+          "placeholder": false
+        },
+        "phone": {
+          "mediaWidth": 390,
+          "mediaHeight": 487.5,
+          "imgSizes": "(max-width: 1023px) 100vw, calc(max(100vw, calc(max(620px, 100svh) * 1.7778)))",
+          "sourceSizes": "100vw",
+          "delivery": "derived",
+          "currentPath": "/uploads/page-assets/r6-mobile-a.png",
+          "requestWidth": 800,
+          "naturalWidth": 390,
+          "naturalHeight": 487,
+          "placeholder": false
+        },
+        "wide": {
+          "mediaWidth": 1024,
+          "mediaHeight": 1366,
+          "imgSizes": "(max-width: 1023px) 100vw, calc(max(100vw, calc(max(620px, 100svh) * 1.7778)))",
+          "sourceSizes": "100vw",
+          "delivery": "derived",
+          "currentPath": "/uploads/page-assets/r6-desktop-a.png",
+          "requestWidth": 3840,
+          "naturalWidth": 2428,
+          "naturalHeight": 1366,
+          "placeholder": false
+        },
+        "phoneAgain": {
+          "mediaWidth": 390,
+          "mediaHeight": 487.5,
+          "imgSizes": "(max-width: 1023px) 100vw, calc(max(100vw, calc(max(620px, 100svh) * 1.7778)))",
+          "sourceSizes": "100vw",
+          "delivery": "derived",
+          "currentPath": "/uploads/page-assets/r6-mobile-a.png",
+          "requestWidth": 800,
+          "naturalWidth": 390,
+          "naturalHeight": 487,
+          "placeholder": false
+        }
+      }
+    },
+    {
+      "name": "fallback-phone",
+      "ok": true,
+      "result": {
+        "hero": {
+          "mediaWidth": 390,
+          "mediaHeight": 487.5,
+          "imgSizes": null,
+          "sourceSizes": null,
+          "delivery": "original",
+          "currentPath": "/uploads/page-assets/r6-mobile-a.png",
+          "requestWidth": null,
+          "naturalWidth": 2000,
+          "naturalHeight": 2500,
+          "placeholder": false
+        },
+        "swapped": {
+          "mediaWidth": 390,
+          "mediaHeight": 487.5,
+          "imgSizes": "(max-width: 1023px) 100vw, calc(max(100vw, calc(max(620px, 100svh) * 1.7778)))",
+          "sourceSizes": "100vw",
+          "delivery": "derived",
+          "currentPath": "/uploads/page-assets/r6-mobile-b.png",
+          "requestWidth": 1200,
+          "naturalWidth": 390,
+          "naturalHeight": 487,
+          "placeholder": false
+        },
+        "traffic": [
+          {
+            "path": "/uploads/page-assets/r6-mobile-a.png",
+            "width": "1200",
+            "status": 404,
+            "generatedWidth": null,
+            "pngWidth": null,
+            "pngHeight": null
+          },
+          {
+            "path": "/uploads/page-assets/r6-mobile-a.png",
+            "width": null,
+            "status": 200,
+            "generatedWidth": 2000,
+            "pngWidth": 2000,
+            "pngHeight": 2500
+          },
+          {
+            "path": "/uploads/page-assets/r6-mobile-b.png",
+            "width": "1200",
+            "status": 200,
+            "generatedWidth": 1200,
+            "pngWidth": 1200,
+            "pngHeight": 1500
+          }
+        ]
+      }
+    },
+    {
+      "name": "fallback-desktop",
+      "ok": true,
+      "result": {
+        "hero": {
+          "mediaWidth": 1920,
+          "mediaHeight": 1080,
+          "imgSizes": null,
+          "sourceSizes": null,
+          "delivery": "original",
+          "currentPath": "/uploads/page-assets/r6-desktop-a.png",
+          "requestWidth": null,
+          "naturalWidth": 3840,
+          "naturalHeight": 2160,
+          "placeholder": false
+        },
+        "swapped": {
+          "mediaWidth": 1920,
+          "mediaHeight": 1080,
+          "imgSizes": "(max-width: 1023px) 100vw, calc(max(100vw, calc(max(620px, 100svh) * 1.7778)))",
+          "sourceSizes": "100vw",
+          "delivery": "derived",
+          "currentPath": "/uploads/page-assets/r6-desktop-b.png",
+          "requestWidth": 3840,
+          "naturalWidth": 1920,
+          "naturalHeight": 1080,
+          "placeholder": false
+        },
+        "traffic": [
+          {
+            "path": "/uploads/page-assets/r6-desktop-a.png",
+            "width": "3840",
+            "status": 404,
+            "generatedWidth": null,
+            "pngWidth": null,
+            "pngHeight": null
+          },
+          {
+            "path": "/uploads/page-assets/r6-desktop-a.png",
+            "width": null,
+            "status": 200,
+            "generatedWidth": 3840,
+            "pngWidth": 3840,
+            "pngHeight": 2160
+          },
+          {
+            "path": "/uploads/page-assets/r6-desktop-b.png",
+            "width": "3840",
+            "status": 200,
+            "generatedWidth": 3840,
+            "pngWidth": 3840,
+            "pngHeight": 2160
+          }
+        ]
+      }
+    },
+    {
+      "name": "fallback-both",
+      "ok": true,
+      "phone": {
+        "hero": {
+          "mediaWidth": 390,
+          "mediaHeight": 487.5,
+          "imgSizes": null,
+          "sourceSizes": null,
+          "delivery": null,
+          "currentPath": null,
+          "requestWidth": null,
+          "naturalWidth": 0,
+          "naturalHeight": 0,
+          "placeholder": true
+        },
+        "traffic": [
+          {
+            "path": "/uploads/page-assets/r6-mobile-a.png",
+            "width": "800",
+            "status": 404,
+            "generatedWidth": null,
+            "pngWidth": null,
+            "pngHeight": null
+          },
+          {
+            "path": "/uploads/page-assets/r6-mobile-a.png",
+            "width": null,
+            "status": 404,
+            "generatedWidth": null,
+            "pngWidth": null,
+            "pngHeight": null
+          }
+        ]
+      },
+      "desktop": {
+        "hero": {
+          "mediaWidth": 1280,
+          "mediaHeight": 800,
+          "imgSizes": null,
+          "sourceSizes": null,
+          "delivery": null,
+          "currentPath": null,
+          "requestWidth": null,
+          "naturalWidth": 0,
+          "naturalHeight": 0,
+          "placeholder": true
+        },
+        "traffic": [
+          {
+            "path": "/uploads/page-assets/r6-desktop-a.png",
+            "width": "2880",
+            "status": 404,
+            "generatedWidth": null,
+            "pngWidth": null,
+            "pngHeight": null
+          },
+          {
+            "path": "/uploads/page-assets/r6-desktop-a.png",
+            "width": null,
+            "status": 404,
+            "generatedWidth": null,
+            "pngWidth": null,
+            "pngHeight": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "edit-preview",
+      "ok": true,
+      "edit": {
+        "hero": {
+          "mediaWidth": 1280,
+          "mediaHeight": 1200,
+          "imgSizes": null,
+          "sourceSizes": null,
+          "delivery": "editor",
+          "currentPath": "http://127.0.0.1:5191/9c82770c-dcaf-4234-b668-3f4a8a01c7ea",
+          "requestWidth": null,
+          "naturalWidth": 32,
+          "naturalHeight": 18,
+          "placeholder": false
+        },
+        "current": "blob:http://127.0.0.1:5191/9c82770c-dcaf-4234-b668-3f4a8a01c7ea",
+        "traffic": [
+          {
+            "path": "/api/upload/media/preview-by-storage-key",
+            "width": null,
+            "status": 200,
+            "generatedWidth": null,
+            "pngWidth": 32,
+            "pngHeight": 18
+          },
+          {
+            "path": "/api/upload/media/preview-by-storage-key",
+            "width": null,
+            "status": 200,
+            "generatedWidth": null,
+            "pngWidth": 32,
+            "pngHeight": 18
+          }
+        ]
+      },
+      "editFail": {
+        "hero": {
+          "mediaWidth": 1280,
+          "mediaHeight": 1200,
+          "imgSizes": null,
+          "sourceSizes": null,
+          "delivery": null,
+          "currentPath": null,
+          "requestWidth": null,
+          "naturalWidth": 0,
+          "naturalHeight": 0,
+          "placeholder": false
+        },
+        "traffic": [
+          {
+            "path": "/api/upload/media/preview-by-storage-key",
+            "width": null,
+            "status": 404,
+            "generatedWidth": null,
+            "pngWidth": null,
+            "pngHeight": null
+          },
+          {
+            "path": "/api/upload/media/preview-by-storage-key",
+            "width": null,
+            "status": 404,
+            "generatedWidth": null,
+            "pngWidth": null,
+            "pngHeight": null
+          },
+          {
+            "path": "/api/upload/media/preview-by-storage-key",
+            "width": null,
+            "status": 404,
+            "generatedWidth": null,
+            "pngWidth": null,
+            "pngHeight": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "roundtrip-restored-derived",
+      "ok": false,
+      "error": "TimeoutError: page.waitForFunction: Timeout 30000ms exceeded."
+    },
+    {
+      "name": "roundtrip-original-fails-on-return",
+      "ok": false,
+      "error": "TimeoutError: page.waitForFunction: Timeout 30000ms exceeded."
+    }
+  ]
+}

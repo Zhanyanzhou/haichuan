@@ -17,7 +17,7 @@ export const TEMPLATE_TYPE_SCALE = {
   /** 区块标题 H2：32 / 24。 */
   h2: { desktop: 32, mobile: 24, weight: 400, lineHeight: 1.35, fontRole: "heading" },
   /** 系列名 / 副标题：20 / 18。 */
-  subtitle: { desktop: 20, mobile: 18, weight: 400, lineHeight: 1.4, fontRole: "body" },
+  subtitle: { desktop: 20, mobile: 18, weight: 400, lineHeight: 1.4, fontRole: "heading" },
   /** 正文：16 / 15。行动槽位标签同用正文层级——UI_GUIDE 未设独立的按钮层级。 */
   body: { desktop: 16, mobile: 15, weight: 400, lineHeight: 1.75, fontRole: "body" },
   /** 辅助：13 / 12。价格与库存不用这一级。 */

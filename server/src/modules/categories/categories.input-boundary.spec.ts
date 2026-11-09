@@ -71,3 +71,18 @@ test('分类更新 DTO 拒绝空字段 非法父级和超长媒体字段', async
     ),
   );
 });
+
+test('商品发布规则接受已知选项和显式清空，并拒绝非数组、未知和重复选项', async () => {
+  const metadata = { type: 'body' as const, metatype: UpdateCategoryDto };
+  const rules = ['RING_SIZE', 'CERTIFICATE', 'GEM_DISCLOSURE', 'GEM_CARAT', 'GEM_GRADING'];
+  const result = await pipe.transform(
+    { publicationRules: rules, expectedPublicationRules: null },
+    metadata,
+  );
+  assert.deepEqual(result.publicationRules, rules);
+  assert.equal(result.expectedPublicationRules, null);
+  assert.equal((await pipe.transform({ publicationRules: null }, metadata)).publicationRules, null);
+  for (const publicationRules of ['RING_SIZE', ['RING_SIZE', 'RING_SIZE'], ['UNKNOWN']]) {
+    await assert.rejects(pipe.transform({ publicationRules }, metadata));
+  }
+});

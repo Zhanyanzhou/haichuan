@@ -63,7 +63,7 @@ test("商品发布页不加载运费模板，也不提供物流入口", async ({
   });
 
   await page.goto("/admin/products/new");
-  await expect(page.getByRole("heading", { name: "图文描述" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "图文详情" })).toBeVisible();
   await expect(page.getByRole("button", { name: "物流服务" })).toHaveCount(0);
   await expect(page.getByRole("dialog", { name: "新建运费模板" })).toHaveCount(0);
   expect(listRequests).toBe(0);

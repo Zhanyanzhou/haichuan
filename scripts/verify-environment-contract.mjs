@@ -319,6 +319,7 @@ const internalServerKeys = new Set([
   "BACKUP_DIR",
   "BACKUP_HEALTH_GRACE_SECONDS",
 ]);
+const localOnlyServerKeys = new Set(["DEV_SMS_INBOX_ENABLED"]);
 const operationalKeys = new Set([
   "MYSQL_ROOT_PASSWORD",
   "MYSQL_PASSWORD",
@@ -399,9 +400,12 @@ function requireSubset(label, expected, actual) {
 
 requireSubset(
   "server runtime 未显式注入到 compose",
-  serverRuntimeKeys,
+  new Set([...serverRuntimeKeys].filter((key) => !localOnlyServerKeys.has(key))),
   serverComposeKeys,
 );
+for (const key of localOnlyServerKeys) {
+  if (serverComposeKeys.has(key)) errors.push(`本机开发配置禁止注入到 compose: ${key}`);
+}
 requireSubset(
   "server runtime 未记录在 .env.example 或 compose 内部固定值",
   new Set([...serverRuntimeKeys].filter((key) => !internalServerKeys.has(key))),

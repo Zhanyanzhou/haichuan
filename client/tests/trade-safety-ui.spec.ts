@@ -74,9 +74,8 @@ test.describe('客户咨询完整分页', () => {
       return respond({ list: [], total: 0 });
     });
 
-    await page.goto('/customer');
-    const summary = page.getByLabel('服务概览');
-    await expect(summary.getByText('04', { exact: true })).toBeVisible();
+    await page.goto('/customer?section=appointments');
+    await expect(page.locator('#my-appointments').getByText('共 4 条预约咨询')).toBeVisible();
     await expect(page.getByText('第一页预约 1')).toBeVisible();
     await page.getByLabel('预约咨询分页').locator('.ant-pagination-item-2').click();
     await expect(page.getByText('第二页祖母绿预约')).toBeVisible();
@@ -2828,7 +2827,7 @@ test.describe('客户标准零售使用微信在线支付主链', () => {
       return respond([]);
     });
     await installCustomerSession(page, { name: '支付竞态客户' });
-    await page.goto('/customer');
+    await page.goto('/customer?section=orders');
 
     const payButtons = page.getByRole('button', { name: '继续微信支付' });
     await payButtons.nth(0).click();
@@ -2941,7 +2940,7 @@ test.describe('客户中心展示真实履约、售后与退款状态', () => {
     test(`${viewport.name}订单卡展示服务状态与可展开时间线`, async ({ page }) => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await mockCustomerTradeTimeline(page);
-      await page.goto('/customer');
+      await page.goto('/customer?section=orders');
 
       await expect(page.getByText('履约 · 待拣货')).toBeVisible();
       await expect(page.getByText('售后 · 时间线测试戒指 · 退款 · 已通过')).toBeVisible();
@@ -2954,7 +2953,7 @@ test.describe('客户中心展示真实履约、售后与退款状态', () => {
   test('订单物流轨迹可展开、展示渠道事实并收起', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await mockCustomerTradeTimeline(page, { withTracking: true });
-    await page.goto('/customer');
+    await page.goto('/customer?section=orders');
 
     await page.getByRole('button', { name: '查看轨迹' }).click();
     await expect(page.getByText('已签收 · 顺丰速运')).toBeVisible();
@@ -2973,7 +2972,7 @@ test.describe('客户中心展示真实履约、售后与退款状态', () => {
         withTracking: true,
         trackingFailures: 1,
       });
-      await page.goto('/customer');
+      await page.goto('/customer?section=orders');
 
       await page.getByRole('button', { name: '查看轨迹' }).click();
       await expect(page.getByRole('alert').filter({
@@ -3041,7 +3040,7 @@ test.describe('客户中心展示真实履约、售后与退款状态', () => {
       return respond(null);
     });
 
-    await page.goto('/customer');
+    await page.goto('/customer?section=orders');
     const trackingButtons = page.getByRole('button', { name: '查看轨迹' });
     await trackingButtons.nth(0).click();
     await trackingButtons.nth(0).click();
@@ -3175,7 +3174,7 @@ test.describe('客户订单恢复状态与完整订单入口（确定性 UI）',
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await installCustomerSession(page, { id: 27, name: '订单恢复验收客户' });
       await mockCustomerOrderRecovery(page);
-      await page.goto('/customer');
+      await page.goto('/customer?section=orders');
 
       await expect(page.getByText('较早恢复订单胸针', { exact: true })).toHaveCount(0);
       await expect(page.getByText(/当前责任：支付渠道与海川财务.*系统会继续查询渠道结果/)).toBeVisible();
@@ -3358,7 +3357,7 @@ test.describe('客户完成订单评价（先审后展）', () => {
   test('校验评价内容、上传晒单图并提交审核', async ({ page }) => {
     const mock = await mockCustomerReview(page);
     await page.setViewportSize({ width: 1280, height: 900 });
-    await page.goto('/customer');
+    await page.goto('/customer?section=orders');
 
     await page.getByRole('button', { name: '评价作品' }).click();
     const dialog = page.getByRole('dialog', { name: '评价作品' });
@@ -3390,7 +3389,7 @@ test.describe('客户完成订单评价（先审后展）', () => {
   test('提交冲突保留输入并允许客户重试', async ({ page }) => {
     const mock = await mockCustomerReview(page, { firstReviewFails: true });
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('/customer');
+    await page.goto('/customer?section=orders');
 
     await page.getByRole('button', { name: '评价作品' }).click();
     const dialog = page.getByRole('dialog', { name: '评价作品' });
@@ -3407,7 +3406,7 @@ test.describe('客户完成订单评价（先审后展）', () => {
 
   test('晒单图已写入但响应丢失时只读核验且不重复上传', async ({ page }) => {
     const mock = await mockCustomerReview(page, { firstUploadCommitsButFails: true });
-    await page.goto('/customer');
+    await page.goto('/customer?section=orders');
     await page.getByRole('button', { name: '评价作品' }).click();
     const dialog = page.getByRole('dialog', { name: '评价作品' });
     await dialog.locator('input[type="file"]').setInputFiles({
@@ -3422,7 +3421,7 @@ test.describe('客户完成订单评价（先审后展）', () => {
 
   test('评价已提交但响应丢失时只读核验成功且不重复 POST', async ({ page }) => {
     const mock = await mockCustomerReview(page, { firstReviewCommitsButFails: true });
-    await page.goto('/customer');
+    await page.goto('/customer?section=orders');
     await page.getByRole('button', { name: '评价作品' }).click();
     const dialog = page.getByRole('dialog', { name: '评价作品' });
     await dialog
@@ -3445,7 +3444,7 @@ test.describe('客户完成订单评价（先审后展）', () => {
       firstReviewCommitsButFails: true,
       recoveryFingerprintMismatch: true,
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=orders');
     await page.getByRole('button', { name: '评价作品' }).click();
     const dialog = page.getByRole('dialog', { name: '评价作品' });
     await dialog
@@ -3463,7 +3462,7 @@ test.describe('客户完成订单评价（先审后展）', () => {
       firstReviewCommitsButFails: true,
       recoveryReadFails: true,
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=orders');
     await page.getByRole('button', { name: '评价作品' }).click();
     const dialog = page.getByRole('dialog', { name: '评价作品' });
     const content = dialog.getByPlaceholder('工艺、佩戴感受、顾问服务体验…');
@@ -3648,7 +3647,7 @@ test.describe('客户自助售后方案 A（确定性 UI 与失败态）', () =>
   test('桌面端按订单商品提交售后并可撤销待受理申请', async ({ page }) => {
     const mock = await mockCustomerAfterSales(page);
     await page.setViewportSize({ width: 1280, height: 900 });
-    await page.goto('/customer');
+    await page.goto('/customer?section=orders');
 
     await page.getByRole('button', { name: '申请售后' }).click();
     const dialog = page.getByRole('dialog', { name: '申请售后' });
@@ -3689,7 +3688,7 @@ test.describe('客户自助售后方案 A（确定性 UI 与失败态）', () =>
     const mock = await mockCustomerAfterSales(page, {
       firstCancelCommitsButFails: true,
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=orders');
 
     await page.getByRole('button', { name: '申请售后' }).click();
     const requestDialog = page.getByRole('dialog', { name: '申请售后' });
@@ -3711,7 +3710,7 @@ test.describe('客户自助售后方案 A（确定性 UI 与失败态）', () =>
     const mock = await mockCustomerAfterSales(page, {
       firstCancelFailsBeforeCommit: true,
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=orders');
 
     await page.getByRole('button', { name: '申请售后' }).click();
     const requestDialog = page.getByRole('dialog', { name: '申请售后' });
@@ -3742,7 +3741,7 @@ test.describe('客户自助售后方案 A（确定性 UI 与失败态）', () =>
       firstCancelFailsBeforeCommit: true,
       cancelRecoveryReadFails: true,
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=orders');
 
     await page.getByRole('button', { name: '申请售后' }).click();
     const requestDialog = page.getByRole('dialog', { name: '申请售后' });
@@ -3767,7 +3766,7 @@ test.describe('客户自助售后方案 A（确定性 UI 与失败态）', () =>
   test('手机端展示提交中、服务端错误和可重试成功状态', async ({ page }) => {
     const mock = await mockCustomerAfterSales(page, { firstCreateFails: true });
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('/customer');
+    await page.goto('/customer?section=orders');
 
     await page.getByRole('button', { name: '申请售后' }).click();
     const dialog = page.getByRole('dialog', { name: '申请售后' });
@@ -3794,7 +3793,7 @@ test.describe('客户自助售后方案 A（确定性 UI 与失败态）', () =>
       firstCreateCommitsButFails: true,
     });
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('/customer');
+    await page.goto('/customer?section=orders');
 
     await page.getByRole('button', { name: '申请售后' }).click();
     const dialog = page.getByRole('dialog', { name: '申请售后' });
@@ -3827,7 +3826,7 @@ test.describe('客户自助售后方案 A（确定性 UI 与失败态）', () =>
       };
     });
     const mock = await mockCustomerAfterSales(page);
-    await page.goto('/customer');
+    await page.goto('/customer?section=orders');
 
     await page.getByRole('button', { name: '申请售后' }).click();
     const dialog = page.getByRole('dialog', { name: '申请售后' });
@@ -4057,7 +4056,7 @@ test.describe('客户自助取消未付款订单', () => {
   test('未付款且无待处理支付时确认后取消并刷新状态', async ({ page }) => {
     const { getCancelCalls } = await mockCustomerCancelPage(page);
     page.on('dialog', (dialog) => dialog.accept());
-    await page.goto('/customer');
+    await page.goto('/customer?section=orders');
 
     const cancelButton = page.getByRole('button', { name: '取消订单' });
     await expect(cancelButton).toBeVisible();
@@ -4072,7 +4071,7 @@ test.describe('客户自助取消未付款订单', () => {
 
   test('线下凭证待审核时不提供取消入口（防渠道扣款与取消竞态）', async ({ page }) => {
     const { getCancelCalls } = await mockCustomerCancelPage(page, { hasPendingProof: true });
-    await page.goto('/customer');
+    await page.goto('/customer?section=orders');
 
     await expect(page.getByText('特殊线下凭证已提交·待审核')).toBeVisible();
     await expect(page.getByRole('button', { name: '取消订单' })).toHaveCount(0);
@@ -4086,7 +4085,7 @@ test.describe('客户自助取消未付款订单', () => {
     });
     await page.setViewportSize({ width: 390, height: 844 });
     page.on('dialog', (dialog) => dialog.accept());
-    await page.goto('/customer');
+    await page.goto('/customer?section=orders');
 
     await page.getByRole('button', { name: '取消订单' }).click();
     await expect(page.getByText(/请先在订单中查询或结束支付/).first()).toBeVisible();
@@ -4107,7 +4106,7 @@ test.describe('客户自助取消未付款订单', () => {
       firstCancelCommitsButFails: true,
     });
     page.on('dialog', (dialog) => dialog.accept());
-    await page.goto('/customer');
+    await page.goto('/customer?section=orders');
 
     await page.getByRole('button', { name: '取消订单' }).click();
     await expect(page.getByText('订单已取消并完成权威核验')).toBeVisible();
@@ -4122,7 +4121,7 @@ test.describe('客户自助取消未付款订单', () => {
       firstCancelFailsBeforeCommit: true,
     });
     page.on('dialog', (dialog) => dialog.accept());
-    await page.goto('/customer');
+    await page.goto('/customer?section=orders');
 
     await page.getByRole('button', { name: '取消订单' }).click();
     await expect(page.getByText('取消结果未确认，已刷新权威状态，可以安全重试。')).toBeVisible();
@@ -4142,7 +4141,7 @@ test.describe('客户自助取消未付款订单', () => {
       cancelRecoveryReadFails: true,
     });
     page.on('dialog', (dialog) => dialog.accept());
-    await page.goto('/customer');
+    await page.goto('/customer?section=orders');
 
     await page.getByRole('button', { name: '取消订单' }).click();
     await expect(page.getByText('取消结果待确认，暂未读取到权威订单，可以安全重试。')).toBeVisible();
@@ -4155,7 +4154,7 @@ test.describe('客户自助取消未付款订单', () => {
 
   test('线下凭证通过上传与订单关联的单一请求提交', async ({ page }) => {
     const { getProofUploadPaths, getProofIdempotencyKeys } = await mockCustomerCancelPage(page, { bankTransfer: true });
-    await page.goto('/customer');
+    await page.goto('/customer?section=orders');
 
     await page.getByRole('button', { name: '上传线下付款凭证' }).click();
     const dialog = page.getByRole('dialog', { name: '上传付款凭证' });

@@ -495,6 +495,7 @@ export const cartApi = {
 };
 
 export type CustomerCheckoutRequest = {
+  purchaseSource?: "DIRECT";
   address: string;
   customerEmail?: string;
   couponId?: number;
@@ -562,7 +563,8 @@ export const customerApi = {
     headers: { ...customerAuthHeaders(), "X-Session-Mode": "cookie" },
   }),
   login: (data: {
-    phone: string;
+    phone?: string;
+    username?: string;
     password: string;
     captchaId?: string;
     captchaCode?: string;
@@ -596,9 +598,9 @@ export const customerApi = {
   requestSmsCode: (data: { phone: string }) =>
     api.post("/customers/sms-code", data),
   // 登录分级挑战：查询等级 / 图形验证码 / 登录短信验证码
-  loginChallenge: (phone: string) =>
+  loginChallenge: (identifier: { phone?: string; username?: string }) =>
     api.get("/customers/login/challenge", {
-      params: { phone },
+      params: identifier,
       suppressGlobalError: true,
     }),
   loginCaptcha: () => api.get("/customers/login/captcha"),

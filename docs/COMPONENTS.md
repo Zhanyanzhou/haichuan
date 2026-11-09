@@ -25,5 +25,5 @@
 ## 所有权判断
 
 - 组件、页面或接口是否可删除，不能只看文件名或一次文本搜索；至少核对生产入口、动态导入、测试夹具、机器合同、服务端消费者和兼容窗口。
-- 页面构建器的产品模型与实现入口分别见 `docs/page-builder/template-design-framework.md` 和 `docs/architecture/page-builder-boundary.md`。
+- 页面构建器的产品入口见 `docs/page-builder/README.md`，按页面职责、模板角色和模板编辑分别进入对应合同；`template-design-framework.md` 只作从属操作细则。实现入口见 `docs/architecture/page-builder-boundary.md`，现行功能启停见 `docs/DECISIONS.md`。
 - 当前可达性与遗留候选只认新鲜运行时所有权审计；历史处置单已归档，不作为删除授权。

@@ -1729,8 +1729,10 @@ export class OrdersService implements OnModuleInit {
     couponId?: number;
     /** 操作人上下文（客户结算=客户；后台人工建单=管理员） */
     operator?: OperatorContext;
-    /** 仅由已认证客户结算服务设置；用于可见性校验、购物车绑定和原子清理。 */
-    checkoutCustomer?: CustomerProductAccess & Pick<CustomerPrincipal, "id" | "authVersion">;
+    /** 仅由已认证客户结算服务设置；用于事务内资格校验及区分结算来源。 */
+    checkoutCustomer?: CustomerProductAccess & Pick<CustomerPrincipal, "id" | "authVersion"> & {
+      purchaseSource?: "DIRECT";
+    };
     /** 客户结算请求的作用域键与请求摘要；与订单、库存预占在同一事务内写入。 */
     checkoutIdempotency?: { keyHash: string; requestHash: string };
     /** 后台人工建单的员工域幂等上下文；复用订单现有摘要列，不扩展客户结算作用域。 */
@@ -1744,6 +1746,9 @@ export class OrdersService implements OnModuleInit {
     if (data.checkoutCustomer && data.adminCreation) {
       throw new BadRequestException("客户结算与后台人工建单上下文不能同时存在");
     }
+    const cartCustomer = data.checkoutCustomer?.purchaseSource === "DIRECT"
+      ? undefined
+      : data.checkoutCustomer;
     if (
       data.adminCreation
       && (!data.staffPrincipal || data.staffPrincipal.id !== data.adminCreation.actorId)
@@ -1972,9 +1977,9 @@ export class OrdersService implements OnModuleInit {
           }
         }
 
-        if (data.checkoutCustomer) {
+        if (cartCustomer) {
           const currentCart = await tx.cart.findMany({
-            where: { userId: data.checkoutCustomer.id },
+            where: { userId: cartCustomer.id },
             select: { skuId: true, quantity: true },
           });
           const currentQuantities = new Map<number, number>();
@@ -2140,9 +2145,9 @@ export class OrdersService implements OnModuleInit {
             where: { id: data.checkoutCustomer.id },
             data: { lastOrderAt: reservedAt },
           });
-          await tx.cart.deleteMany({
-            where: { userId: data.checkoutCustomer.id },
-          });
+          if (cartCustomer) {
+            await tx.cart.deleteMany({ where: { userId: cartCustomer.id } });
+          }
           await this.reliableNotifications?.enqueueOrderCreated(tx, order);
         }
 

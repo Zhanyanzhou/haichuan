@@ -1,5 +1,6 @@
 import {
   App as AntdApp,
+  Button,
   Form,
   Input,
   Modal,
@@ -11,7 +12,6 @@ import {
   type UploadProps,
 } from "antd";
 import { PictureOutlined } from "@ant-design/icons";
-import ScifiButton from "@/components/ui/ScifiButton";
 import { ADMIN_COPY } from "@/constants/adminCopy";
 import { uploadApi } from "@/services/api";
 import type { Category } from "@/types";
@@ -82,9 +82,9 @@ export function CategoryImageUpload({
         showUploadList={false}
         beforeUpload={beforeUpload}
       >
-        <ScifiButton variant="outline" size="sm" disabled={disabled}>
-          <PictureOutlined /> {value ? "更换图片" : "上传图片"}
-        </ScifiButton>
+        <Button icon={<PictureOutlined />} disabled={disabled}>
+          {value ? "更换图片" : "上传图片"}
+        </Button>
       </Upload>
     </Space>
   );

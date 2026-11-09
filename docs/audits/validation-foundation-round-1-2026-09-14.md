@@ -5,7 +5,7 @@
 
 ## 1. 状态保护与环境
 
-- 开始快照：`G:\网站搭建2`，分支 `codex/release-curation-20260814`，提交 `cd27a5dd9f064165a0bcc029492391d7f80036d6`，相对 upstream 领先 2、落后 0。
+- 开始快照：`G:\海川珠宝官方网站开发`，分支 `codex/release-curation-20260814`，提交 `cd27a5dd9f064165a0bcc029492391d7f80036d6`，相对 upstream 领先 2、落后 0。
 - 开始时工作树共 82 个状态条目：74 个 tracked、8 个 untracked。未切分支，未暂存、stash、reset、clean、提交或推送。
 - 本轮结束前复核提交未变。开始时 82 项均保留；其中 runner 及其单测两项存在原有修改，本轮在其上继续修改，其余原有修改未纳入本轮。
 - 原有版本副本与脱敏日志位于忽略目录 `.codex-tmp/validation-foundation-20260914-230544/`。未复制 `.env`、密钥、客户或真实数据库数据。原先干净的文件仍可由当前 HEAD 恢复。

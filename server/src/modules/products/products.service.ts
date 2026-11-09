@@ -21,6 +21,13 @@ import {
   CreateSkuDto,
   UpdateSkuDto,
 } from "./dto";
+import { isPublishableCertificateNumber } from "./dto/certificate.dto";
+import {
+  PRODUCT_CODE_REDIRECT_KEY,
+  readProductCodeRedirectMap,
+  retargetProductCodeRedirects,
+  type ProductCodeRedirect,
+} from "./product-code-redirect";
 import {
   InventoryPolicy,
   ImageType,
@@ -58,6 +65,7 @@ import type {
 } from "../../common/security/authenticated-principal";
 import { evaluateMediaPublicEligibility } from "../upload/media-public-eligibility";
 import { lockActiveCustomerForRead } from "../customers/customer-write-gate";
+import { readCategoryPublicationRules } from "../categories/category-publication-rules";
 import { isZeroShippingCheckoutTemplate } from "../orders/shipping-pricing-boundary";
 import {
   normalizeProductSearch,
@@ -74,6 +82,14 @@ const CUSTOMER_DELIVERY_METHODS = new Set([
 ]);
 const FORBIDDEN_PUBLIC_CONTENT =
   /(?:\be2e\b|\btest\b|\bmock\b|\bseed\b|\bdemo\b|测试|样例|示例|演示|占位|待替换)/i;
+const DRAFT_TITLE = /^未命名商品(?:\s*[-－—].*)?$/u;
+const PRECIOUS_METAL_MATERIALS = new Set(["GOLD_999", "GOLD_9999", "AU750", "PT950", "S925"]);
+const GEM_ORIGINS = new Set(["天然", "实验室培育", "养殖", "人工合成", "仿制"]);
+const SIZE_REQUIREMENTS = [
+  ["RING_SIZE", "所有有效 SKU 的戒指圈口"],
+  ["INNER_DIAMETER", "所有有效 SKU 的内径或圈口"],
+  ["CHAIN_LENGTH", "所有有效 SKU 的链长或可调范围"],
+] as const;
 const MOJIBAKE_OR_REPLACEMENT = /[\u00c0-\u00ff]|\uFFFD/;
 
 function hasRepeatedPlaceholderText(value: string): boolean {
@@ -272,11 +288,13 @@ const PUBLICATION_QUALITY_SELECT = {
   publicationQualityStatus: true,
   publicationQualityHash: true,
   priceMin: true,
-  category: { select: { isActive: true, deletedAt: true } },
+  category: { select: { isActive: true, deletedAt: true, publicationRules: true } },
+  publicationRulesAcceptedAt: true,
   salesMode: true,
   inventoryPolicy: true,
   price: true,
   fulfillmentType: true,
+  fulfillmentConfirmed: true,
   dispatchTime: true,
   deliveryMethods: true,
   requiresInsuredShipping: true,
@@ -421,7 +439,7 @@ function requestedProductCreateIntent(dto: CreateProductDto) {
   const skus = dto.skus?.length
     ? dto.skus.map((sku) => ({
         skuCode: sku.skuCode,
-        material: sku.material ?? "GOLD_999",
+        material: sku.material ?? dto.materialType ?? "OTHER",
         size: sku.size ?? null,
         color: sku.color?.trim() || null,
         goldWeight: intentDecimal(sku.goldWeight),
@@ -430,7 +448,7 @@ function requestedProductCreateIntent(dto: CreateProductDto) {
       }))
     : [{
         skuCode: `${dto.code}-DEFAULT`,
-        material: dto.materialType ?? "GOLD_999",
+        material: dto.materialType ?? "OTHER",
         size: dto.size ?? null,
         color: null,
         goldWeight: intentDecimal(dto.goldWeight),
@@ -444,7 +462,7 @@ function requestedProductCreateIntent(dto: CreateProductDto) {
     categoryId: dto.categoryId,
     shortDescription: dto.shortDescription ?? null,
     description: dto.description ?? null,
-    materialType: dto.materialType ?? "GOLD_999",
+    materialType: dto.materialType ?? "OTHER",
     goldWeight: intentDecimal(dto.goldWeight),
     craftFee: intentDecimal(dto.craftFee),
     weight: intentDecimal(dto.weight),
@@ -464,12 +482,13 @@ function requestedProductCreateIntent(dto: CreateProductDto) {
     publishMode: dto.publishMode ?? "WAREHOUSE",
     scheduledPublishAt: intentDate(dto.scheduledPublishAt),
     fulfillmentType: dto.fulfillmentType ?? "IN_STOCK",
+    fulfillmentConfirmed: dto.fulfillmentConfirmed === true && Boolean(dto.fulfillmentType && dto.dispatchTime),
     dispatchTime: dto.dispatchTime ?? "WITHIN_48_HOURS",
     shippingTemplateId: dto.shippingTemplateId ?? null,
-    deliveryMethods: dto.deliveryMethods ?? ["EXPRESS"],
+    deliveryMethods: dto.deliveryMethods ?? [],
     requiresInsuredShipping: dto.requiresInsuredShipping ?? true,
     requiresSignature: dto.requiresSignature ?? true,
-    includesCertificate: dto.includesCertificate ?? true,
+    includesCertificate: dto.includesCertificate ?? false,
     packageType: dto.packageType ?? null,
     customLeadTime: (dto.dispatchTime ?? "WITHIN_48_HOURS") === "CUSTOM"
       ? dto.customLeadTime ?? null
@@ -509,6 +528,7 @@ function persistedProductCreateIntent(product: ProductCreateReplayRecord) {
     publishMode: product.publishMode,
     scheduledPublishAt: intentDate(product.scheduledPublishAt),
     fulfillmentType: product.fulfillmentType,
+    fulfillmentConfirmed: product.fulfillmentConfirmed ?? false,
     dispatchTime: product.dispatchTime,
     shippingTemplateId: product.shippingTemplateId,
     deliveryMethods: product.deliveryMethods,
@@ -648,6 +668,7 @@ function mapCreateDto(dto: CreateProductDto): Prisma.ProductCreateInput {
     publishMode,
     scheduledPublishAt,
     fulfillmentType,
+    fulfillmentConfirmed,
     dispatchTime,
     shippingTemplateId,
     deliveryMethods,
@@ -671,7 +692,7 @@ function mapCreateDto(dto: CreateProductDto): Prisma.ProductCreateInput {
     category: { connect: { id: categoryId } },
     shortDescription: shortDescription ?? null,
     description: description ?? null,
-    materialType: materialType ?? "GOLD_999",
+    materialType: materialType ?? "OTHER",
     goldWeight: goldWeight ?? 0,
     craftFee: craftFee ?? 0,
     // Product.price 是 SKU 派生缓存；创建事务会在 SKU 落库后统一重算。
@@ -693,12 +714,13 @@ function mapCreateDto(dto: CreateProductDto): Prisma.ProductCreateInput {
     publishMode: publishMode ?? "WAREHOUSE",
     scheduledPublishAt: scheduledPublishAt ? new Date(scheduledPublishAt) : null,
     fulfillmentType: fulfillmentType ?? "IN_STOCK",
+    fulfillmentConfirmed: fulfillmentConfirmed === true && Boolean(fulfillmentType && dispatchTime),
     dispatchTime: dispatchTime ?? "WITHIN_48_HOURS",
     shippingTemplate: shippingTemplateId ? { connect: { id: shippingTemplateId } } : undefined,
-    deliveryMethods: deliveryMethods ?? ["EXPRESS"],
+    deliveryMethods: deliveryMethods ?? [],
     requiresInsuredShipping: requiresInsuredShipping ?? true,
     requiresSignature: requiresSignature ?? true,
-    includesCertificate: includesCertificate ?? true,
+    includesCertificate: includesCertificate ?? false,
     packageType: packageType ?? null,
     customLeadTime:
       (dispatchTime ?? "WITHIN_48_HOURS") === "CUSTOM"
@@ -752,15 +774,26 @@ function mapUpdateDto(
   if (dto.inventoryPolicy !== undefined)
     data.inventoryPolicy = dto.inventoryPolicy;
   if (dto.purchaseRegion !== undefined) data.purchaseRegion = dto.purchaseRegion;
-  if (dto.publishMode !== undefined) data.publishMode = dto.publishMode;
-  if (dto.scheduledPublishAt !== undefined)
-    data.scheduledPublishAt = dto.scheduledPublishAt ? new Date(dto.scheduledPublishAt) : null;
+  if (dto.publishMode !== undefined) {
+    data.publishMode = dto.publishMode;
+    data.scheduledPublishAt = dto.publishMode === "SCHEDULED" && dto.scheduledPublishAt
+      ? new Date(dto.scheduledPublishAt) : null;
+    data.scheduledPublishError = null;
+  }
   if (dto.fulfillmentType !== undefined) data.fulfillmentType = dto.fulfillmentType;
   if (dto.dispatchTime !== undefined) data.dispatchTime = dto.dispatchTime;
   if (dto.shippingTemplateId !== undefined) {
     data.shippingTemplateId = dto.shippingTemplateId;
   }
   if (dto.deliveryMethods !== undefined) data.deliveryMethods = dto.deliveryMethods;
+  if (dto.fulfillmentConfirmed !== undefined) {
+    data.fulfillmentConfirmed = dto.fulfillmentConfirmed === true;
+  } else if (
+    dto.fulfillmentType !== undefined || dto.dispatchTime !== undefined ||
+    dto.deliveryMethods !== undefined || dto.customLeadTime !== undefined
+  ) {
+    data.fulfillmentConfirmed = false;
+  }
   if (dto.requiresInsuredShipping !== undefined)
     data.requiresInsuredShipping = dto.requiresInsuredShipping;
   if (dto.requiresSignature !== undefined) data.requiresSignature = dto.requiresSignature;
@@ -957,22 +990,53 @@ export class ProductsService {
     });
   }
 
+  /** 旧测试的 Prisma 替身没有 siteSetting；没有这张表时按没有旧款号处理。 */
+  private async readRedirectMap(
+    db: { siteSetting?: { findUnique?: (args: { where: { key: string } }) => Promise<{ value?: unknown } | null> } },
+  ): Promise<Record<string, ProductCodeRedirect>> {
+    const findUnique = db.siteSetting?.findUnique;
+    if (typeof findUnique !== "function") return {};
+    const row = await findUnique({ where: { key: PRODUCT_CODE_REDIRECT_KEY } });
+    return readProductCodeRedirectMap(row?.value);
+  }
+
+  private async lockRedirectMap(tx: Prisma.TransactionClient) {
+    await tx.siteSetting.upsert({
+      where: { key: PRODUCT_CODE_REDIRECT_KEY },
+      create: { key: PRODUCT_CODE_REDIRECT_KEY, value: { codes: {} } },
+      update: {},
+    });
+    const rows = await tx.$queryRaw<Array<{ value: Prisma.JsonValue }>>(
+      Prisma.sql`SELECT value FROM site_settings WHERE \`key\` = ${PRODUCT_CODE_REDIRECT_KEY} FOR UPDATE`,
+    );
+    return readProductCodeRedirectMap(rows[0]?.value);
+  }
+
   @Cron(CronExpression.EVERY_MINUTE)
   async publishScheduledProducts() {
+    const dueWhere: Prisma.ProductWhereInput = {
+      deletedAt: null,
+      publishMode: "SCHEDULED",
+      status: { in: ["DRAFT", "OFFLINE"] },
+      scheduledPublishAt: { lte: new Date() },
+    };
     const due = await this.prisma.product.findMany({
-      where: {
-        deletedAt: null,
-        publishMode: "SCHEDULED",
-        status: { in: ["DRAFT", "OFFLINE"] },
-        scheduledPublishAt: { lte: new Date() },
-      },
+      where: dueWhere,
       select: { id: true },
+      orderBy: [{ scheduledPublishAt: "asc" }, { id: "asc" }],
       take: 50,
     });
     for (const item of due) {
+      const attempt: { plan?: { scheduledPublishAt: Date | null; updatedAt: Date } } = {};
       try {
-        await this.prisma.$transaction(async (tx) => {
+        const published = await this.prisma.$transaction(async (tx) => {
           await this.lockProductForTradeMutation(item.id, tx);
+          const plan = await tx.product.findFirst({
+            where: { ...dueWhere, id: item.id },
+            select: { scheduledPublishAt: true, updatedAt: true, publishedAt: true },
+          });
+          if (!plan) return false;
+          attempt.plan = { scheduledPublishAt: plan.scheduledPublishAt, updatedAt: plan.updatedAt };
           const review = await this.getProductReviewState(item.id, tx);
           if (review.status === "IN_REVIEW") {
             throw new ConflictException("作品正在审核中，定时计划不能代替管理员审核");
@@ -996,7 +1060,7 @@ export class ProductsService {
             where: { id: item.id },
             data: {
               status: "PUBLISHED",
-              publishedAt: new Date(),
+              ...(!plan.publishedAt ? { publishedAt: new Date() } : {}),
               publishMode: "IMMEDIATE",
               scheduledPublishAt: null,
               scheduledPublishError: null,
@@ -1009,18 +1073,27 @@ export class ProductsService {
             "product.publish.scheduled",
             { status: "PUBLISHED" },
           );
+          return true;
         });
-        this.notifyPublicChange(item.id);
+        if (published) this.notifyPublicChange(item.id);
       } catch (error) {
-        const message = error instanceof Error ? error.message : "定时上架校验失败";
-        await this.prisma.product.update({
-          where: { id: item.id },
-          data: {
-            publishMode: "WAREHOUSE",
-            scheduledPublishAt: null,
-            scheduledPublishError: message.slice(0, 500),
-          },
-        });
+        if (!attempt.plan && error instanceof NotFoundException) continue;
+        if (!attempt.plan || !(error instanceof BadRequestException || error instanceof ConflictException)) {
+          this.productsLogger.warn(`定时上架暂未完成，等待重试。商品 ID ${item.id}`);
+          continue;
+        }
+        try {
+          await this.prisma.product.updateMany({
+            where: { ...dueWhere, id: item.id, ...attempt.plan },
+            data: {
+              publishMode: "WAREHOUSE",
+              scheduledPublishAt: null,
+              scheduledPublishError: error.message.slice(0, 500),
+            },
+          });
+        } catch {
+          this.productsLogger.warn(`暂时无法记录定时上架失败原因。商品 ID ${item.id}`);
+        }
       }
     }
   }
@@ -1334,9 +1407,18 @@ export class ProductsService {
           where: { code: requestedCode },
           select: { id: true, code: true, name: true, status: true, deletedAt: true },
         });
-        if (!product) return null;
-        const { deletedAt, status, ...identity } = product;
-        return { ...identity, status: deletedAt ? ProductStatus.ARCHIVED : status, requestedCode, ...(deletedAt ? { removed: true } : {}) };
+        if (product) {
+          const { deletedAt, status, ...identity } = product;
+          return { ...identity, status: deletedAt ? ProductStatus.ARCHIVED : status, requestedCode, ...(deletedAt ? { removed: true } : {}) };
+        }
+        const reserved = (await this.readRedirectMap(tx))[requestedCode];
+        if (!reserved) return null;
+        const owner = await tx.product.findFirst({
+          where: { id: reserved.productId },
+          select: { id: true, code: true, name: true, status: true, deletedAt: true },
+        });
+        if (!owner || owner.deletedAt) return null;
+        return { id: owner.id, code: owner.code, name: owner.name, status: owner.status, requestedCode };
       }));
       return matches.filter((match) => match !== null);
     });
@@ -1360,11 +1442,17 @@ export class ProductsService {
       (id) => Number.isInteger(id) && id > 0,
     );
     if (codes.length === 0 && legacyIds.length === 0) return [];
+    const redirects = codes.length ? await this.readRedirectMap(tx) : {};
+    const redirectedIds = [...new Set(codes.flatMap((code) => {
+      const productId = redirects[code]?.productId;
+      return Number.isInteger(productId) ? [productId as number] : [];
+    }))];
     const products = await tx.product.findMany({
       where: {
         OR: [
           ...(codes.length ? [{ code: { in: [...new Set(codes)] } }] : []),
           ...(legacyIds.length ? [{ id: { in: [...new Set(legacyIds)] } }] : []),
+          ...(redirectedIds.length ? [{ id: { in: redirectedIds } }] : []),
         ],
       },
       select: {
@@ -1449,7 +1537,10 @@ export class ProductsService {
     };
 
     return [
-      ...codes.map((code) => mapReference(byCode.get(code), { code })),
+      ...codes.map((code) => mapReference(
+        byCode.get(code) ?? byId.get(redirects[code]?.productId ?? 0),
+        { code },
+      )),
       ...legacyIds.map((legacyId) =>
         mapReference(byId.get(legacyId), { legacyId }),
       ),
@@ -1861,7 +1952,7 @@ export class ProductsService {
       response.certificates = "certificates" in product
         ? (product.certificates ?? [])
             .filter((certificate) => {
-              if (certificate.certNumber.trim().length === 0) return false;
+              if (!isPublishableCertificateNumber(certificate.certNumber)) return false;
               if (!certificate.expireDate) return true;
               const expiresAt = new Date(certificate.expireDate).getTime();
               return Number.isFinite(expiresAt) && expiresAt >= certificateNow;
@@ -2164,6 +2255,18 @@ export class ProductsService {
       },
       select: CUSTOMER_FACING_PUBLIC_DETAIL_SELECT,
     });
+    if (!product) {
+      const redirectedId = (await this.readRedirectMap(this.prisma))[value]?.productId;
+      if (redirectedId) {
+        product = await this.prisma.product.findFirst({
+          where: { ...publicWhere, id: redirectedId },
+          select: CUSTOMER_FACING_PUBLIC_DETAIL_SELECT,
+        });
+        return product
+          ? this.toCustomerFacingProduct(product, "public", true)
+          : null;
+      }
+    }
     const legacyId = Number(value);
     if (!product && Number.isInteger(legacyId) && legacyId > 0) {
       product = await this.prisma.product.findFirst({
@@ -2193,6 +2296,18 @@ export class ProductsService {
         },
         select: CUSTOMER_FACING_DETAIL_SELECT,
       });
+      if (!product) {
+        const redirectedId = (await this.readRedirectMap(transaction))[value]?.productId;
+        if (redirectedId) {
+          product = await transaction.product.findFirst({
+            where: { ...catalogWhere, id: redirectedId },
+            select: CUSTOMER_FACING_DETAIL_SELECT,
+          });
+          return product
+            ? { productId: product.id, response: this.toCustomerFacingProduct(product, "catalog") }
+            : null;
+        }
+      }
       const legacyId = Number(value);
       if (!product && Number.isInteger(legacyId) && legacyId > 0) {
         product = await transaction.product.findFirst({
@@ -2439,15 +2554,24 @@ export class ProductsService {
     }
   }
 
+  private assertScheduleInput({ publishMode, scheduledPublishAt }: Pick<CreateProductDto, "publishMode" | "scheduledPublishAt">) {
+    if (publishMode !== "SCHEDULED") {
+      if (scheduledPublishAt != null) throw new BadRequestException("请先选择定时上架再填写时间");
+      return;
+    }
+    const timestamp = scheduledPublishAt ? Date.parse(scheduledPublishAt) : NaN;
+    if (!Number.isFinite(timestamp) || timestamp <= Date.now()) {
+      throw new BadRequestException("定时上架时间必须晚于当前时间");
+    }
+  }
+
   async create(dto: CreateProductDto, actor: ProductMutationActor) {
     if (dto.skus?.some((sku) => sku.imageId != null)) {
       throw new BadRequestException("请先保存商品并上传图集，再为规格绑定图片");
     }
     const normalizedDto: CreateProductDto = { ...dto };
+    this.assertScheduleInput(dto);
     if (dto.publishMode === "SCHEDULED") {
-      if (!dto.scheduledPublishAt || new Date(dto.scheduledPublishAt).getTime() <= Date.now()) {
-        throw new BadRequestException("定时上架时间必须晚于当前时间");
-      }
       normalizedDto.status = "DRAFT";
     } else if (dto.publishMode === "WAREHOUSE" && dto.status === "PUBLISHED") {
       normalizedDto.status = "DRAFT";
@@ -2482,6 +2606,14 @@ export class ProductsService {
           });
           if (!template) throw new BadRequestException("所选运费模板不存在或已停用");
         }
+        const reservedCode = (await this.readRedirectMap(tx))[normalizedDto.code];
+        if (reservedCode) {
+          const owner = await tx.product.findFirst({
+            where: { id: reservedCode.productId, deletedAt: null },
+            select: { id: true },
+          });
+          if (owner) throw new ConflictException("这个款号仍是另一件商品的旧地址，请换一个");
+        }
         const wantsPublished = data.status === "PUBLISHED";
         let created = await tx.product.create({
           data: wantsPublished ? { ...data, status: "DRAFT" } : data,
@@ -2494,7 +2626,7 @@ export class ProductsService {
               data: {
                 productId: created.id,
                 skuCode: sku.skuCode,
-                material: sku.material ?? "GOLD_999",
+                material: sku.material ?? normalizedDto.materialType ?? "OTHER",
                 size: sku.size ?? null,
                 color: sku.color?.trim() || null,
                 goldWeight: sku.goldWeight ?? 0,
@@ -2510,7 +2642,7 @@ export class ProductsService {
             data: {
               productId: created.id,
               skuCode: `${created.code}-DEFAULT`,
-              material: normalizedDto.materialType ?? "GOLD_999",
+              material: normalizedDto.materialType ?? "OTHER",
               size: normalizedDto.size ?? null,
               color: null,
               goldWeight: normalizedDto.goldWeight ?? 0,
@@ -2522,6 +2654,13 @@ export class ProductsService {
         }
 
         await this.reconcileTradeRulesInTransaction(created.id, tx);
+
+        if (dto.publishMode === "SCHEDULED") {
+          await this.assertPublicationRequirements(created.id, tx, true);
+          await this.writeProductAudit(tx, lockedActor, created.id, "product.publish.schedule", {
+            scheduledPublishAt: dto.scheduledPublishAt ?? null,
+          });
+        }
 
         if (wantsPublished) {
           try {
@@ -2535,7 +2674,7 @@ export class ProductsService {
           }
           created = await tx.product.update({
             where: { id: created.id },
-            data: { status: "PUBLISHED" },
+            data: { status: "PUBLISHED", publishedAt: new Date() },
           });
         }
         return { product: created, created: true };
@@ -2568,37 +2707,48 @@ export class ProductsService {
   }
 
   /**
-   * 上架门禁唯一入口。五种销售模式共用基础事实与媒体门禁；直接销售只追加成交价和有效规格。
-   * 未填写的配送不阻断上架。已填写的配送方式仍须是系统支持的值。
+   * 上架门禁唯一入口。历史已上架商品只在重新上架或明确采用新规则后执行新增校验。
    */
   async canPublish(
     productId: number,
     db: Prisma.TransactionClient | PrismaService = this.prisma,
+    enforceNewRules = true,
   ) {
-    const product = await db.product.findFirst({
-      where: { id: productId, deletedAt: null },
-      select: PUBLICATION_QUALITY_SELECT,
-    });
-    if (!product) throw new NotFoundException("商品不存在或已删除");
-    const assessment = this.assessPublicationQuality(product);
-    if (assessment.conflicts.length > 0) {
-      throw new ConflictException(assessment.conflicts.join("；"));
-    }
-    if (assessment.errors.length > 0) {
-      throw new BadRequestException(`发布前请补全: ${assessment.errors.join("、")}`);
-    }
+    const { product, assessment, strict } = await this.assertPublicationRequirements(productId, db, enforceNewRules);
     await db.product.update({
       where: { id: productId },
       data: {
         publicationQualityStatus: "READY",
         publicationQualityHash: assessment.qualityHash,
         publicationQualityCheckedAt: new Date(),
+        ...(strict && !product.publicationRulesAcceptedAt ? { publicationRulesAcceptedAt: new Date() } : {}),
         ...(!product.listingImage && product.primaryImage
           ? { listingImageId: product.primaryImage.id }
           : {}),
       },
     });
     return { status: "READY" as const, qualityHash: assessment.qualityHash };
+  }
+
+  private async assertPublicationRequirements(
+    productId: number,
+    db: Prisma.TransactionClient | PrismaService,
+    enforceNewRules: boolean,
+  ) {
+    const product = await db.product.findFirst({
+      where: { id: productId, deletedAt: null },
+      select: PUBLICATION_QUALITY_SELECT,
+    });
+    if (!product) throw new NotFoundException("商品不存在或已删除");
+    const strict = enforceNewRules || Boolean(product.publicationRulesAcceptedAt);
+    const assessment = this.assessPublicationQuality(product, strict);
+    if (assessment.conflicts.length > 0) {
+      throw new ConflictException(assessment.conflicts.join("；"));
+    }
+    if (assessment.errors.length > 0) {
+      throw new BadRequestException(`发布前请补全: ${assessment.errors.join("、")}`);
+    }
+    return { product, assessment, strict };
   }
 
   /**
@@ -2695,12 +2845,12 @@ export class ProductsService {
     };
   }
 
-  private assessPublicationQuality(product: PublicationQualitySnapshot) {
+  private assessPublicationQuality(product: PublicationQualitySnapshot, strict = true) {
     const errors: string[] = [];
     const conflicts: string[] = [];
     const activeSkus = product.skus.filter((sku) => sku.isActive);
-    if (!isMeaningfulPublicText(product.name, 2))
-      errors.push("商品标题不能是纯数字、整段同一个字、测试词或乱码");
+    if (!isMeaningfulPublicText(product.name, 2) || (strict && DRAFT_TITLE.test(product.name.trim())))
+      errors.push("商品标题不能是未命名商品、纯数字、整段同一个字、测试词或乱码");
     if (!product.code.trim()) errors.push("商品款号");
     else if (FORBIDDEN_PUBLIC_CONTENT.test(product.code) || MOJIBAKE_OR_REPLACEMENT.test(product.code))
       errors.push("正式商品款号（禁止 E2E、Mock、Seed 或乱码标记）");
@@ -2718,7 +2868,18 @@ export class ProductsService {
     errors.push(...misleadingJewelryClaims(publicCopy));
     if (/秒杀|限时折扣|满减/.test(product.name)) errors.push("标题不要写秒杀、限时折扣或满减");
 
+    const categoryRules = readCategoryPublicationRules(product.category.publicationRules);
+    if (strict && categoryRules.includes("GROUP_ONLY")) errors.push("选择允许上架的具体类目");
+
     if (product.visibility !== "INTERNAL") {
+      if (strict && (product.includesCertificate || categoryRules.includes("CERTIFICATE"))) {
+        const now = Date.now();
+        const hasCertificate = product.certificates.some((certificate) =>
+          isPublishableCertificateNumber(certificate.certNumber) &&
+          (certificate.expireDate == null || certificate.expireDate.getTime() >= now),
+        );
+        if (!hasCertificate) errors.push("有效鉴定证书");
+      }
       const coverReady = Boolean(
         product.primaryImage
         && !product.primaryImage.isVideo
@@ -2743,6 +2904,42 @@ export class ProductsService {
         const deliveryMethods = Array.isArray(product.deliveryMethods)
           ? product.deliveryMethods
           : [];
+        if (strict) {
+          if (!product.materialType || product.materialType === "OTHER") errors.push("已确认的主要材质");
+          if (deliveryMethods.length === 0) errors.push("至少一种配送方式");
+          if (!product.fulfillmentConfirmed) errors.push("确认备货状态和发出时效");
+          if (categoryRules.includes("PRECIOUS_METAL") && (
+            !PRECIOUS_METAL_MATERIALS.has(product.materialType) ||
+            activeSkus.some((sku) => !PRECIOUS_METAL_MATERIALS.has(sku.material))
+          )) errors.push("贵金属材质和纯度");
+          if (categoryRules.includes("GOLD_WEIGHT") && activeSkus.some((sku) => !(Number(sku.goldWeight) > 0))) {
+            errors.push("所有有效 SKU 的净金重");
+          }
+          const gemInfo = product.gemInfo && typeof product.gemInfo === "object" && !Array.isArray(product.gemInfo)
+            ? product.gemInfo
+            : null;
+          if (categoryRules.includes("GEMSTONE")) {
+            if (!isMeaningfulPublicText(gemInfo?.type, 1) || gemInfo?.type === "无主石") errors.push("主石种类");
+            const settingMaterial = gemInfo?.settingMaterial ?? product.materialType;
+            if (typeof settingMaterial !== "string" || !PRECIOUS_METAL_MATERIALS.has(settingMaterial)) errors.push("镶托材质");
+          }
+          if (categoryRules.includes("GEM_DISCLOSURE")) {
+            if (typeof gemInfo?.origin !== "string" || !GEM_ORIGINS.has(gemInfo.origin)) errors.push("宝石来源");
+            if (!isMeaningfulPublicText(gemInfo?.treatment, 2)) errors.push("宝石处理说明");
+          }
+          if (categoryRules.includes("GEM_CARAT") && (typeof gemInfo?.carat !== "number" || gemInfo.carat <= 0)) {
+            errors.push("主石克拉");
+          }
+          if (categoryRules.includes("GEM_GRADING") && !isMeaningfulPublicText(gemInfo?.clarity, 1)) {
+            errors.push("主石等级（净度）");
+          }
+          for (const [rule, label] of SIZE_REQUIREMENTS) {
+            if (categoryRules.includes(rule) && activeSkus.some((sku) =>
+              !sku.size || !/[1-9１-９]/u.test(sku.size) || FORBIDDEN_PUBLIC_CONTENT.test(sku.size) ||
+              MOJIBAKE_OR_REPLACEMENT.test(sku.size),
+            )) errors.push(label);
+          }
+        }
         if (deliveryMethods.some(
           (method) => typeof method !== "string" || !CUSTOMER_DELIVERY_METHODS.has(method),
         )) {
@@ -2869,10 +3066,11 @@ export class ProductsService {
   async reconcileTradeRulesInTransaction(
     productId: number,
     tx: Prisma.TransactionClient,
+    enforceNewRules = false,
   ) {
     await this.syncProductStartingPrice(productId, tx);
     await this.assertInventoryPolicy(productId, tx);
-    await this.revalidatePublishedQualityAfterMutation(productId, tx);
+    await this.revalidatePublishedQualityAfterMutation(productId, tx, enforceNewRules);
   }
 
   /**
@@ -2882,6 +3080,7 @@ export class ProductsService {
   private async revalidatePublishedQualityAfterMutation(
     productId: number,
     tx: Prisma.TransactionClient,
+    enforceNewRules = false,
   ) {
     const product = await tx.product.findUnique({
       where: { id: productId },
@@ -2890,7 +3089,7 @@ export class ProductsService {
     if (!product) throw new NotFoundException("商品不存在或已删除");
     if (product.status === "PUBLISHED") {
       try {
-        await this.canPublish(productId, tx);
+        await this.canPublish(productId, tx, enforceNewRules);
       } catch (error) {
         if (error instanceof BadRequestException) {
           throw new ConflictException(`已发布商品更新后不满足发布条件：${error.message}`);
@@ -2902,6 +3101,10 @@ export class ProductsService {
 
   async update(id: number, dto: UpdateProductDto, actor: ProductMutationActor) {
     const { expectedCategoryId, categoryId, expectedSalesMode } = dto;
+    const editsSku = dto.editorSkuUpdates !== undefined || dto.editorDefaultSku !== undefined;
+    if (editsSku && (dto.price !== undefined || (dto.editorSkuUpdates && dto.editorDefaultSku))) {
+      throw new BadRequestException("商品规格修改不能同时提交旧版一口价或默认规格");
+    }
     if (
       expectedCategoryId !== undefined &&
       (typeof categoryId !== "number" || !Number.isInteger(categoryId) || categoryId < 1)
@@ -2911,11 +3114,7 @@ export class ProductsService {
     if (expectedSalesMode !== undefined && !dto.salesMode) {
       throw new BadRequestException("校验原销售方式时必须指定目标销售方式");
     }
-    if (dto.publishMode === "SCHEDULED") {
-      if (!dto.scheduledPublishAt || new Date(dto.scheduledPublishAt).getTime() <= Date.now()) {
-        throw new BadRequestException("定时上架时间必须晚于当前时间");
-      }
-    }
+    this.assertScheduleInput(dto);
 
     try {
       const product = await this.prisma.$transaction(async (tx) => {
@@ -2923,7 +3122,10 @@ export class ProductsService {
         // 先读取编辑基线，再获取商品锁；若期间有并发保存，updatedAt CAS 会拒绝覆盖。
         const existing = await tx.product.findFirst({
           where: { id, deletedAt: null },
-          select: { id: true, status: true, updatedAt: true, dispatchTime: true },
+          select: {
+            id: true, status: true, updatedAt: true, dispatchTime: true, publishMode: true,
+            categoryId: true, salesMode: true, visibility: true, fulfillmentConfirmed: true, includesCertificate: true,
+          },
         });
         if (!existing) throw new NotFoundException("商品不存在或已删除");
         if (existing.status === "ARCHIVED") {
@@ -2932,7 +3134,15 @@ export class ProductsService {
         if (!this.isPublishingAdmin(lockedActor) && existing.status !== "DRAFT") {
           throw new ForbiddenException("编辑角色只能维护草稿；已发布或已下架作品须由管理员处理");
         }
-        if (dto.publishMode === "SCHEDULED") this.assertCanChangePublication(lockedActor);
+        if (dto.publishMode === "SCHEDULED" || (existing.publishMode === "SCHEDULED" && dto.publishMode !== undefined)) {
+          this.assertCanChangePublication(lockedActor);
+        }
+        if (dto.publishMode === "SCHEDULED" && existing.status === "PUBLISHED") {
+          throw new ConflictException("商品已经上架。请先下架再安排定时上架");
+        }
+        if (editsSku && (dto.salesMode ?? existing.salesMode) !== "DIRECT_PURCHASE") {
+          throw new BadRequestException("只有直接销售商品可以随商品资料保存交易规格");
+        }
         if (dto.categoryId !== undefined) {
           const category = await tx.category.findUnique({
             where: { id: dto.categoryId },
@@ -2978,6 +3188,41 @@ export class ProductsService {
           }
         }
 
+        if (dto.editorSkuUpdates) {
+          for (const { id: skuId, expectedPrice, material, size, goldWeight, price } of dto.editorSkuUpdates) {
+            if ([material, size, goldWeight, price].every((value) => value === undefined)) {
+              throw new BadRequestException("请填写需要修改的 SKU 资料");
+            }
+            const updated = await tx.productSKU.updateMany({
+              where: { id: skuId, productId: id, isActive: true, ...(expectedPrice === undefined ? {} : { price: expectedPrice }) },
+              data: { material, size, goldWeight, price },
+            });
+            if (updated.count !== 1) {
+              throw new ConflictException("商品规格或价格已发生变化，请重新加载后再编辑");
+            }
+          }
+        }
+        if (dto.editorDefaultSku) {
+          const activeSku = await tx.productSKU.findFirst({
+            where: { productId: id, isActive: true },
+            select: { id: true },
+          });
+          if (activeSku) throw new ConflictException("商品已有有效 SKU，请重新加载后编辑规格");
+          if (!(dto.editorDefaultSku.price > 0)) throw new BadRequestException("默认 SKU 的成交价须大于 0");
+          try {
+            await this.createSkuInTransaction(id, {
+              ...dto.editorDefaultSku,
+              material: dto.editorDefaultSku.material ?? dto.materialType ?? "OTHER",
+              isActive: true,
+            }, lockedActor, tx);
+          } catch (error) {
+            if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+              throw new ConflictException("默认 SKU 编码已存在，请在规格面板启用原 SKU 或新增规格");
+            }
+            throw error;
+          }
+        }
+
         // 兼容旧编辑器的一口价字段：只允许映射到唯一有效 SKU，绝不直接写 Product.price。
         if (dto.price !== undefined) {
           const activeSkus = await tx.productSKU.findMany({
@@ -2995,8 +3240,15 @@ export class ProductsService {
           });
         }
 
-        await this.reconcileTradeRulesInTransaction(id, tx);
+        const adoptingNewRules =
+          (dto.categoryId !== undefined && dto.categoryId !== existing.categoryId) ||
+          (dto.salesMode === "DIRECT_PURCHASE" && existing.salesMode !== "DIRECT_PURCHASE") ||
+          (existing.visibility === "INTERNAL" && dto.visibility !== undefined && dto.visibility !== "INTERNAL") ||
+          (dto.fulfillmentConfirmed === true && !existing.fulfillmentConfirmed) ||
+          (dto.includesCertificate === true && !existing.includesCertificate);
+        await this.reconcileTradeRulesInTransaction(id, tx, adoptingNewRules);
         if (dto.publishMode === "SCHEDULED") {
+          await this.assertPublicationRequirements(id, tx, true);
           await this.writeProductAudit(tx, lockedActor, id, "product.publish.schedule", {
             scheduledPublishAt: dto.scheduledPublishAt ?? null,
           });
@@ -3019,6 +3271,58 @@ export class ProductsService {
     }
   }
 
+  async correctCode(id: number, rawCode: string, actor: ProductMutationActor) {
+    const code = rawCode.trim();
+    if (!code) throw new BadRequestException("请填写商品款号");
+    if (code.length > 50) throw new BadRequestException("款号不能超过50个字符");
+    try {
+      const result = await this.prisma.$transaction(async (tx) => {
+        const lockedActor = await this.lockAuthorizedProductActor(tx, actor);
+        const existing = await tx.product.findFirst({
+          where: { id, deletedAt: null },
+          select: { id: true, code: true, status: true },
+        });
+        if (!existing) throw new NotFoundException("商品不存在或已删除");
+        if (existing.status === "ARCHIVED") throw new ConflictException("归档作品不能更正款号");
+        await this.assertCanMutateProductDraft(id, lockedActor, tx);
+        if (existing.code === code) throw new BadRequestException("款号没有变化");
+        const occupied = await tx.product.findFirst({
+          where: { code, NOT: { id } },
+          select: { id: true },
+        });
+        if (occupied) throw new ConflictException("这个款号已经有商品使用，请换一个");
+        await this.lockProductForTradeMutation(id, tx);
+        const map = await this.lockRedirectMap(tx);
+        const reserved = map[code];
+        if (reserved && reserved.productId !== id) {
+          throw new ConflictException("这个款号仍是另一件商品的旧地址，请换一个");
+        }
+        await tx.product.update({ where: { id }, data: { code } });
+        await tx.siteSetting.update({
+          where: { key: PRODUCT_CODE_REDIRECT_KEY },
+          data: {
+            value: JSON.parse(JSON.stringify({
+              codes: retargetProductCodeRedirects(map, id, existing.code, code),
+            })) as Prisma.InputJsonValue,
+            version: { increment: 1 },
+          },
+        });
+        await this.writeProductAudit(tx, lockedActor, id, "product.code.correct", {
+          previousCode: existing.code,
+          code,
+        });
+        return { id, previousCode: existing.code, code };
+      });
+      this.notifyPublicChange(id);
+      return result;
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new ConflictException("这个款号已经有商品使用，请换一个");
+      }
+      throw error;
+    }
+  }
+
   async updateStatus(id: number, status: ProductStatus, actor: ProductMutationActor) {
     if (status === "ARCHIVED") return this.archive(id, actor);
     const product = await this.prisma.$transaction(async (tx) => {
@@ -3035,22 +3339,20 @@ export class ProductsService {
       if (status === "PUBLISHED") {
         data = {
           status: "PUBLISHED",
-          ...(existing.status === "PUBLISHED" ? {} : { publishedAt: new Date() }),
+          ...(existing.status === "PUBLISHED" || existing.publishedAt ? {} : { publishedAt: new Date() }),
           publishMode: "IMMEDIATE",
           scheduledPublishAt: null,
           scheduledPublishError: null,
         };
         await this.syncProductStartingPrice(id, tx);
         await this.assertInventoryPolicy(id, tx);
-        await this.canPublish(id, tx);
+        await this.canPublish(id, tx, existing.status !== "PUBLISHED");
         auditAction = "product.publish";
       } else {
         if (review.status === "IN_REVIEW" && status !== "DRAFT") {
           throw new ConflictException("作品正在审核中；管理员只能直接通过上架或退回草稿");
         }
-        data = status === "OFFLINE"
-          ? { status: "OFFLINE", publishMode: "WAREHOUSE", scheduledPublishAt: null }
-          : { status: "DRAFT", publishMode: "WAREHOUSE", scheduledPublishAt: null };
+        data = { status, publishMode: "WAREHOUSE", scheduledPublishAt: null, scheduledPublishError: null };
         auditAction = status === "OFFLINE"
           ? "product.unpublish"
           : review.status === "IN_REVIEW"
@@ -3097,7 +3399,7 @@ export class ProductsService {
     }
     const product = await db.product.findFirst({
       where: { id, deletedAt: null },
-      select: { id: true, status: true },
+      select: { id: true, status: true, publishedAt: true },
     });
     if (!product) {
       throw new NotFoundException("商品不存在或已被其他人处理");
@@ -3782,22 +4084,7 @@ export class ProductsService {
         await this.lockProductForTradeMutation(productId, tx);
         await this.assertCanMutateProductDraft(productId, lockedActor, tx);
         await this.assertSkuImageBelongsToGallery(tx, productId, dto.imageId);
-        const created = await tx.productSKU.create({
-          data: {
-            productId,
-            imageId: dto.imageId,
-            skuCode: dto.skuCode,
-            material: dto.material ?? "GOLD_999",
-            size: dto.size ?? null,
-            color: dto.color?.trim() || null,
-            goldWeight: dto.goldWeight ?? 0,
-            price: dto.price,
-            isActive: dto.isActive ?? true,
-          },
-        });
-        // 新建 SKU 与 Inventory、派生价格及发布门禁在同一事务内。
-        const warehouseId = await this.ensureDefaultWarehouseId(tx);
-        await this.initializeSkuInventory(tx, lockedActor, created.id, warehouseId);
+        const created = await this.createSkuInTransaction(productId, dto, lockedActor, tx);
         await this.reconcileTradeRulesInTransaction(productId, tx);
         return created;
       });
@@ -3811,6 +4098,30 @@ export class ProductsService {
       }
       throw error;
     }
+  }
+
+  private async createSkuInTransaction(
+    productId: number,
+    dto: CreateSkuDto,
+    actor: ProductMutationActor,
+    tx: Prisma.TransactionClient,
+  ) {
+    const created = await tx.productSKU.create({
+      data: {
+        productId,
+        imageId: dto.imageId,
+        skuCode: dto.skuCode,
+        material: dto.material ?? "GOLD_999",
+        size: dto.size ?? null,
+        color: dto.color?.trim() || null,
+        goldWeight: dto.goldWeight ?? 0,
+        price: dto.price,
+        isActive: dto.isActive ?? true,
+      },
+    });
+    const warehouseId = await this.ensureDefaultWarehouseId(tx);
+    await this.initializeSkuInventory(tx, actor, created.id, warehouseId);
+    return created;
   }
 
   async updateSku(

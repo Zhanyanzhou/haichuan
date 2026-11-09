@@ -1,7 +1,7 @@
 // 作品详情：公开安全字段/主图悬停放大/SKU/收藏/评价 Tab(晒单)/SEO meta。作品列表只在选款中心。
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import { useParams, Link, useLocation, useSearchParams } from "react-router-dom";
+import { useParams, Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { App as AntdApp, Tabs, Rate } from "antd";
 import RouteLoading from "@/components/common/RouteLoading";
 import {
@@ -14,7 +14,9 @@ import {
   LeftOutlined,
   RightOutlined,
 } from "@ant-design/icons";
+import { jewelryMeasurementFacts } from "@/utils/jewelryParameters";
 import { getMaterialLabel } from "@/utils/material";
+import { isPublishableCertificate } from "@/utils/productCertificate";
 import { clampProductTitle } from "@/utils/productTitleLength";
 import { getPublicProductTitle } from "@/utils/publicProductTitle";
 import { getListingImage, getPrimaryImage, getThumbnailList } from "@/utils/productImage";
@@ -38,7 +40,7 @@ import {
   trackRemoveFromSelection,
 } from "@/hooks/useAnalytics";
 import {
-  isCommerceAllowed,
+  canPrepareDirectPurchase,
   useCommerceCapabilities,
 } from "@/store/featureFlags";
 import { useReconnectingEventSource } from "@/hooks/useReconnectingEventSource";
@@ -123,6 +125,20 @@ function buildDetailZoomSrc(src: string): string {
   }
 }
 
+function relatedPriceLabel(product: {
+  salesMode?: string;
+  price?: number;
+  priceMin?: number;
+}): string {
+  if (product.salesMode === "DIRECT_PURCHASE" && Number(product.price) > 0) {
+    return `¥${Number(product.price).toLocaleString()}`;
+  }
+  if (product.salesMode === "CUSTOM_INQUIRY" && Number(product.priceMin) > 0) {
+    return `¥${Number(product.priceMin).toLocaleString()} 起`;
+  }
+  return "";
+}
+
 function RelatedWorks({ categoryId, productId, catalogUrl }: {
   categoryId: number;
   productId: number;
@@ -144,14 +160,30 @@ function RelatedWorks({ categoryId, productId, catalogUrl }: {
       </div>
       {related.length > 0 ? (
         <ul className="product-detail-page__related-grid">
-          {related.map((product) => (
-            <li key={product.id}>
-              <Link to={productPathWithCatalogReturn(publicProductPath(product), catalogUrl)}>
-                <SecureImage src={getListingImage(product)} alt="" deferUntilVisible />
-                <span>{getPublicProductTitle(product.name)}</span>
-              </Link>
-            </li>
-          ))}
+          {related.map((product) => {
+            const frames = product.images.filter((src) => src && src !== product.images[0]);
+            const secondary = frames[0] ?? "";
+            const priceLabel = relatedPriceLabel(product);
+            return (
+              <li key={product.id}>
+                <Link to={productPathWithCatalogReturn(publicProductPath(product), catalogUrl)}>
+                  <span className="product-detail-page__related-media">
+                    <SecureImage src={getListingImage(product)} alt="" deferUntilVisible />
+                    {secondary ? (
+                      <SecureImage
+                        className="product-detail-page__related-secondary"
+                        src={withPublicMediaWidth(secondary, 480)}
+                        alt=""
+                        deferUntilVisible
+                      />
+                    ) : null}
+                  </span>
+                  <span className="product-detail-page__related-name">{getPublicProductTitle(product.name)}</span>
+                  {priceLabel ? <span className="product-detail-page__related-price">{priceLabel}</span> : null}
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       ) : null}
     </section>
@@ -172,6 +204,13 @@ function ProductImagePreview({ src, alt, onStep }: { src: string; alt: string; o
   const imageScrollRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [zoomed, setZoomed] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+
+  useEffect(() => {
+    const sync = () => setFullscreen(document.fullscreenElement === dialogRef.current);
+    document.addEventListener("fullscreenchange", sync);
+    return () => document.removeEventListener("fullscreenchange", sync);
+  }, []);
 
   useLayoutEffect(() => {
     const viewport = imageScrollRef.current;
@@ -202,6 +241,16 @@ function ProductImagePreview({ src, alt, onStep }: { src: string; alt: string; o
         onClose={() => {
           setOpen(false);
           setZoomed(false);
+          if (document.fullscreenElement === dialogRef.current) {
+            void document.exitFullscreen().catch(() => undefined);
+          }
+        }}
+        onKeyDown={(event) => {
+          if (!onStep || event.altKey || event.metaKey || event.ctrlKey) return;
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+          event.preventDefault();
+          setZoomed(false);
+          onStep(event.key === "ArrowLeft" ? -1 : 1);
         }}
       >
         <form method="dialog" className="product-detail-page__image-dialog-actions">
@@ -213,6 +262,21 @@ function ProductImagePreview({ src, alt, onStep }: { src: string; alt: string; o
           ) : null}
           <button type="button" aria-pressed={zoomed} onClick={() => setZoomed((value) => !value)}>
             放大细节
+          </button>
+          <button
+            type="button"
+            aria-pressed={fullscreen}
+            onClick={() => {
+              const dialog = dialogRef.current;
+              if (!dialog?.requestFullscreen) return;
+              if (document.fullscreenElement === dialog) {
+                void document.exitFullscreen().catch(() => undefined);
+                return;
+              }
+              void dialog.requestFullscreen().catch(() => undefined);
+            }}
+          >
+            {fullscreen ? "退出全屏" : "全屏浏览"}
           </button>
           <button type="submit">关闭大图</button>
         </form>
@@ -363,6 +427,15 @@ function hasPublicFact(value: unknown): boolean {
   return clean !== "" && clean !== "-" && clean !== "—";
 }
 
+/** 公开金重只保留 SKU / 商品事实中的正数，并与规格按钮使用同一写法。 */
+function formatPublicGrams(value: unknown): string {
+  if (!hasPublicFact(value)) return "";
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return "";
+  const rounded = Math.round(numeric * 100) / 100;
+  return `${Number.isInteger(rounded) ? rounded.toFixed(0) : String(rounded)}g`;
+}
+
 function publicStringList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -411,6 +484,12 @@ function gemPublicFacts(gemInfo: Product["gemInfo"]): Array<{ label: string; val
       : GEM_TYPE_LABELS[rawType.toLowerCase()] ?? "";
   const facts: Array<{ label: string; value: string }> = [];
   if (hasPublicFact(typeLabel)) facts.push({ label: "主石", value: typeLabel });
+  if (gemInfo.settingMaterial) {
+    const materialLabel = getMaterialLabel(gemInfo.settingMaterial);
+    if (materialLabel !== "其他") facts.push({ label: "镶托材质", value: materialLabel });
+  }
+  if (hasPublicFact(gemInfo.origin)) facts.push({ label: "宝石来源", value: gemInfo.origin!.trim() });
+  if (hasPublicFact(gemInfo.treatment)) facts.push({ label: "宝石处理", value: gemInfo.treatment!.trim() });
   if (typeof gemInfo.carat === "number" && hasPublicFact(gemInfo.carat)) {
     facts.push({ label: "克拉", value: formatCarat(gemInfo.carat) });
   }
@@ -420,6 +499,11 @@ function gemPublicFacts(gemInfo: Product["gemInfo"]): Array<{ label: string; val
   if (typeof gemInfo.quantity === "number" && gemInfo.quantity > 1) {
     facts.push({ label: "数量", value: String(gemInfo.quantity) });
   }
+  if (hasPublicFact(gemInfo.metalColor)) facts.push({ label: "金属颜色", value: gemInfo.metalColor!.trim() });
+  if (hasPublicFact(gemInfo.brand)) facts.push({ label: "品牌", value: gemInfo.brand!.trim() });
+  if (hasPublicFact(gemInfo.collection)) facts.push({ label: "系列", value: gemInfo.collection!.trim() });
+  if (hasPublicFact(gemInfo.style)) facts.push({ label: "款式", value: gemInfo.style!.trim() });
+  facts.push(...jewelryMeasurementFacts(gemInfo.measurements));
   return facts;
 }
 
@@ -444,6 +528,8 @@ function ProductPrimaryAction({
   isSelected,
   onToggleSelection,
   onAddToCart,
+  buyNowPath,
+  canCheckout,
 }: {
   product: Product;
   selectedSku: ProductSKU | null;
@@ -459,6 +545,8 @@ function ProductPrimaryAction({
   isSelected: boolean;
   onToggleSelection: () => void;
   onAddToCart: () => void;
+  buyNowPath: string | null;
+  canCheckout: boolean;
 }) {
   const primaryClass = "btn btn-primary product-detail-page__primary-action";
 
@@ -510,9 +598,6 @@ function ProductPrimaryAction({
   if (typeof product.isAvailableForPurchase !== "boolean") {
     return <button type="button" className={primaryClass} disabled>库存状态暂不可用</button>;
   }
-  if (commerceFlagsLoading || !commerceFlags) {
-    return <button type="button" className={primaryClass} disabled>正在确认购买状态</button>;
-  }
   if (commerceFlagsError) {
     return (
       <div role="alert" aria-live="polite" className="grid gap-3">
@@ -526,6 +611,9 @@ function ProductPrimaryAction({
         </button>
       </div>
     );
+  }
+  if (commerceFlagsLoading || !commerceFlags) {
+    return <button type="button" className={primaryClass} disabled>正在确认购买状态</button>;
   }
   if (!canUseCart) {
     return (
@@ -546,29 +634,35 @@ function ProductPrimaryAction({
       </div>
     );
   }
-  if (purchaseIssue) {
-    return <button type="button" className={primaryClass} disabled>{purchaseIssue.actionLabel}</button>;
-  }
-  if (!isSignedIn) {
-    return (
-      <Link
-        to="/customer"
-        state={{ returnTo: publicProductPath(product) }}
-        className={`${primaryClass} text-center`}
-      >
-        登录后购买
-      </Link>
-    );
-  }
   return (
-    <button
-      type="button"
-      className={primaryClass}
-      onClick={onAddToCart}
-      disabled={addingToCart || !canAddToCart || !selectedSku}
-    >
-      <ShoppingCartOutlined /> {addingToCart ? "加入中..." : "加入购物车"}
-    </button>
+    <div className="product-detail-page__purchase-actions" data-checkout={canCheckout}>
+      {purchaseIssue ? (
+        <button type="button" className={primaryClass} disabled>{purchaseIssue.actionLabel}</button>
+      ) : !isSignedIn ? (
+        <Link
+          to={`/customer?returnTo=${encodeURIComponent(buyNowPath ?? publicProductPath(product))}`}
+          className={primaryClass}
+        >
+          登录后购买
+        </Link>
+      ) : (
+        <button
+          type="button"
+          className={primaryClass}
+          onClick={onAddToCart}
+          disabled={addingToCart || !canAddToCart || !selectedSku}
+        >
+          <ShoppingCartOutlined /> {addingToCart ? "加入中..." : "加入购物车"}
+        </button>
+      )}
+      {canCheckout ? (
+        buyNowPath && !addingToCart ? (
+          <Link to={buyNowPath} className="btn btn-primary product-detail-page__buy-now">立即购买</Link>
+        ) : (
+          <button type="button" className="btn btn-primary product-detail-page__buy-now" disabled>立即购买</button>
+        )
+      ) : null}
+    </div>
   );
 }
 
@@ -576,6 +670,7 @@ export default function ProductDetail() {
   const { message } = AntdApp.useApp();
   const { id } = useParams();
   const location = useLocation();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const catalogReturnUrl = getCatalogReturnUrl(id)
     || sanitizeCatalogReturnUrl(searchParams.get("from"))
@@ -594,9 +689,11 @@ export default function ProductDetail() {
   const loadFailure = resolution?.kind === "error";
   const [qty, setQty] = useState(1);
   const [selectedSkuId, setSelectedSkuId] = useState<number | null>(null);
+  const [selectedStyle, setSelectedStyle] = useState<string | null>(null);
   const [mainImage, setMainImage] = useState(0);
   const [galleryPanel, setGalleryPanel] = useState<"images" | "parameters">("images");
   const parameterPreviewHeadingRef = useRef<HTMLHeadingElement>(null);
+  const parameterSwitchRef = useRef<HTMLButtonElement>(null);
   const specificationsHeadingRef = useRef<HTMLHeadingElement>(null);
   useLayoutEffect(() => {
     if (galleryPanel === "parameters") {
@@ -658,6 +755,7 @@ export default function ProductDetail() {
     setGalleryPanel("images");
     galleryPointerStart.current = null;
     setSelectedSkuId(null);
+    setSelectedStyle(null);
     setQty(1);
     setPurchaseError("");
   }, [workKey]);
@@ -731,6 +829,13 @@ export default function ProductDetail() {
     );
     return () => controller.abort();
   }, [id, workKey, revision]);
+
+  useEffect(() => {
+    if (!id || !product?.code || isVirtualWork) return;
+    const routeCode = decodeURIComponent(id);
+    if (/^\d+$/.test(routeCode) || routeCode === product.code) return;
+    navigate(`/products/${encodeURIComponent(product.code)}${location.search}`, { replace: true });
+  }, [id, product?.code, isVirtualWork, navigate, location.search]);
 
   useEffect(() => {
     if (!product?.id || isVirtualWork) {
@@ -918,24 +1023,23 @@ export default function ProductDetail() {
   // Product.price 是服务端派生展示价；选中 SKU 后只展示该 SKU 的成交价。
   const activeSkus = (Array.isArray(product.skus) ? product.skus : [])
     .filter((s) => s.isActive);
-  const selectedSku = activeSkus.find((sku) => sku.id === selectedSkuId) ?? null;
   // P1-33：缩略图与主图共享同一数据源，mainImage 驱动主图切换
   // （原主图恒渲染 getPrimaryImage，点击缩略图只改高亮、主图不变）
   const thumbnails = getThumbnailList(product.images, product.primaryImage);
   const skuOptions = activeSkus.map((sku) => {
     const material = getMaterialLabel(sku.material);
     const color = hasPublicFact(sku.color) ? sku.color!.trim() : "";
-    const name = [
-      material !== "其他" ? material : "",
-      color,
-      hasPublicFact(sku.size) ? sku.size!.trim() : "",
-      hasPublicFact(sku.goldWeight) ? `${sku.goldWeight}g` : "",
-    ].filter(Boolean).join(" · ");
+    const size = hasPublicFact(sku.size) ? sku.size!.trim() : "";
+    const styleName = [material !== "其他" ? material : "", color, size].filter(Boolean).join(" · ");
+    const weight = formatPublicGrams(sku.goldWeight);
     const imageIndex = thumbnails.findIndex((image) => image.id === sku.imageId);
     const image = thumbnails[imageIndex];
     return {
       sku,
-      name: name || "作品规格",
+      styleKey: JSON.stringify([sku.material, color, size]),
+      styleName: styleName || "作品款式",
+      weight,
+      name: [styleName, weight].filter(Boolean).join(" · ") || "作品规格",
       imageIndex,
       imageUrl: image?.mediaUrl || image?.url || "",
       priceLabel: Number(sku.price) > 0 ? `¥${Number(sku.price).toLocaleString()}` : "价格待确认",
@@ -945,15 +1049,40 @@ export default function ProductDetail() {
     };
   });
   const hasSkuColors = activeSkus.some((sku) => hasPublicFact(sku.color));
-  const hasSkuImages = skuOptions.some((option) => Boolean(option.imageUrl));
-  const selectSku = (id: string) => {
-    const option = skuOptions.find(({ sku }) => String(sku.id) === id);
-    if (option?.sku.isAvailableForPurchase !== true) return;
+  const hasSkuImages = skuOptions.some((option) => option.imageUrl);
+  const hasSkuWeights = skuOptions.some((option) => option.weight);
+  const styles = new Map<string, typeof skuOptions>();
+  for (const option of skuOptions) {
+    const group = styles.get(option.styleKey);
+    if (group) group.push(option);
+    else styles.set(option.styleKey, [option]);
+  }
+  const splitStyles = [...styles.values()].some(
+    (options) => new Set(options.map((option) => option.weight).filter(Boolean)).size > 1,
+  );
+  const activeStyle = styles.has(selectedStyle ?? "") ? selectedStyle : styles.size === 1
+    ? skuOptions[0].styleKey : null;
+  const visibleOptions = splitStyles ? styles.get(activeStyle ?? "") ?? [] : skuOptions;
+  const selectedSku = visibleOptions.find(({ sku }) => sku.id === selectedSkuId)?.sku ?? null;
+  const pickStyle = (key: string, imageIndex: number) => {
+    if (activeStyle === key) return;
+    setSelectedStyle(key);
+    setSelectedSkuId(null);
+    setPurchaseError("");
+    setQty(1);
+    if (hasSkuImages) {
+      setMainImage(Math.max(0, imageIndex));
+      setGalleryPanel("images");
+    }
+  };
+  const selectSku = (option: (typeof skuOptions)[number]) => {
+    if (option.sku.isAvailableForPurchase !== true) return;
     setSelectedSkuId(option.sku.id);
     setPurchaseError("");
     setQty(1);
     if (hasSkuImages) {
-      setMainImage(Math.max(0, option.imageIndex));
+      const styleImage = styles.get(option.styleKey)?.find(({ imageIndex }) => imageIndex >= 0);
+      setMainImage(option.imageIndex >= 0 ? option.imageIndex : styleImage?.imageIndex ?? 0);
       setGalleryPanel("images");
     }
   };
@@ -993,8 +1122,7 @@ export default function ProductDetail() {
   const isSingleUnit = product.inventoryPolicy === "SINGLE_UNIT";
   const availabilityKnown = typeof product.isAvailableForPurchase === "boolean";
   const isSoldOut = isDirectPurchase && product.isAvailableForPurchase === false;
-  const commerceOk = isCommerceAllowed(product.salesMode, commerceEnabled);
-  const canUseCart = commerceOk && cartEnabled;
+  const canUseCart = canPrepareDirectPurchase(product.salesMode, cartEnabled);
   const availableSkus = activeSkus.filter((sku) => sku.isAvailableForPurchase === true);
   const allSkuAvailabilityKnown = activeSkus.every(
     (sku) => typeof sku.isAvailableForPurchase === "boolean",
@@ -1021,7 +1149,7 @@ export default function ProductDetail() {
   } else if (isDirectPurchase && !selectedSku) {
     purchaseIssue = {
       actionLabel: "请先选择规格",
-      detail: "请选择一个库存已确认的规格后继续。",
+      detail: "请先选择可购买的规格。",
       offerConsultation: false,
     };
   } else if (isDirectPurchase && selectedSku?.isAvailableForPurchase !== true) {
@@ -1044,23 +1172,48 @@ export default function ProductDetail() {
     product.isAvailableForPurchase === true &&
     selectedSku?.isAvailableForPurchase === true &&
     displayPrice > 0;
+  const completionOpen = Boolean(commerceEnabled && commerceFlags?.paymentEnabled);
+  const buyNowPath = canAddToCart && selectedSku && id && !isVirtualWork
+    ? `/checkout?${new URLSearchParams({ product: id, sku: String(selectedSku.id), quantity: String(isSingleUnit ? 1 : qty) })}`
+    : null;
+  const canEnterCheckout = Boolean(
+    canUseCart
+    && product.isAvailableForPurchase === true
+    && !isVirtualWork
+    && commerceFlags
+    && !commerceFlagsLoading
+    && !commerceFlagsError
+    && purchaseIssue?.offerConsultation !== true
+  );
   const canChoosePurchaseQuantity =
     isDirectPurchase &&
     product.isAvailableForPurchase === true &&
     selectedSku?.isAvailableForPurchase === true &&
     displayPrice > 0;
-  const purchaseGuidance = purchaseIssue
-    ? purchaseIssue.detail
-    : !selectedSku
-      ? `请先选择${hasSkuColors ? "规格与颜色" : "作品规格"}；所选组合将决定价格、库存状态与对应作品图。`
-      : commerceFlagsLoading
-        ? "正在确认购买服务状态；您可以先核对规格、颜色与数量。"
-        : !canUseCart
-          ? "购买服务当前未开放；已选规格仍可查看，开放后可继续加入购物车。"
-          : isSignedIn
-            ? "所选规格可以加入购物车；结算前请再次核对规格、颜色与数量。"
-            : "所选规格可以购买；登录后可加入购物车并继续结算。";
-  const displayGoldWeight = selectedSku?.goldWeight ?? product.goldWeight;
+  const purchaseGuidance = purchaseIssue?.detail ?? (
+    commerceFlagsLoading ? "正在确认购买状态。"
+    : !canUseCart ? "您可以先核对规格，或联系顾问了解购买方式。"
+    : !completionOpen
+      ? (isSignedIn
+        ? "所选规格可以加入购物车。暂时不能提交订单或付款。"
+        : "请登录后继续购买。暂时不能提交订单或付款。")
+      : isSignedIn ? "所选规格可以加入购物车。"
+      : "请登录后继续购买。"
+  );
+  const skuGoldLabels = activeSkus
+    .map((sku) => formatPublicGrams(sku.goldWeight))
+    .filter(Boolean);
+  const uniqueSkuGoldLabels = [...new Set(skuGoldLabels)];
+  const selectedGoldLabel = formatPublicGrams(selectedSku?.goldWeight);
+  const productGoldLabel = formatPublicGrams(product.goldWeight);
+  // 多规格金重不一致时，未选择前不回退到商品级金重，避免和规格按钮互相矛盾。
+  const resolvedGoldLabel = selectedGoldLabel
+    || (uniqueSkuGoldLabels.length === 1 ? uniqueSkuGoldLabels[0] : "")
+    || (uniqueSkuGoldLabels.length === 0 ? productGoldLabel : "");
+  const showPurchaseWeight = Boolean(resolvedGoldLabel);
+  const selectedOption = selectedSku
+    ? skuOptions.find((option) => option.sku.id === selectedSku.id) ?? null
+    : null;
   const originalSummary =
     product.shortDescription?.trim() || product.description?.trim() || "";
   const hasDesignPreview = /3D\s*设计效果图/iu.test(originalSummary);
@@ -1072,24 +1225,34 @@ export default function ProductDetail() {
         Boolean(block) && (block.type === "TEXT" || block.type === "IMAGE"),
       )
     : [];
-  const materialLabel = getMaterialLabel(product.materialType);
-  const numericGoldWeight = Number(displayGoldWeight);
+  const materialLabel = getMaterialLabel(selectedSku?.material ?? product.materialType);
+  const materialNote = typeof product.gemInfo?.materialNote === "string" ? product.gemInfo.materialNote.trim() : "";
+  const resolvedGoldNumber = Number.parseFloat(resolvedGoldLabel);
+  const productGoldNumber = Number.parseFloat(productGoldLabel);
   const numericTotalWeight = Number(product.weight);
-  const hasDistinctTotalWeight = hasPublicFact(product.weight) && (
-    !hasPublicFact(displayGoldWeight)
-    || !Number.isFinite(numericGoldWeight)
-    || !Number.isFinite(numericTotalWeight)
-    || numericGoldWeight !== numericTotalWeight
-  );
+  // 商品级金重与总重相同，只说明没有单独的总重事实；规格金重以 SKU 为准。
+  const totalRepeatsProductGold = Number.isFinite(productGoldNumber)
+    && Number.isFinite(numericTotalWeight)
+    && productGoldNumber === numericTotalWeight;
+  const hasDistinctTotalWeight = hasPublicFact(product.weight)
+    && !totalRepeatsProductGold
+    && (
+      !resolvedGoldLabel
+      || !Number.isFinite(resolvedGoldNumber)
+      || !Number.isFinite(numericTotalWeight)
+      || resolvedGoldNumber !== numericTotalWeight
+    );
   const categoryId = product.category?.id;
   const categoryName = product.category?.name?.trim() ?? "";
   const seriesName = categoryName && categoryName !== displayTitle ? categoryName : "";
   const publicFacts = [
-    { label: "材质", value: hasPublicFact(materialLabel) && materialLabel !== "其他" ? materialLabel : "" },
+    { label: "商品编号", value: selectedSku?.skuCode?.trim() || product.code },
+    { label: "类别", value: categoryName },
+    { label: "材质", value: hasPublicFact(materialLabel) && materialLabel !== "其他" ? materialLabel : materialNote },
     ...gemPublicFacts(product.gemInfo),
     {
       label: "金重",
-      value: hasPublicFact(displayGoldWeight) ? `${displayGoldWeight}g` : "",
+      value: resolvedGoldLabel,
     },
     {
       label: "总重",
@@ -1097,6 +1260,9 @@ export default function ProductDetail() {
     },
     ...publicStringList(product.craftTechnique)
       .map((craft) => ({ label: "工艺", value: craft })),
+    hasPublicFact(product.packageType)
+      ? { label: "包装", value: product.packageType!.trim() }
+      : null,
   ].filter((fact): fact is { label: string; value: string } => Boolean(fact?.value));
   const storyText = publicSummary && publicSummary !== seriesName ? publicSummary : "";
   const storyIsShort = Boolean(storyText) && storyText.length <= 18 && !/[。！？.!?]/u.test(storyText);
@@ -1104,14 +1270,8 @@ export default function ProductDetail() {
   const storyRepeatsTitle = storyIsShort && Boolean(storyStem) && displayTitle.includes(storyStem);
   const storyLabel = storyIsShort && !storyRepeatsTitle ? storyText : "";
   const storyBody = storyIsShort ? "" : storyText;
-  const now = Date.now();
   const validCertificates = (Array.isArray(product.certificates) ? product.certificates : [])
-    .filter((certificate) => {
-      if (!hasPublicFact(certificate.certNumber)) return false;
-      if (!certificate.expireDate) return true;
-      const expiry = new Date(certificate.expireDate).getTime();
-      return Number.isFinite(expiry) && expiry >= now;
-    });
+    .filter(isPublishableCertificate);
   const currentSize = hasPublicFact(selectedSku?.size)
     ? selectedSku!.size!.trim()
     : !selectedSku && hasPublicFact(product.size)
@@ -1180,7 +1340,7 @@ export default function ProductDetail() {
       setPurchaseError("该作品已售罄，仍可浏览作品信息。");
       return;
     }
-    if (!selectedSku) {
+    if (!canAddToCart || !selectedSku || !isSignedIn || isVirtualWork) {
       setPurchaseError("请先选择可购买的商品规格。");
       return;
     }
@@ -1297,29 +1457,33 @@ export default function ProductDetail() {
             </div>
             {mainImageUrl ? (
               <div className="product-detail-page__gallery-controls">
-                <div className="product-detail-page__gallery-caption">
-                  <p>{showParameterPreview ? "已公开参数" : hasDesignPreview ? "3D 设计效果图" : "作品图集"}</p>
-                  {thumbnails.length > 1 && !showGalleryPreview ? (
-                    <>
-                      <span className="product-detail-page__gallery-count" aria-hidden="true">{mainImage + 1} / {thumbnails.length}</span>
-                      <span className="sr-only" aria-live="polite">第 {mainImage + 1} 张，共 {thumbnails.length} 张作品图</span>
-                    </>
-                  ) : null}
-                </div>
-                <div className="product-detail-page__media-switcher" role="group" aria-label="切换作品内容">
-                  <button
-                    type="button"
-                    aria-pressed={!showGalleryPreview}
-                    onClick={() => setGalleryPanel("images")}
-                  >{showParameterPreview ? "返回图集" : "作品图集"}</button>
-                  {parameterPreview.length > 0 ? (
-                    <button
-                      type="button"
-                      aria-pressed={showParameterPreview}
-                      onClick={() => setGalleryPanel("parameters")}
-                    >参数</button>
-                  ) : null}
-                </div>
+                {hasDesignPreview && !showGalleryPreview ? (
+                  <p className="product-detail-page__gallery-caption">3D 设计效果图</p>
+                ) : null}
+                {thumbnails.length > 1 && !showGalleryPreview ? (
+                  <span className="sr-only" aria-live="polite">第 {mainImage + 1} 张，共 {thumbnails.length} 张作品图</span>
+                ) : null}
+                {showParameterPreview || parameterPreview.length > 0 ? (
+                  <div className="product-detail-page__media-switcher" role="group" aria-label="切换作品内容">
+                    {showParameterPreview ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          parameterSwitchRef.current?.focus();
+                          setGalleryPanel("images");
+                        }}
+                      >返回图集</button>
+                    ) : null}
+                    {parameterPreview.length > 0 ? (
+                      <button
+                        ref={parameterSwitchRef}
+                        type="button"
+                        aria-pressed={showParameterPreview}
+                        onClick={() => setGalleryPanel("parameters")}
+                      >参数</button>
+                    ) : null}
+                  </div>
+                ) : null}
                 {!showGalleryPreview ? (
                   <ProductImagePreview
                     key={workKey}
@@ -1382,14 +1546,13 @@ export default function ProductDetail() {
             </div>
           </div>
 
-        {publicFacts.length > 0 || storyBody || currentSize || hasSkuSizeFact || isDirectPurchase || visibleServiceFacts.length > 0 ? (
+        {publicFacts.length > 0 || currentSize || hasSkuSizeFact || isDirectPurchase || visibleServiceFacts.length > 0 ? (
           <div className="product-detail-page__details-grid" id="product-specifications">
-            {publicFacts.length > 0 || storyBody || currentSize || hasSkuSizeFact ? (
+            {publicFacts.length > 0 || currentSize || hasSkuSizeFact ? (
               <section className="product-detail-page__specifications" aria-labelledby="product-specifications-title">
                 <h2 id="product-specifications-title" ref={specificationsHeadingRef} tabIndex={-1}>
-                  {publicFacts.length > 0 || currentSize || hasSkuSizeFact ? "参数" : "详情"}
+                  参数
                 </h2>
-                {storyBody ? <p className="product-detail-page__description">{storyBody}</p> : null}
                 {publicFacts.length > 0 ? (
                   <dl className="product-detail-page__facts-grid">
                     {publicFacts.map((fact, index) => (
@@ -1431,18 +1594,38 @@ export default function ProductDetail() {
                   ))}
                 </dl>
                 <p className="product-detail-page__decision-note">{decisionNote}</p>
+                <div className="product-detail-page__services">
+                  <details className="product-detail-page__service" open>
+                    <summary>商品咨询</summary>
+                    <p>如需核对规格、尺寸或购买方式，可联系珠宝顾问。页面未列明的费用与交期不作推定。</p>
+                    <Link to={publicProductInquiryPath(product, "purchase-support")}>联系珠宝顾问</Link>
+                  </details>
+                  <details className="product-detail-page__service">
+                    <summary>保养与维修</summary>
+                    <p>可说明保养或维修需求。是否承接、费用与时间，以实际评估为准。</p>
+                    <Link to="/contact">前往联系与咨询</Link>
+                  </details>
+                  {isSignedIn ? (
+                    <details className="product-detail-page__service">
+                      <summary>订单售后</summary>
+                      <p>已购作品的退款或售后，在账户订单中按实际状态申请。</p>
+                      <Link to="/customer?section=orders">查看订单</Link>
+                    </details>
+                  ) : null}
+                </div>
               </section>
             ) : null}
 
           </div>
         ) : null}
-        {detailBlocks.length > 0 && (
-          <section className="product-detail-page__content" id="product-detail-content" aria-labelledby="product-detail-content-title">
-            <h2 id="product-detail-content-title">图文详情</h2>
+        {storyBody || detailBlocks.length > 0 ? (
+          <section className="product-detail-page__content product-detail-page__editorial" id="product-detail-content" aria-labelledby="product-detail-content-title">
+            <h2 id="product-detail-content-title">作品与工艺</h2>
+            {storyBody ? <p className="product-detail-page__editorial-copy">{storyBody}</p> : null}
             {detailBlocks.map((block, index) => {
               if (block.type === "TEXT") {
                 return block.text ? (
-                  <p key={`detail-text-${index}`} className="mx-auto max-w-3xl whitespace-pre-wrap py-8 text-base leading-8 text-brand-muted">
+                  <p key={`detail-text-${index}`} className="product-detail-page__editorial-copy">
                     {block.text}
                   </p>
                 ) : null;
@@ -1458,13 +1641,13 @@ export default function ProductDetail() {
                   width={image?.width ?? undefined}
                   height={image?.height ?? undefined}
                   alt={block.alt || `${publicTitle} 详情图 ${index + 1}`}
-                  className="mx-auto block h-auto w-full"
+                  className="product-detail-page__editorial-photo"
                   deferUntilVisible
                 />
               ) : null;
             })}
           </section>
-        )}
+        ) : null}
           </div>
           {/* Right: Info */}
           <div className="product-detail-page__summary">
@@ -1510,7 +1693,7 @@ export default function ProductDetail() {
               aria-label={isDirectPurchase ? "购买信息" : "作品服务"}
             >
             {/* 只显示来自公开事实源的非空事实，不以 0 或破折号填充。 */}
-            {hasPublicFact(displayGoldWeight) || (isDirectPurchase && displayPrice > 0) || customReferencePrice > 0 ? (
+            {showPurchaseWeight || (isDirectPurchase && displayPrice > 0) || customReferencePrice > 0 ? (
               <dl className="product-detail-page__commerce-facts">
                 {isDirectPurchase && displayPrice > 0 ? (
                   <>
@@ -1527,67 +1710,92 @@ export default function ProductDetail() {
                     <dd className="is-price">¥{customReferencePrice.toLocaleString()}<span>起</span></dd>
                   </>
                 ) : null}
-                {hasPublicFact(displayGoldWeight) ? (
+                {showPurchaseWeight ? (
                   <>
                     <dt>金重</dt>
-                    <dd>{displayGoldWeight}g</dd>
+                    <dd>{resolvedGoldLabel}</dd>
                   </>
                 ) : null}
               </dl>
             ) : null}
+            {selectedOption ? (
+              <p className="product-detail-page__availability" role="status">
+                {selectedOption.sku.isAvailableForPurchase === true
+                  ? "当前规格可购买"
+                  : selectedOption.sku.isAvailableForPurchase === false
+                    ? "当前规格已售罄"
+                    : "库存待确认"}
+              </p>
+            ) : null}
             {customReferencePrice > 0 ? (
               <p className="product-detail-page__decision-note">最终金额在确认定制方案后报价。</p>
             ) : null}
-            {/* SKU selection */}
-            {isDirectPurchase && hasSkuImages ? (
+            {isDirectPurchase && splitStyles && styles.size > 1 ? (
+              <fieldset className="product-detail-page__sku-picker">
+                <legend className="product-detail-page__section-label">款式</legend>
+                <div className="product-detail-page__sku-cards">
+                  {[...styles].map(([key, options]) => {
+                    const image = options.find((option) => option.imageUrl);
+                    return (
+                      <label className="product-detail-page__sku-card" key={key}>
+                        <input
+                          className="sr-only"
+                          type="radio"
+                          name="product-style"
+                          checked={activeStyle === key}
+                          disabled={addingToCart}
+                          onChange={() => pickStyle(key, image?.imageIndex ?? -1)}
+                        />
+                        {image ? <SecureImage src={withPublicMediaWidth(image.imageUrl, 480)} alt="" deferUntilVisible /> : null}
+                        <span>{options[0].styleName}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </fieldset>
+            ) : null}
+
+            {isDirectPurchase && visibleOptions.length > 0 ? (
               <fieldset className="product-detail-page__sku-picker">
                 <legend className="product-detail-page__section-label">
-                  {hasSkuColors ? "选择规格与颜色" : "选择作品规格"}
+                  {splitStyles || (styles.size === 1 && visibleOptions.every(({ styleName, weight }) => styleName === "作品款式" && weight))
+                    ? "金重"
+                    : hasSkuColors ? "款式与颜色" : "款式规格"}
                 </legend>
                 <div className="product-detail-page__sku-cards">
-                  {skuOptions.map(({ sku, name, imageUrl, priceLabel, statusLabel }) => (
-                    <label className="product-detail-page__sku-card" key={sku.id}>
-                      <input
-                        className="sr-only"
-                        type="radio"
-                        name="product-sku"
-                        checked={sku.id === selectedSkuId}
-                        disabled={addingToCart || sku.isAvailableForPurchase !== true}
-                        onChange={() => selectSku(String(sku.id))}
-                      />
-                      {imageUrl ? <SecureImage src={withPublicMediaWidth(imageUrl, 480)} alt="" deferUntilVisible /> : null}
-                      <span>
-                        <span>{name}</span>
-                        <small>{priceLabel} · {statusLabel}</small>
-                      </span>
-                    </label>
-                  ))}
+                  {visibleOptions.map((option) => {
+                    const { sku, name, imageUrl, priceLabel, statusLabel, weight } = option;
+                    const weightOnly = splitStyles && styles.size > 1;
+                    const label = weightOnly ? weight || "金重未标注" : name;
+                    const hasDuplicateLabel = visibleOptions.some((other) =>
+                      other.sku.id !== sku.id && (weightOnly ? other.weight === weight : other.name === name)
+                    );
+                    return (
+                      <label className="product-detail-page__sku-card" key={sku.id}>
+                        <input
+                          className="sr-only"
+                          type="radio"
+                          name="product-sku"
+                          value={sku.id}
+                          checked={sku.id === selectedSkuId}
+                          disabled={addingToCart || sku.isAvailableForPurchase !== true}
+                          onChange={() => selectSku(option)}
+                        />
+                        {imageUrl && !weightOnly ? <SecureImage src={withPublicMediaWidth(imageUrl, 480)} alt="" deferUntilVisible /> : null}
+                        <span>
+                          <span>{label}{hasDuplicateLabel ? ` · ${sku.skuCode}` : ""}</span>
+                          <small>{priceLabel} · {statusLabel}</small>
+                        </span>
+                      </label>
+                    );
+                  })}
                 </div>
-                <p className="product-detail-page__section-label product-detail-page__sku-status" role="status">
-                  {selectedSku ? `所选规格：${skuOptions.find(({ sku }) => sku.id === selectedSku.id)?.statusLabel}` : "请选择规格以查看对应图片和价格"}
+                <p className="sr-only" role="status">
+                  {selectedSku ? `已选 ${skuOptions.find(({ sku }) => sku.id === selectedSku.id)?.name}` : null}
                 </p>
               </fieldset>
-            ) : isDirectPurchase && activeSkus.length > 0 ? (
-              <div className="product-detail-page__sku-picker">
-                <label htmlFor="product-sku" className="product-detail-page__section-label">
-                  {hasSkuColors ? "规格与颜色" : "规格"}
-                </label>
-                <select
-                  id="product-sku"
-                  className="product-detail-page__sku-select"
-                  aria-label="选择作品规格"
-                  value={selectedSku?.id ?? ""}
-                  disabled={addingToCart}
-                  onChange={(event) => selectSku(event.target.value)}
-                >
-                  <option value="" disabled>请选择规格</option>
-                  {skuOptions.map(({ sku, name, priceLabel, statusLabel }) => (
-                    <option key={sku.id} value={sku.id} disabled={sku.isAvailableForPurchase !== true}>
-                      {`${name} · ${priceLabel}，${statusLabel}`}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            ) : isDirectPurchase && splitStyles ? (
+              <p className="product-detail-page__section-label">先选择款式，再选择对应金重。</p>
             ) : null}
 
             {showSizeConsultation ? (
@@ -1626,10 +1834,10 @@ export default function ProductDetail() {
                     +
                   </button>
                 </div>
-                <small>{isSingleUnit ? "该作品每次最多购买 1 件。" : "实际可购数量将在加入购物车时再次校验。"}</small>
+                <small>{isSingleUnit ? "该作品每次最多购买 1 件。" : "可购数量以提交时的库存为准。"}</small>
               </div>
             ) : null}
-            <div className="product-detail-page__action-zone">
+            <div className="product-detail-page__action-zone" data-pinned={canUseCart && product.isAvailableForPurchase === true}>
               <ProductPrimaryAction
                 product={product}
                 selectedSku={selectedSku}
@@ -1654,6 +1862,8 @@ export default function ProductDetail() {
                   else trackAddToSelection(product.id);
                 }}
                 onAddToCart={handleAddToCart}
+                buyNowPath={buyNowPath}
+                canCheckout={canEnterCheckout}
               />
             </div>
             {isSingleUnit && isDirectPurchase ? (
@@ -1684,6 +1894,14 @@ export default function ProductDetail() {
                 {purchaseError}
               </p>
             ) : null}
+            {isDirectPurchase ? (
+              <Link
+                className="product-detail-page__advisor"
+                to={publicProductInquiryPath(product, "purchase-support")}
+              >
+                联系珠宝顾问
+              </Link>
+            ) : null}
             </section>
 
           </div>
@@ -1691,10 +1909,10 @@ export default function ProductDetail() {
         </div>
             <nav className="product-detail-page__content-nav" aria-label="作品详情内容">
               <a href="#product-media">作品图集</a>
-              {publicFacts.length > 0 || storyBody || currentSize || hasSkuSizeFact || isDirectPurchase || visibleServiceFacts.length > 0 ? (
+              {publicFacts.length > 0 || currentSize || hasSkuSizeFact || isDirectPurchase || visibleServiceFacts.length > 0 ? (
                 <a href="#product-specifications">参数信息</a>
               ) : null}
-              {detailBlocks.length > 0 ? <a href="#product-detail-content">图文详情</a> : null}
+              {storyBody || detailBlocks.length > 0 ? <a href="#product-detail-content">作品与工艺</a> : null}
               {validCertificates.length > 0 || Boolean(reviewsData?.total) ? <a href="#product-proof">证书与评价</a> : null}
               {sameCategoryHref && categoryId ? <a href="#product-related">同类作品</a> : null}
             </nav>

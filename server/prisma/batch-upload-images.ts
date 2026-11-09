@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 
 const p = new PrismaClient();
-const imgDir = "g:/网站搭建2/client/public/images/products";
+const imgDir = "g:/海川珠宝官方网站开发/client/public/images/products";
 
 async function main() {
   const files = fs.readdirSync(imgDir).filter((f: string) => f.match(/\.(png|jpg|jpeg|webp)$/i));

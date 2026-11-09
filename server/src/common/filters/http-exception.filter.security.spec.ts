@@ -37,7 +37,7 @@ function capture(exception: unknown, url = "/api/cart") {
 test("Prisma 校验异常不向公开响应泄漏调用、绝对路径或堆栈", () => {
   const result = capture(
     new Prisma.PrismaClientValidationError(
-      "Invalid `prisma.cart.create()` invocation in G:\\网站搭建2\\server\\src\\modules\\cart\\cart.service.ts:181:22",
+      "Invalid `prisma.cart.create()` invocation in G:\\海川珠宝官方网站开发\\server\\src\\modules\\cart\\cart.service.ts:181:22",
       { clientVersion: "5.8.0" },
     ),
   );

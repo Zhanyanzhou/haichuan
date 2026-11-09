@@ -1,7 +1,7 @@
 import {
   IsString, IsOptional, IsInt, IsBoolean, IsEnum, IsNumber,
   Min, Max, MaxLength, IsNotEmpty, ValidateNested, IsArray, ArrayMaxSize, ArrayUnique,
-  IsIn, IsDateString,
+  IsIn, IsDateString, ValidateIf,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import {
@@ -160,6 +160,11 @@ export class CreateProductDto {
   @IsEnum(ProductDispatchTime)
   dispatchTime?: ProductDispatchTime;
 
+  @ValidateIf((_dto, value) => value !== undefined)
+  @Transform(({ obj }) => obj.fulfillmentConfirmed)
+  @IsBoolean({ message: '请确认备货状态和发出时效' })
+  fulfillmentConfirmed?: boolean;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -187,7 +192,7 @@ export class CreateProductDto {
   requiresSignature?: boolean;
 
   @IsOptional()
-  @Type(() => Boolean)
+  @Transform(({ obj }) => obj.includesCertificate)
   @IsBoolean()
   includesCertificate?: boolean;
 

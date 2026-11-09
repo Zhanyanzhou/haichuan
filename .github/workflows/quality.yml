@@ -114,6 +114,7 @@ jobs:
           npm run test:template-v2-gate-d
           npm run test:decision-governance
           npm run test:client-public-env
+          npm run test:image-quality
           npm run test:server
           npm run test:release-supply-chain
 
@@ -191,6 +192,11 @@ jobs:
           --project=${{ matrix.project }}
           --shard=${{ matrix.shard }}
           --workers=1
+
+      - name: 运行 Storybook 状态与无障碍检查（不代表视觉基线已认可）
+        if: matrix.name == 'public'
+        working-directory: client
+        run: npm run test:storybook:state
 
       - name: 保存失败的 E2E 报告与 trace
         if: failure()

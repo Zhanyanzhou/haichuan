@@ -1,11 +1,12 @@
 /**
- * 模板台架（dev-only）— 真实组件渲染的模板设计视图。
+ * 旧 Hero 调试台架（dev-only），不代表当前正式模板目录。
  *
- * 用途:以中性占位 + 演示文字呈现模板本身的形态(布局/排印/留白/比例),
- * 不受站点壳层与存量素材干扰。对应规则第 27 条占位体系与第 33 条画布一致性。
+ * 仅隔离调试保留的 Hero 测试样例；动态模板验收使用现有模板设计、
+ * 页面预览与公开页，覆盖相同模板版本的真实内容和双端构图。
  * 路由 /__templates 仅本地开发使用,不属于公开页面。
  */
 import HeroSection from "@/components/blocks/HeroSection";
+import { Link } from "react-router-dom";
 import ContentTemplateSkeletonPreview from "@/page-builder/preview/ContentTemplateSkeletonPreview";
 import type { PageModule } from "@/types/pageModule";
 
@@ -62,6 +63,18 @@ function Label({ no, name, note }: { no: string; name: string; note: string }) {
 export default function TemplateGallery() {
   return (
     <div style={{ background: "#111315", minHeight: "100vh" }}>
+      <section className="mx-auto max-w-5xl px-6 pt-10 text-white" aria-labelledby="legacy-hero-debug-title">
+        <h1 id="legacy-hero-debug-title" className="text-2xl font-normal">旧 Hero 调试台架</h1>
+        <p className="mt-4 text-sm leading-7">
+          此处只展示保留的 Hero 测试样例和中性占位，不代表正式模板目录，也不能用于判定整页设计已通过验收。
+        </p>
+        <p className="mt-2 text-sm leading-7">
+          当前动态模板请从已有编辑工作区进入“模板设计”，核对同一模板版本的桌面与手机构图，再到页面预览及对应公开页检查真实内容。
+        </p>
+        <Link className="mt-4 inline-flex min-h-11 items-center underline underline-offset-4" to="/admin/editor/home">
+          打开现有编辑工作区
+        </Link>
+      </section>
       <div
         style={{
           maxWidth: 1800,

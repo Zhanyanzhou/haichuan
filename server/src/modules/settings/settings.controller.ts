@@ -107,8 +107,9 @@ export class SettingsController {
   @ApiOperation({ summary: "获取功能开关" })
   @Get("flags")
   getFlags() {
-    // 单一来源：与 CustomerCommerceGuard 共用发布档位和交易开关判定。
-    // 缺失、写错或 lead-generation 档位一律关闭；服务端守卫负责最终拦截。
+    // 创建订单与 CustomerCommerceGuard 共用发布档位和交易开关；支付单独读取网关开关。
+    // 购物车准备与成交分离：功能开关读取成功时 cartEnabled 为 true，不再跟随交易开关。
+    // 功能开关读取失败时，前台回退 SAFE_FLAGS，购物车准备一并关闭。
     const commerceEnabled = isCustomerCommerceEnabled();
     // 行为分析后台：默认开启；显式设置 ANALYTICS_DASHBOARD_ENABLED=false 才关闭。
     const analyticsDashboardEnabled =
@@ -119,7 +120,7 @@ export class SettingsController {
       : null;
     return {
       commerceEnabled,
-      cartEnabled: commerceEnabled,
+      cartEnabled: true,
       paymentEnabled: isPaymentGatewayTransactionsEnabled(),
       quotationOrderingEnabled: isCustomerQuotationOrderingEnabled(),
       partnerApplicationsWriteEnabled,

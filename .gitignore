@@ -107,9 +107,39 @@ client/scripts/tmp-*.mjs
 # Codex 本地工作树快照（仅用于当前机器恢复，不属于项目交付物）
 /.codex-tmp/
 client/.codex-tmp/
-# Storybook 只作开发与视觉回归工具，静态产物与截图基线不入库。
+
+# 本地检出里的指令副本。主工作区已有根目录 AGENTS.md / CLAUDE.md。
+# 这些文件留在工作区内会被 Cursor 和 Codex 重复注入每次对话。
+.worktrees/**/AGENTS.md
+.worktrees/**/CLAUDE.md
+.tmp/**/AGENTS.md
+.tmp/**/CLAUDE.md
+.agents/worktrees/**/AGENTS.md
+.agents/worktrees/**/CLAUDE.md
+
+# 本地工作树、临时验收和根目录诊断产物。工作树仍由 Git 登记，忽略只避免误提交。
+/.worktrees/
+/.tmp/
+/output/
+/.kimi-temp/
+/.gold-visual-reference-*/
+/*.jpeg
+/*.jpg
+/NUL
+/check-bluetooth-devices.ps1
+/check-bluetooth-driver.ps1
+/diagnose-handles.ps1
+/diagnose-r6016.ps1
+/diagnose-r6016-detail.ps1
+/repair-r6016.ps1
+/verify-r6016.ps1
+# Storybook 静态产物不入库；经审阅的视觉基线保留在版本控制中。
 client/storybook-static/
-client/.storybook/visual/__screenshots__/
+
+# 一次性诊断与 CI 排障记录，不属于源码或共享验收基线。
+/.tmp-ci/
+/_diag-*.txt
+/server/.codex-tmp/
 
 # 模板设计评审构建产物与一次性只读探查脚本（正式验收记录入 docs/acceptance 与 docs/audits）
 client/dist-option-two-review/

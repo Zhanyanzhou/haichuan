@@ -93,7 +93,7 @@ test('公开功能开关与服务端交易守卫使用同一双重门禁', () =>
     delete process.env.PAYMENT_GATEWAY_TRANSACTIONS_ENABLED;
     assert.deepEqual(controller.getFlags(), {
       commerceEnabled: false,
-      cartEnabled: false,
+      cartEnabled: true,
       paymentEnabled: false,
       quotationOrderingEnabled: false,
       partnerApplicationsWriteEnabled: false,
@@ -103,6 +103,7 @@ test('公开功能开关与服务端交易守卫使用同一双重门禁', () =>
 
     process.env.RELEASE_PROFILE = 'commerce';
     assert.equal(controller.getFlags().commerceEnabled, true);
+    assert.equal(controller.getFlags().cartEnabled, true);
     assert.equal(controller.getFlags().quotationOrderingEnabled, false);
     assert.equal(controller.getFlags().paymentEnabled, false);
     process.env.CUSTOMER_QUOTATION_ORDERING_ENABLED = 'true';

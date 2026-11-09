@@ -1,0 +1,492 @@
+{
+  "acceptanceId": "r4",
+  "exitCode": 0,
+  "generatedAt": "2026-11-04T15:40:29.694Z",
+  "commands": {
+    "start": "node scripts/image-quality-acceptance/start-isolated-read.mjs",
+    "verify": "node scripts/image-quality-acceptance/verify-isolated-read.mjs",
+    "stop": "node scripts/image-quality-acceptance/stop-isolated-read.mjs"
+  },
+  "ports": {
+    "api": 3018,
+    "web": 5176,
+    "untouchedUserApi": 3000,
+    "untouchedUserWeb": 5173
+  },
+  "codeVersion": "207f2c382056442cb1382472c7891fefa45309f4",
+  "distHashes": {
+    "uploadService": "83746119a97b67aa1da6c977347d7f08d1667d01d40053a79be6704dfad6f61d",
+    "gateway": "a811d184ec08bd9c47f163447933c95744eb258f35d1dc76bb1a014704ce26a4",
+    "pageModules": "11bfed62cac9bae3691112a5774fde730916379bf0b00bddd46af4e30368fadb"
+  },
+  "distFingerprint": "c26b1d65ab6c149d1ff4aac8edbe47ebe4e81903b447ca450a98a3b8828bc816",
+  "state": {
+    "acceptanceId": "r4",
+    "apiPid": 74616,
+    "apiCommandLine": "\"C:\\Users\\Administrator\\AppData\\Local\\fnm_multishells\\73160_1793791153189\\node.exe\" scripts/image-quality-acceptance/start-isolated-read.mjs",
+    "vitePid": 57168,
+    "apiPort": 3018,
+    "webPort": 5176,
+    "codeVersion": "207f2c382056442cb1382472c7891fefa45309f4",
+    "distHashes": {
+      "uploadService": "83746119a97b67aa1da6c977347d7f08d1667d01d40053a79be6704dfad6f61d",
+      "gateway": "a811d184ec08bd9c47f163447933c95744eb258f35d1dc76bb1a014704ce26a4",
+      "pageModules": "11bfed62cac9bae3691112a5774fde730916379bf0b00bddd46af4e30368fadb"
+    },
+    "distFingerprint": "c26b1d65ab6c149d1ff4aac8edbe47ebe4e81903b447ca450a98a3b8828bc816",
+    "tempRoot": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\haichuan-image-r4-74616",
+    "userApiPid": 65740,
+    "userWebPid": 16412,
+    "startedAt": "2026-11-04T15:35:23.281Z"
+  },
+  "checks": [
+    {
+      "name": "runtime identity matches git and dist",
+      "ok": true,
+      "healthPid": 74616,
+      "codeVersion": "207f2c382056442cb1382472c7891fefa45309f4",
+      "distFingerprint": "c26b1d65ab6c149d1ff4aac8edbe47ebe4e81903b447ca450a98a3b8828bc816",
+      "apiCommand": "\"C:\\Users\\Administrator\\AppData\\Local\\fnm_multishells\\73160_1793791153189\\node.exe\" scripts/image-quality-acceptance/start-isolated-read.mjs",
+      "viteCommand": "C:\\Users\\Administrator\\AppData\\Local\\fnm_multishells\\73160_1793791153189\\node.exe G:\\海川珠宝官方网站开发\\client\\node_modules\\vite\\bin\\vite.js --config G:\\海川珠宝官方网站开发\\scripts\\image-quality-acceptance\\vite.config.mjs --host 127.0.0.1 --port 5176 --strictPort"
+    },
+    {
+      "name": "defaultLocale document has mediaFacts",
+      "ok": true,
+      "status": 200,
+      "identity": {
+        "acceptance": "r4",
+        "pid": "74616",
+        "code": "207f2c382056442cb1382472c7891fefa45309f4",
+        "dist": "c26b1d65ab6c149d1ff4aac8edbe47ebe4e81903b447ca450a98a3b8828bc816"
+      },
+      "locale": "zh-CN",
+      "documentStatus": "PUBLISHED",
+      "factCount": 14
+    },
+    {
+      "name": "zhCN document has mediaFacts",
+      "ok": true,
+      "status": 200,
+      "identity": {
+        "acceptance": "r4",
+        "pid": "74616",
+        "code": "207f2c382056442cb1382472c7891fefa45309f4",
+        "dist": "c26b1d65ab6c149d1ff4aac8edbe47ebe4e81903b447ca450a98a3b8828bc816"
+      },
+      "locale": "zh-CN",
+      "documentStatus": "PUBLISHED",
+      "factCount": 14
+    },
+    {
+      "name": "desktop 1920 CSS at 2x selects decoded 3840",
+      "ok": true,
+      "storageKey": "page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png",
+      "currentSrc": "http://127.0.0.1:5176/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=3840&rv=2",
+      "sizes": "1920px",
+      "descriptor": 3840,
+      "naturalWidthNotProof": 1920,
+      "decoded": {
+        "url": "http://127.0.0.1:3018/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=3840&rv=2",
+        "status": 200,
+        "contentType": "image/webp",
+        "bytes": 645170,
+        "width": 3840,
+        "height": 2160,
+        "format": "webp",
+        "etag": "\"w3840-v2-4aef4d2abdf6376c\"",
+        "identity": {
+          "acceptance": "r4",
+          "pid": "74616",
+          "code": "207f2c382056442cb1382472c7891fefa45309f4",
+          "dist": "c26b1d65ab6c149d1ff4aac8edbe47ebe4e81903b447ca450a98a3b8828bc816"
+        }
+      }
+    },
+    {
+      "name": "941 descriptor matches decoded pixels and is not enlarged",
+      "ok": true,
+      "phoneMatch": {
+        "url": "http://127.0.0.1:3018/uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png?width=1200&rv=2",
+        "status": 200,
+        "contentType": "image/webp",
+        "bytes": 116966,
+        "width": 941,
+        "height": 1672,
+        "format": "webp",
+        "etag": "\"w1200-v2-ea965bf55028982b\"",
+        "identity": {
+          "acceptance": "r4",
+          "pid": "74616",
+          "code": "207f2c382056442cb1382472c7891fefa45309f4",
+          "dist": "c26b1d65ab6c149d1ff4aac8edbe47ebe4e81903b447ca450a98a3b8828bc816"
+        },
+        "descriptor": 941,
+        "sizes": "390px",
+        "naturalWidthNotProof": 390
+      },
+      "observed": [
+        {
+          "width": 941,
+          "descriptor": 941,
+          "contentType": "image/webp",
+          "bytes": 116966
+        },
+        {
+          "width": 941,
+          "descriptor": 941,
+          "contentType": "image/webp",
+          "bytes": 123612
+        },
+        {
+          "width": 941,
+          "descriptor": 941,
+          "contentType": "image/webp",
+          "bytes": 112256
+        },
+        {
+          "width": 941,
+          "descriptor": 941,
+          "contentType": "image/webp",
+          "bytes": 133992
+        },
+        {
+          "width": 941,
+          "descriptor": 941,
+          "contentType": "image/webp",
+          "bytes": 152300
+        },
+        {
+          "width": 941,
+          "descriptor": 941,
+          "contentType": "image/webp",
+          "bytes": 134304
+        },
+        {
+          "width": 941,
+          "descriptor": 941,
+          "contentType": "image/webp",
+          "bytes": 183476
+        }
+      ]
+    },
+    {
+      "name": "mobile currentSrc responses are derived webp, not the original png",
+      "ok": true,
+      "count": 7
+    },
+    {
+      "name": "illegal rv is rejected",
+      "ok": true,
+      "status": 404,
+      "body": "素材不存在",
+      "bytes": 15,
+      "identity": {
+        "acceptance": "r4",
+        "pid": "74616",
+        "code": "207f2c382056442cb1382472c7891fefa45309f4",
+        "dist": "c26b1d65ab6c149d1ff4aac8edbe47ebe4e81903b447ca450a98a3b8828bc816"
+      }
+    },
+    {
+      "name": "cover geometry probe selects 3840 from drawn area",
+      "ok": true,
+      "found": true,
+      "before": {
+        "sizes": "800px",
+        "currentSrc": "http://127.0.0.1:5176/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=1680&rv=2"
+      },
+      "geometryProbe": true,
+      "savedTemplateLayout": false,
+      "after": {
+        "currentSrc": "http://127.0.0.1:5176/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=3840&rv=2",
+        "sizes": "2133px",
+        "srcset": "/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=480&rv=2 480w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=800&rv=2 800w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=1200&rv=2 1200w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=1680&rv=2 1680w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=2400&rv=2 2400w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=2880&rv=2 2880w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=3840&rv=2 3840w",
+        "naturalWidthNotProof": 2133
+      },
+      "decoded": {
+        "url": "http://127.0.0.1:3018/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=3840&rv=2",
+        "status": 200,
+        "contentType": "image/webp",
+        "bytes": 645170,
+        "width": 3840,
+        "height": 2160,
+        "format": "webp",
+        "etag": "\"w3840-v2-4aef4d2abdf6376c\"",
+        "identity": {
+          "acceptance": "r4",
+          "pid": "74616",
+          "code": "207f2c382056442cb1382472c7891fefa45309f4",
+          "dist": "c26b1d65ab6c149d1ff4aac8edbe47ebe4e81903b447ca450a98a3b8828bc816"
+        }
+      }
+    },
+    {
+      "name": "cache hit still checks authorization and does not write revocation",
+      "ok": true,
+      "first": {
+        "status": 200,
+        "bytes": 153832,
+        "width": 1680,
+        "format": "webp"
+      },
+      "secondStatus": 200,
+      "cacheEntries": 19,
+      "afterRevokeStatus": 404,
+      "afterRevokeEtag": "W/\"1e-NQau73SHyN8l3rgP3uUpW/iImXg\"",
+      "imageEtag": "\"w1680-v2-4aef4d2abdf6376c\"",
+      "afterRevokeBody": "素材当前不可公开访问",
+      "databaseRevocationBefore": "ACTIVE",
+      "databaseRevocationAfter": "ACTIVE",
+      "blockedWrites": [],
+      "snapshotWriteAttempts": [],
+      "absorbedIntegrityUpdates": 126
+    },
+    {
+      "name": "user 3000 and 5173 were not replaced",
+      "ok": true,
+      "userApiStatus": 200,
+      "userApiHasAcceptanceHeader": null,
+      "userApiPid": 65740,
+      "userApiPidsNow": [
+        65740
+      ],
+      "userWebPid": 16412,
+      "userWebPidsNow": [
+        16412
+      ]
+    }
+  ],
+  "documents": {
+    "defaultLocale": {
+      "status": 200,
+      "identity": {
+        "acceptance": "r4",
+        "pid": "74616",
+        "code": "207f2c382056442cb1382472c7891fefa45309f4",
+        "dist": "c26b1d65ab6c149d1ff4aac8edbe47ebe4e81903b447ca450a98a3b8828bc816"
+      },
+      "locale": "zh-CN",
+      "documentStatus": "PUBLISHED",
+      "factCount": 14
+    },
+    "zhCN": {
+      "status": 200,
+      "identity": {
+        "acceptance": "r4",
+        "pid": "74616",
+        "code": "207f2c382056442cb1382472c7891fefa45309f4",
+        "dist": "c26b1d65ab6c149d1ff4aac8edbe47ebe4e81903b447ca450a98a3b8828bc816"
+      },
+      "locale": "zh-CN",
+      "documentStatus": "PUBLISHED",
+      "factCount": 14
+    }
+  },
+  "scenes": {
+    "desktop": {
+      "storageKey": "page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png",
+      "currentSrc": "http://127.0.0.1:5176/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=3840&rv=2",
+      "sizes": "1920px",
+      "descriptor": 3840,
+      "naturalWidthNotProof": 1920,
+      "decoded": {
+        "url": "http://127.0.0.1:3018/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=3840&rv=2",
+        "status": 200,
+        "contentType": "image/webp",
+        "bytes": 645170,
+        "width": 3840,
+        "height": 2160,
+        "format": "webp",
+        "etag": "\"w3840-v2-4aef4d2abdf6376c\"",
+        "identity": {
+          "acceptance": "r4",
+          "pid": "74616",
+          "code": "207f2c382056442cb1382472c7891fefa45309f4",
+          "dist": "c26b1d65ab6c149d1ff4aac8edbe47ebe4e81903b447ca450a98a3b8828bc816"
+        }
+      }
+    },
+    "mobile": [
+      {
+        "url": "http://127.0.0.1:3018/uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png?width=1200&rv=2",
+        "status": 200,
+        "contentType": "image/webp",
+        "bytes": 116966,
+        "width": 941,
+        "height": 1672,
+        "format": "webp",
+        "etag": "\"w1200-v2-ea965bf55028982b\"",
+        "identity": {
+          "acceptance": "r4",
+          "pid": "74616",
+          "code": "207f2c382056442cb1382472c7891fefa45309f4",
+          "dist": "c26b1d65ab6c149d1ff4aac8edbe47ebe4e81903b447ca450a98a3b8828bc816"
+        },
+        "descriptor": 941,
+        "sizes": "390px",
+        "naturalWidthNotProof": 390
+      },
+      {
+        "url": "http://127.0.0.1:3018/uploads/page-assets/0ee8e3108dc570bdd5d2110d7f6ebd71d5ad6ca4c30095788ee97d5d7c4ce2a6.png?width=1200&rv=2",
+        "status": 200,
+        "contentType": "image/webp",
+        "bytes": 123612,
+        "width": 941,
+        "height": 1672,
+        "format": "webp",
+        "etag": "\"w1200-v2-5739021b786494c8\"",
+        "identity": {
+          "acceptance": "r4",
+          "pid": "74616",
+          "code": "207f2c382056442cb1382472c7891fefa45309f4",
+          "dist": "c26b1d65ab6c149d1ff4aac8edbe47ebe4e81903b447ca450a98a3b8828bc816"
+        },
+        "descriptor": 941,
+        "sizes": "390px",
+        "naturalWidthNotProof": 390
+      },
+      {
+        "url": "http://127.0.0.1:3018/uploads/page-assets/eb8636ac838b80400530c0a845f77a76b70d2d515bd5a497144546848c41e05b.png?width=1200&rv=2",
+        "status": 200,
+        "contentType": "image/webp",
+        "bytes": 112256,
+        "width": 941,
+        "height": 1672,
+        "format": "webp",
+        "etag": "\"w1200-v2-c32c3c06a9c7f1b5\"",
+        "identity": {
+          "acceptance": "r4",
+          "pid": "74616",
+          "code": "207f2c382056442cb1382472c7891fefa45309f4",
+          "dist": "c26b1d65ab6c149d1ff4aac8edbe47ebe4e81903b447ca450a98a3b8828bc816"
+        },
+        "descriptor": 941,
+        "sizes": "390px",
+        "naturalWidthNotProof": 390
+      },
+      {
+        "url": "http://127.0.0.1:3018/uploads/page-assets/066d937975d86891e68a10c5eaf1202aea266913fc43cd5ffbe4ff0515f8c2f6.png?width=1200&rv=2",
+        "status": 200,
+        "contentType": "image/webp",
+        "bytes": 133992,
+        "width": 941,
+        "height": 1671,
+        "format": "webp",
+        "etag": "\"w1200-v2-865ab7dcdd5a3d4a\"",
+        "identity": {
+          "acceptance": "r4",
+          "pid": "74616",
+          "code": "207f2c382056442cb1382472c7891fefa45309f4",
+          "dist": "c26b1d65ab6c149d1ff4aac8edbe47ebe4e81903b447ca450a98a3b8828bc816"
+        },
+        "descriptor": 941,
+        "sizes": "390px",
+        "naturalWidthNotProof": 390
+      },
+      {
+        "url": "http://127.0.0.1:3018/uploads/page-assets/611f16c674372af051e0db29a2b7c13d4e4eaa0042a80868cae1f0bcd9b9303e.png?width=1200&rv=2",
+        "status": 200,
+        "contentType": "image/webp",
+        "bytes": 152300,
+        "width": 941,
+        "height": 1672,
+        "format": "webp",
+        "etag": "\"w1200-v2-b0b002618493df19\"",
+        "identity": {
+          "acceptance": "r4",
+          "pid": "74616",
+          "code": "207f2c382056442cb1382472c7891fefa45309f4",
+          "dist": "c26b1d65ab6c149d1ff4aac8edbe47ebe4e81903b447ca450a98a3b8828bc816"
+        },
+        "descriptor": 941,
+        "sizes": "390px",
+        "naturalWidthNotProof": 390
+      },
+      {
+        "url": "http://127.0.0.1:3018/uploads/page-assets/7e6123adea7caf27c5711459b5a782bf4f576ff5d54e8459f4668eb0aaedca5d.png?width=1200&rv=2",
+        "status": 200,
+        "contentType": "image/webp",
+        "bytes": 134304,
+        "width": 941,
+        "height": 1671,
+        "format": "webp",
+        "etag": "\"w1200-v2-76324d7836cd2895\"",
+        "identity": {
+          "acceptance": "r4",
+          "pid": "74616",
+          "code": "207f2c382056442cb1382472c7891fefa45309f4",
+          "dist": "c26b1d65ab6c149d1ff4aac8edbe47ebe4e81903b447ca450a98a3b8828bc816"
+        },
+        "descriptor": 941,
+        "sizes": "390px",
+        "naturalWidthNotProof": 390
+      },
+      {
+        "url": "http://127.0.0.1:3018/uploads/page-assets/af2a0befa47a2dd9249f931e4a33f9f370bc88501bdd115f16d1415d1a7bf96f.png?width=1200&rv=2",
+        "status": 200,
+        "contentType": "image/webp",
+        "bytes": 183476,
+        "width": 941,
+        "height": 1672,
+        "format": "webp",
+        "etag": "\"w1200-v2-11583f6602740881\"",
+        "identity": {
+          "acceptance": "r4",
+          "pid": "74616",
+          "code": "207f2c382056442cb1382472c7891fefa45309f4",
+          "dist": "c26b1d65ab6c149d1ff4aac8edbe47ebe4e81903b447ca450a98a3b8828bc816"
+        },
+        "descriptor": 941,
+        "sizes": "390px",
+        "naturalWidthNotProof": 390
+      }
+    ],
+    "coverProbe": {
+      "found": true,
+      "before": {
+        "sizes": "800px",
+        "currentSrc": "http://127.0.0.1:5176/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=1680&rv=2"
+      },
+      "geometryProbe": true,
+      "savedTemplateLayout": false,
+      "after": {
+        "currentSrc": "http://127.0.0.1:5176/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=3840&rv=2",
+        "sizes": "2133px",
+        "srcset": "/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=480&rv=2 480w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=800&rv=2 800w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=1200&rv=2 1200w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=1680&rv=2 1680w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=2400&rv=2 2400w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=2880&rv=2 2880w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=3840&rv=2 3840w",
+        "naturalWidthNotProof": 2133
+      },
+      "decoded": {
+        "url": "http://127.0.0.1:3018/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=3840&rv=2",
+        "status": 200,
+        "contentType": "image/webp",
+        "bytes": 645170,
+        "width": 3840,
+        "height": 2160,
+        "format": "webp",
+        "etag": "\"w3840-v2-4aef4d2abdf6376c\"",
+        "identity": {
+          "acceptance": "r4",
+          "pid": "74616",
+          "code": "207f2c382056442cb1382472c7891fefa45309f4",
+          "dist": "c26b1d65ab6c149d1ff4aac8edbe47ebe4e81903b447ca450a98a3b8828bc816"
+        }
+      }
+    }
+  },
+  "disposableDatabase": {
+    "REAL_MYSQL_TEST_DATABASE_URL": false,
+    "MEDIA_REAL_MYSQL_URL": false
+  },
+  "notRun": [
+    {
+      "name": "upload, library save, reopen, test publish, public reread",
+      "reason": "No verified disposable database variable is set.",
+      "unblock": "Set REAL_MYSQL_TEST_DATABASE_URL or MEDIA_REAL_MYSQL_URL to a database that is confirmed disposable, then rerun only that closed loop."
+    },
+    {
+      "name": "by-url HTTP against a database",
+      "reason": "The role, missing, archived, and failure checks run in page-media-by-url.direct.spec.ts against a temporary file and an in-memory staff query.",
+      "unblock": "A disposable database is required before sending an authenticated by-url HTTP request."
+    }
+  ]
+}

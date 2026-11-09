@@ -127,7 +127,7 @@ export const settingsApi = {
       await mockDelay(200);
       return mockResponse({
         commerceEnabled: false,
-        cartEnabled: false,
+        cartEnabled: true,
         paymentEnabled: false,
         quotationOrderingEnabled: false,
         partnerApplicationsWriteEnabled: false,

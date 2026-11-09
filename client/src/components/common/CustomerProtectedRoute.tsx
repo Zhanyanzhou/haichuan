@@ -64,7 +64,12 @@ export function CustomerProtectedRoute({ children }: { children: ReactNode }) {
 
   if (status !== 'authenticated') {
     const returnTo = location.pathname + location.search;
-    return <Navigate to="/customer" state={{ returnTo }} replace />;
+    return (
+      <Navigate
+        to={`/customer?returnTo=${encodeURIComponent(returnTo)}`}
+        replace
+      />
+    );
   }
   return <>{children}</>;
 }

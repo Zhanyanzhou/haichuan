@@ -71,4 +71,4 @@ rules/bundle-barrel-imports.md
 rules/rerender-derived-state-no-effect.md
 ```
 
-不要把本目录内汇总文件 `AGENTS.md` 当成项目根规则；项目治理只认仓库根 `AGENTS.md`、`PROJECT_RULES.md` 与 `WORKFLOW.md`。
+汇总参考在 `REFERENCE.md`，文件名保持为 `REFERENCE.md`，这样 Cursor 和 Codex 不会把它整篇收进每次对话。项目治理只认仓库根 `AGENTS.md`、`PROJECT_RULES.md` 与 `WORKFLOW.md`。

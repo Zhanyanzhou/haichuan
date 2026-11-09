@@ -3,7 +3,7 @@ const p = new PrismaClient();
 async function main() {
   const products = await p.product.findMany({ where: { status: "PUBLISHED" } });
   console.log(`找到 ${products.length} 个商品`);
-  const imgDir = "g:/网站搭建2/client/public/images/products";
+  const imgDir = "g:/海川珠宝官方网站开发/client/public/images/products";
   const fs = require("fs");
   const files = fs.readdirSync(imgDir).filter((f: string) => f.endsWith(".png"));
   for (const product of products) {

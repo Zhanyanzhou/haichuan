@@ -15,7 +15,7 @@ alwaysApply: true
 
 ## 按对象读取共享来源
 
-- **客户公开页面的布局、排版、响应式与交互**：读 `docs/PROJECT_GUARDRAILS.md`、`docs/UI_GUIDE.md` 和 `.agents/skills/taste-skill/SKILL.md`。摄影、Hero、系列专题的艺术方向才追加 `.agents/skills/luxury-visual/SKILL.md`，其生图边界仍按该技能执行。
+- **客户公开页面的布局、排版、响应式与交互**：先读 `docs/design-spec-card.md`，按它的"三十秒路由"选阅读包，只取 `docs/UI_GUIDE.md` 对应节与行段，不整份通读规范；品牌与页面职责按需取 `docs/PROJECT_GUARDRAILS.md` 相关节。**写代码前先产出艺术方向卡**，字段与颗粒度只认规格卡 §3 和 `design-library/06-composition-patterns.md` §9 样例。默认不采用"居中 Hero + 副标题 + 按钮 + 三列卡片 + 底部 CTA"的通用版式。局部修复只需被改性质那一节，不必出整页方向卡。视觉审查可用 `.agents/skills/taste-skill/SKILL.md`，摄影、Hero、系列专题的艺术方向才追加 `.agents/skills/luxury-visual/SKILL.md`，其生图边界仍按该技能执行。
 - **管理后台的工具界面、表单、列表及属性面板体验**：读 `docs/UI_GUIDE.md` 附录 A、`docs/ADMIN_COPY_GUIDE.md`、`docs/ADMIN_INCREMENTAL_DEVELOPMENT.md`；后台内嵌公开内容预览只对预览内容应用前台规范。
 - **店铺装修、母模板、Puck 编辑器与 Renderer**：从 `AGENTS.md` §2、`WORKFLOW.md` §3 进入 `docs/page-builder/store-decoration.md`、`docs/page-builder/section-template-standard.md`、`docs/page-builder/template-creation-rules.md` 的相关章节；模板结构与编辑合同不能由通用视觉 Skill 替代。功能生命周期和已批准取舍按需核对 `docs/DECISIONS.md` 的相关编号。
 - **实现 Figma 设计**：先读 `.agents/skills/figma-design-to-code/SKILL.md`，按其工具与前置技能要求执行。

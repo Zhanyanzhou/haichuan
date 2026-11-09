@@ -158,14 +158,14 @@ html:has(.site-shell)::-webkit-scrollbar {
   /* 去掉系统按钮外观，避免 Windows 深色系统主题和手机浏览器补一圈按钮框。 */
   appearance: none;
   background: transparent;
-  color: rgba(24, 26, 27, 0.72);
+  color: #181a1b;
   font-family:
     "Noto Serif SC",
     "PingFang SC",
     "Microsoft YaHei",
     serif;
   font-size: 16px;
-  font-weight: 400;
+  font-weight: 500;
   line-height: 1;
   letter-spacing: 0.08em;
   white-space: nowrap;
@@ -242,7 +242,7 @@ html:has(.site-shell)::-webkit-scrollbar {
   display: block;
   width: 24px;
   height: 24px;
-  stroke-width: 1.25;
+  stroke-width: 1.75;
   flex: 0 0 auto;
 }
 
@@ -257,7 +257,7 @@ html:has(.site-shell)::-webkit-scrollbar {
   justify-content: center;
   gap: clamp(11px, 1.4vw, 18px);
   justify-self: center;
-  font-family: var(--brand-calligraphy);
+  font-family: "Bodoni Moda Variable", Didot, "Bodoni MT", "Times New Roman", serif;
   color: #181a1b;
   text-decoration: none;
   white-space: nowrap;
@@ -281,21 +281,39 @@ html:has(.site-shell)::-webkit-scrollbar {
 
 .site-header__brand-text {
   display: inline-flex;
-  flex-direction: column;
-  align-items: center;
+  align-items: baseline;
+  --brand-wordmark-opsz: 32;
   color: var(--brand-ink);
-  font-family: var(--brand-calligraphy);
-  font-size: clamp(29px, 2.5vw, 42px);
-  font-weight: 400;
-  line-height: 0.92;
-  letter-spacing: 0.12em;
+  font-family: "Bodoni Moda Variable", Didot, "Bodoni MT", "Times New Roman", serif;
+  font-size: clamp(28px, 2.15vw, 40px);
+  font-weight: 500;
+  font-style: normal;
+  font-synthesis: none;
+  font-optical-sizing: none;
+  /* 光学尺寸贴近实际字号。锁在小字档再放大，衬线肩发软，竖笔会看起来弯。 */
+  font-variation-settings: "opsz" var(--brand-wordmark-opsz), "wght" 500;
+  font-kerning: normal;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+  line-height: 1;
+  letter-spacing: -0.03em;
   white-space: nowrap;
-  text-shadow: 0 1px 16px rgba(255, 255, 255, 0.18);
+  text-shadow: none;
+}
+
+.site-header__brand-amp {
+  display: inline-block;
+  font-style: normal;
+  font-weight: 500;
+  font-size: 0.94em;
+  letter-spacing: 0;
+  font-variation-settings: "opsz" var(--brand-wordmark-opsz), "wght" 500;
+  /* 正体 & 自身已有斜交叉，不再整字倾斜，字标中线才站得直。 */
 }
 
 .site-header.is-overlay-light .site-header__brand-text {
   color: #F7F8F8;
-  text-shadow: 0 2px 22px rgba(0, 0, 0, 0.28);
+  text-shadow: none;
 }
 
 .site-header.is-overlay-light .site-header__bag-count {
@@ -366,14 +384,14 @@ html:has(.site-shell)::-webkit-scrollbar {
   background: transparent;
   box-shadow: none;
   box-sizing: border-box;
-  color: rgba(24, 26, 27, 0.68);
+  color: #181a1b;
   font-family:
     "Noto Serif SC",
     "PingFang SC",
     "Microsoft YaHei",
     serif;
   font-size: 16px;
-  font-weight: 400;
+  font-weight: 500;
   line-height: 1;
   letter-spacing: 0.08em;
   white-space: nowrap;
@@ -417,8 +435,15 @@ html:has(.site-shell)::-webkit-scrollbar {
   .site-shell,
   .editorial-shell,
   .storefront-navigation {
-    --site-header-height: 108px;
-    --site-header-action-top: 31.5px;
+    /* 字标按宽屏对照提到约 2.2 倍字高，页头跟着留出上下空隙。 */
+    --site-header-height: 128px;
+    --site-header-action-top: 42px;
+  }
+  .site-header__brand-text {
+    /* 先让字高贴近宽屏对照，再用两侧工具组留下的宽度封顶，避免压到菜单和账户。 */
+    --brand-wordmark-opsz: 40;
+    font-size: clamp(40px, calc((100vw - 860px) / 9.2), 88px);
+    letter-spacing: -0.03em;
   }
   .site-header__inner {
     width: calc(100% - (2 * var(--site-header-edge)));
@@ -443,7 +468,7 @@ html:has(.site-shell)::-webkit-scrollbar {
   .site-menu-toggle svg {
     width: 30px;
     height: 30px;
-    stroke-width: 1.4;
+    stroke-width: 1.85;
   }
   .site-header__left-group {
     justify-content: flex-start;
@@ -488,8 +513,10 @@ html:has(.site-shell)::-webkit-scrollbar {
     flex: 0 0 28px;
   }
   .site-header__brand-text {
-    font-size: 24px;
-    letter-spacing: 0.14em;
+    --brand-wordmark-opsz: 30;
+    font-size: 30px;
+    letter-spacing: -0.03em;
+    padding-left: 0;
   }
   .site-header__brand-text::after {
     margin-top: 7px;
@@ -561,8 +588,11 @@ html:has(.site-shell)::-webkit-scrollbar {
     gap: 6px;
   }
   .site-header__brand-text {
-    font-size: 22px;
-    letter-spacing: 0.08em;
+    /* 手机字标随宽度放大；16px 保最窄屏不压到两侧图标，28px 是上限。 */
+    --brand-wordmark-opsz: 20;
+    font-size: clamp(16px, calc(13vw - 26px), 28px);
+    letter-spacing: 0;
+    padding-left: 0;
   }
   .site-header__brand-text::after {
     margin-top: 6px;
@@ -587,18 +617,7 @@ html:has(.site-shell)::-webkit-scrollbar {
     width: 88px;
     gap: 0;
   }
-  .home-brand-signature {
-    margin-bottom: 20px;
-  }
-  .home-brand-signature__name {
-    font-size: clamp(42px, 13vw, 58px);
-    letter-spacing: 0.05em;
-  }
-  .home-brand-signature__sub {
-    margin-top: 10px;
-    font-size: 9px;
-    letter-spacing: 0.24em;
-  }
+
 }
 
 .site-footer {
@@ -616,7 +635,7 @@ html:has(.site-shell)::-webkit-scrollbar {
     calc(100% - (2 * var(--site-content-gutter, 48px)))
   );
   margin: 0 auto;
-  padding: 38px 0 24px;
+  padding: 48px 0 32px;
 }
 
 .site-footer__service {
@@ -635,7 +654,7 @@ html:has(.site-shell)::-webkit-scrollbar {
   color: var(--hc-ink);
   border: 1px solid var(--hc-line-strong);
   font-size: 13px;
-  letter-spacing: 0.08em;
+  letter-spacing: 0;
   text-decoration: none;
   transition:
     border-color 200ms ease,
@@ -690,16 +709,16 @@ html:has(.site-shell)::-webkit-scrollbar {
   justify-content: center;
   gap: 16px;
   width: 100%;
-  margin-top: 24px;
-  padding-top: 18px;
-  color: var(--hc-text-muted);
+  margin-top: 28px;
+  padding-top: 20px;
+  color: var(--hc-text-secondary);
   border-top: 1px solid var(--hc-line);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.6;
 }
 
 .site-footer__brandmark {
-  letter-spacing: 0.22em;
+  letter-spacing: 0.12em;
 }
 
 .site-footer__signature-divider {
@@ -710,8 +729,8 @@ html:has(.site-shell)::-webkit-scrollbar {
 
 .site-footer__filing {
   margin-top: 12px;
-  color: var(--hc-text-muted);
-  font-size: 10px;
+  color: var(--hc-text-secondary);
+  font-size: 12px;
   text-decoration: underline;
   text-underline-offset: 4px;
 }
@@ -768,162 +787,7 @@ html:has(.site-shell)::-webkit-scrollbar {
   }
 }
 
-@media (min-width: 768px) and (max-width: 1100px) {
-  .brand-drawer__content {
-    padding-inline: 28px;
-  }
-  .brand-drawer__nav a {
-    font-size: 18px;
-  }
-  .brand-drawer__secondary a {
-    font-size: 13px;
-  }
-  .brand-drawer__utility a {
-    font-size: 15px;
-  }
-}
-
 @media (max-width: 767px) {
-  .editorial-header,
-  .editorial-header.is-scrolled {
-    height: 76px;
-  }
-  .editorial-header__brand,
-  .editorial-header.is-scrolled .editorial-header__brand {
-    max-width: calc(100vw - 132px);
-    overflow: hidden;
-    font-size: 17px;
-    letter-spacing: 0.11em;
-  }
-  .editorial-header__left {
-    left: 22px;
-    gap: 0;
-  }
-  .editorial-header__menu {
-    left: 22px;
-    gap: 8px;
-    font-size: 16px;
-  }
-  .editorial-header__menu .anticon {
-    font-size: 18px;
-  }
-  .editorial-header__search,
-  .editorial-header__actions {
-    display: none;
-  }
-
-  .editorial-hero {
-    min-height: 560px;
-  }
-  .editorial-hero__copy {
-    left: 22px;
-    bottom: 86px;
-    width: calc(100% - 44px);
-  }
-  .editorial-hero__copy h1 {
-    font-size: 32px;
-  }
-  .editorial-hero__copy p {
-    font-size: 15px;
-    letter-spacing: 0.12em;
-  }
-  .editorial-hero__copy button {
-    margin-top: 22px;
-  }
-  .editorial-hero__media-label {
-    right: 22px;
-    bottom: 24px;
-  }
-  .editorial-hero__scroll {
-    bottom: 24px;
-  }
-
-  .editorial-poster,
-  .editorial-poster--full,
-  .editorial-poster--split {
-    height: auto;
-    min-height: 0;
-  }
-  .editorial-poster--split {
-    grid-template-columns: 1fr;
-  }
-  .editorial-poster__item {
-    height: 72svh;
-    min-height: 520px;
-  }
-  .editorial-poster--full .editorial-poster__item {
-    height: 84svh;
-  }
-  .editorial-poster--split .editorial-poster__item + .editorial-poster__item {
-    border-left: 0;
-    border-top: 1px solid rgba(24, 26, 27, 0.09);
-  }
-  .editorial-poster__caption {
-    left: 18px;
-    bottom: 18px;
-  }
-  .editorial-poster__caption strong {
-    font-size: 23px;
-  }
-
-  .brand-drawer .ant-drawer-content-wrapper {
-    width: 100% !important;
-    max-width: none;
-  }
-  .brand-drawer__content {
-    padding: 0 28px 28px;
-  }
-  .brand-drawer__top {
-    min-height: 88px;
-  }
-  .brand-drawer__brand {
-    display: block;
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    font-size: 19px;
-    line-height: 1;
-  }
-  .brand-drawer__close {
-    margin-left: auto;
-    min-width: 36px;
-    justify-content: flex-end;
-  }
-  .brand-drawer__close-label {
-    display: none;
-  }
-  .brand-drawer__close .anticon {
-    font-size: 23px;
-  }
-  .brand-drawer__nav {
-    margin-top: 38px;
-  }
-  .brand-drawer__nav a {
-    min-height: 64px;
-    font-size: 25px;
-    letter-spacing: 0.08em;
-  }
-  .brand-drawer__nav a .anticon {
-    font-size: 14px;
-  }
-  .brand-drawer__secondary {
-    gap: 22px;
-    margin-top: 18px;
-    padding-top: 30px;
-  }
-  .brand-drawer__secondary a {
-    font-size: 17px;
-  }
-  .brand-drawer__utility {
-    gap: 13px;
-    margin-top: 82px;
-    padding-top: 24px;
-  }
-  .brand-drawer__utility a {
-    font-size: 13px;
-  }
-
   .brand-menu__inner {
     width: 100vw;
     min-width: 0;
@@ -952,10 +816,6 @@ html:has(.site-shell)::-webkit-scrollbar {
   }
   .brand-menu__label {
     font-size: 19px;
-  }
-  .brand-menu__footer {
-    margin-top: auto;
-    padding-top: 24px;
   }
 
   .site-header {
@@ -996,8 +856,11 @@ html:has(.site-shell)::-webkit-scrollbar {
     gap: 6px;
   }
   .site-header__brand-text {
-    font-size: 22px;
-    letter-spacing: 0.08em;
+    /* 手机字标随宽度放大；16px 保最窄屏不压到两侧图标，28px 是上限。 */
+    --brand-wordmark-opsz: 20;
+    font-size: clamp(16px, calc(13vw - 26px), 28px);
+    letter-spacing: 0;
+    padding-left: 0;
   }
   .site-header__brand-text::after {
     margin-top: 6px;
@@ -1009,18 +872,7 @@ html:has(.site-shell)::-webkit-scrollbar {
     width: 88px;
     gap: 0;
   }
-  .home-brand-signature {
-    margin-bottom: 20px;
-  }
-  .home-brand-signature__name {
-    font-size: clamp(42px, 13vw, 58px);
-    letter-spacing: 0.05em;
-  }
-  .home-brand-signature__sub {
-    margin-top: 10px;
-    font-size: 9px;
-    letter-spacing: 0.24em;
-  }
+
   .site-main {
     padding-top: var(--site-header-height);
   }
@@ -1044,126 +896,13 @@ html:has(.site-shell)::-webkit-scrollbar {
   }
 }
 
-@media (max-width: 980px) {
-  .haichuan-universe__grid,
-  .haichuan-savoir,
-  .haichuan-savoir__moments,
-  .haichuan-salon {
-    grid-template-columns: 1fr;
-  }
-
-  .haichuan-savoir__copy {
-    justify-self: start;
-  }
-
-  .haichuan-savoir-card,
-  .haichuan-savoir-card:nth-child(2),
-  .haichuan-savoir-card:nth-child(3) {
-    margin-top: 0;
-  }
-
-  .haichuan-savoir-card {
-    display: grid;
-    grid-template-columns: 132px minmax(0, 1fr);
-    gap: 18px;
-    align-items: center;
-  }
-
-  .haichuan-savoir-card img {
-    aspect-ratio: 1;
-  }
-
-  .haichuan-salon__media {
-    min-height: 520px;
-    order: 2;
-  }
-
-  .haichuan-salon__copy {
-    order: 1;
-  }
-}
-
-@media (max-width: 767px) {
-  .haichuan-universe,
-  .haichuan-savoir,
-  .haichuan-salon {
-    padding: 78px 22px;
-  }
-
-  .haichuan-universe__intro {
-    margin-bottom: 44px;
-    text-align: left;
-  }
-
-  .haichuan-universe__intro h2,
-  .haichuan-savoir__copy h2,
-  .haichuan-salon__copy h2 {
-    font-size: clamp(34px, 10vw, 46px);
-  }
-
-  .haichuan-universe__intro span,
-  .haichuan-savoir__copy > span,
-  .haichuan-salon__copy > span {
-    margin-top: 16px;
-    font-size: 14px;
-  }
-
-  .haichuan-universe__grid {
-    gap: 42px;
-  }
-
-  .haichuan-creation__image {
-    aspect-ratio: 4 / 4.7;
-  }
-
-  .haichuan-savoir-card {
-    grid-template-columns: 106px minmax(0, 1fr);
-    gap: 15px;
-  }
-
-  .haichuan-savoir-card h3 {
-    margin-top: 0;
-    font-size: 21px;
-  }
-
-  .haichuan-savoir-card p {
-    font-size: 12px;
-  }
-
-  .haichuan-salon__media {
-    min-height: 420px;
-  }
-
-  .haichuan-salon__media img:first-child {
-    left: 0;
-    width: 68%;
-    height: 72%;
-  }
-
-  .haichuan-salon__media img:last-child {
-    width: 54%;
-    height: 48%;
-    border-width: 8px;
-  }
-
-  .haichuan-salon__actions {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 4px;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
   }
 
-  .editorial-hero__video,
-  .editorial-poster__item img,
-  .brand-drawer .ant-drawer-content-wrapper,
-  .editorial-header,
   .site-header,
-  .catalog-sticky-bar,
+  .catalog-pin,
   .product-detail-page__main-media,
   .site-header__nav-item,
   .site-header__nav-label,
@@ -1197,7 +936,7 @@ html:has(.site-shell)::-webkit-scrollbar {
   }
 }
 
-/* 窄屏页头保留购物袋和账户；联系顾问与选款仍可从菜单进入。 */
+/* 窄屏页头保留购物袋和账户。联系从页脚进入，选款从品牌菜单进入。 */
 @media (max-width: 767px) {
   .site-header__right > .site-header__nav-item--contact {
     display: none;
@@ -1228,7 +967,11 @@ html:has(.site-shell)::-webkit-scrollbar {
   }
 
   .site-header__brand-text {
-    font-size: 20px;
+    /* 手机字标随宽度放大；16px 保最窄屏不压到两侧图标，28px 是上限。 */
+    --brand-wordmark-opsz: 20;
+    font-size: clamp(16px, calc(13vw - 26px), 28px);
+    letter-spacing: 0;
+    padding-left: 0;
   }
 }
 
@@ -1412,7 +1155,8 @@ html:has(.site-shell)::-webkit-scrollbar {
 .site-search__submit:focus-visible,
 .site-search__close:focus-visible,
 .site-search__link:focus-visible,
-.site-search__product:focus-visible {
+.site-search__product-link:focus-visible,
+.site-search__cart:focus-visible {
   outline: 2px solid #181a1b;
   outline-offset: 3px;
 }
@@ -1491,7 +1235,40 @@ html:has(.site-shell)::-webkit-scrollbar {
   flex-direction: column;
   color: inherit;
   text-align: center;
+}
+
+.site-search__product-link {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  flex-direction: column;
+  color: inherit;
+  text-align: center;
   text-decoration: none;
+}
+
+.site-search__cart {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  margin-top: 2px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: #181a1b;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.site-search__cart:disabled {
+  color: #5f6568;
+  cursor: progress;
 }
 
 .site-search__product-media {

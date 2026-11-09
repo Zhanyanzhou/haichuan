@@ -11,6 +11,8 @@ import { withPublicMediaWidth } from "@/utils/publicMediaWidth";
 import { publicProductPath } from "@/utils/publicProductPath";
 import RouteLoading from "@/components/common/RouteLoading";
 import { clampProductTitle } from "@/utils/productTitleLength";
+import { ListingCartButton } from "@/components/common/ListingCartButton";
+import { useCommerceCapabilities } from "@/store/featureFlags";
 
 type SiteSearchDialogProps = {
   open: boolean;
@@ -26,6 +28,7 @@ type SearchWork = {
   priceMin: number;
   salesMode?: string;
   image?: string;
+  isAvailableForPurchase: boolean;
 };
 
 type SeriesLink = {
@@ -75,6 +78,7 @@ function parseWork(value: unknown): SearchWork | null {
     priceMin: Number.isFinite(priceMin) ? priceMin : 0,
     salesMode: textOf(record.salesMode) || undefined,
     image: image ? withPublicMediaWidth(image, 480) : undefined,
+    isAvailableForPurchase: record.isAvailableForPurchase === true,
   };
 }
 
@@ -187,6 +191,8 @@ export default function SiteSearchDialog({ open, onClose }: SiteSearchDialogProp
   const [categoryRevision, setCategoryRevision] = useState(0);
   const [activeCategoryId, setActiveCategoryId] = useState<number | null>(null);
   const [workRevision, setWorkRevision] = useState(0);
+  const { flags, error: commerceFlagsError } = useCommerceCapabilities();
+  const cartReady = !commerceFlagsError && flags?.cartEnabled === true;
   const panelRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [portalHost, setPortalHost] = useState<HTMLElement | null>(null);
@@ -440,21 +446,35 @@ export default function SiteSearchDialog({ open, onClose }: SiteSearchDialogProp
               <div className="site-search__products">
                 {works.map((work) => {
                   const price = workPrice(work);
+                  const canAdd = cartReady
+                    && work.salesMode === "DIRECT_PURCHASE"
+                    && work.price > 0
+                    && work.isAvailableForPurchase;
                   return (
-                    <Link
-                      key={work.id}
-                      to={publicProductPath(work)}
-                      className="site-search__product"
-                      onClick={onClose}
-                    >
-                      <span className="site-search__product-media">
-                        {work.image ? (
-                          <SecureImage src={work.image} alt="" />
-                        ) : null}
-                      </span>
-                      <span className="site-search__product-name" title={work.name}>{clampProductTitle(work.name)}</span>
-                      {price ? <span className="site-search__product-price">{price}</span> : null}
-                    </Link>
+                    <div key={work.id} className="site-search__product">
+                      <Link
+                        to={publicProductPath(work)}
+                        className="site-search__product-link"
+                        onClick={onClose}
+                      >
+                        <span className="site-search__product-media">
+                          {work.image ? (
+                            <SecureImage src={work.image} alt="" />
+                          ) : null}
+                        </span>
+                        <span className="site-search__product-name" title={work.name}>{clampProductTitle(work.name)}</span>
+                        {price ? <span className="site-search__product-price">{price}</span> : null}
+                      </Link>
+                      {canAdd ? (
+                        <ListingCartButton
+                          product={{ id: work.id, code: work.code }}
+                          className="site-search__cart"
+                          onFinished={(result) => {
+                            if (result.status === "added" || result.status === "choose-specification") onClose();
+                          }}
+                        />
+                      ) : null}
+                    </div>
                   );
                 })}
               </div>

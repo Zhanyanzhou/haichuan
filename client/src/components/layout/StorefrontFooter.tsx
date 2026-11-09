@@ -61,7 +61,7 @@ export default function StorefrontFooter({
               className="site-footer__service-link"
               {...previewLinkProps("/contact")}
             >
-              <span>联系与预约</span>
+              <span>联系与咨询</span>
               <span aria-hidden="true">→</span>
             </Link>
           </div>

@@ -23,7 +23,7 @@ function BagIcon() {
   );
 }
 
-/** 页头购物袋。交易关闭时显示本地选款数量；交易开放后数量改由购物车页承担。 */
+/** 页头购物袋。购物车准备关闭时显示本地选款数量；准备开启后数量改由购物车页承担。 */
 export default function ShoppingBagNavLink({
   onClick,
 }: {
@@ -33,8 +33,8 @@ export default function ShoppingBagNavLink({
   const ready = useSelectionStore((state) => state.ready);
   const selectedCount = useSelectionStore((state) => state.selectedIds.size);
   const flags = useCommerceFlags((state) => state.flags);
-  const commerceCartOpen = flags?.commerceEnabled === true && flags?.cartEnabled === true;
-  const count = ready && !commerceCartOpen ? selectedCount : 0;
+  const cartPreparationOpen = flags?.cartEnabled === true;
+  const count = ready && !cartPreparationOpen ? selectedCount : 0;
   const label = count > 0 ? `购物袋，已选 ${count} 款` : "购物袋";
   const catalogReturnUrl = sanitizeCatalogReturnUrl(`${location.pathname}${location.search}${location.hash}`);
 

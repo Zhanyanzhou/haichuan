@@ -1,0 +1,129 @@
+{
+  "date": "2026-11-04",
+  "conclusion": "REWORK",
+  "runtime": {
+    "viewport": [
+      1920,
+      1080,
+      2
+    ],
+    "firstImage": {
+      "src": "http://127.0.0.1:5173/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png",
+      "srcset": "",
+      "sizes": ""
+    },
+    "documents": [
+      {
+        "url": "/api/page-modules/document/published?pageKey=home",
+        "status": 200,
+        "code": 200,
+        "keys": [
+          "pageKey",
+          "locale",
+          "puckData",
+          "metadata",
+          "status",
+          "publishedAt",
+          "updatedAt",
+          "version",
+          "contentHash"
+        ],
+        "facts": 0
+      },
+      {
+        "url": "/api/page-modules/document/published?pageKey=home&locale=zh-CN",
+        "status": 200,
+        "code": 200,
+        "keys": [
+          "pageKey",
+          "locale",
+          "puckData",
+          "metadata",
+          "status",
+          "publishedAt",
+          "updatedAt",
+          "version",
+          "contentHash"
+        ],
+        "facts": 0
+      }
+    ],
+    "variants": [
+      {
+        "w": 480,
+        "rv": 999,
+        "status": 200
+      },
+      {
+        "w": 3840,
+        "rv": 2,
+        "status": 404
+      }
+    ]
+  },
+  "componentFixture": {
+    "layer": "actual component with synthetic image metadata and route-Mock GET; no auth/DB/upload/publish acceptance",
+    "panels": [
+      {
+        "name": "actual-mobile-spec-810",
+        "text": "actual-mobile-spec-810\n替换图片\n本页图片\n图片链接\n更多\n设计画框\n设计参考 810×1440，不是上传上限。画框 9:16。\n原图像素\n941×1672。\n清晰度\n按 810 宽、3 倍屏检查，像素偏低，建议源宽约 2431。\n构图\n适合当前构图。\n按 810 宽、3 倍屏检查，像素偏低，建议源宽约 2431。\n查看图片信息",
+        "quality": "warning",
+        "factsState": "ready"
+      },
+      {
+        "name": "reference-mobile-spec-390",
+        "text": "reference-mobile-spec-390\n替换图片\n本页图片\n图片链接\n更多\n设计画框\n设计参考 390×693，不是上传上限。画框 9:16。\n原图像素\n941×1672。\n清晰度\n按 390 宽、3 倍屏检查，像素偏低，建议源宽约 1171。\n构图\n适合当前构图。\n按 390 宽、3 倍屏检查，像素偏低，建议源宽约 1171。\n查看图片信息",
+        "quality": "warning",
+        "factsState": "ready"
+      },
+      {
+        "name": "half-column-720",
+        "text": "half-column-720\n替换图片\n本页图片\n图片链接\n更多\n设计画框\n设计参考 720×405，不是上传上限。画框 16:9。\n原图像素\n1600×900。\n清晰度\n按 960 宽、2 倍屏检查，像素偏低，建议源宽约 1920。\n构图\n适合当前构图。\n按 960 宽、2 倍屏检查，像素偏低，建议源宽约 1920。\n查看图片信息",
+        "quality": "warning",
+        "factsState": "ready"
+      },
+      {
+        "name": "uncached-auto-detect",
+        "text": "uncached-auto-detect\n替换图片\n本页图片\n图片链接\n更多\n设计画框\n设计参考 810×1440，不是上传上限。画框 9:16。\n原图像素\n941×1672。\n清晰度\n按 810 宽、3 倍屏检查，像素偏低，建议源宽约 2431。\n构图\n适合当前构图。\n按 810 宽、3 倍屏检查，像素偏低，建议源宽约 2431。\n查看图片信息",
+        "quality": "warning",
+        "factsState": "ready"
+      },
+      {
+        "name": "metadata-retry",
+        "text": "metadata-retry\n替换图片\n本页图片\n图片链接\n更多\n设计画框\n设计参考 810×1440，不是上传上限。画框 9:16。\n原图像素\n941×1672。\n清晰度\n按 810 宽、3 倍屏检查，像素偏低，建议源宽约 2431。\n构图\n适合当前构图。\n按 810 宽、3 倍屏检查，像素偏低，建议源宽约 2431。\n查看图片信息",
+        "quality": "warning",
+        "factsState": "ready"
+      },
+      {
+        "name": "unknown-with-old-db-size",
+        "text": "unknown-with-old-db-size\n替换图片\n本页图片\n图片链接\n更多\n设计画框\n设计参考 1440×810，不是上传上限。画框 16:9。\n原图像素\n3840×2160。\n清晰度\n按 1920 宽、2 倍屏展示，建议源宽 3840。当前像素够用。\n构图\n适合当前构图。",
+        "quality": "good",
+        "factsState": "ready"
+      }
+    ],
+    "calls": [
+      "/uploads/page-assets/acceptance-r2-uncached.png",
+      "/uploads/page-assets/acceptance-r2-retry.png",
+      "/uploads/page-assets/acceptance-r2-unknown.png",
+      "/uploads/page-assets/acceptance-r2-retry.png"
+    ],
+    "beforeRetry": "metadata-retry\n替换图片\n本页图片\n图片链接\n更多\n设计画框\n设计参考 810×1440，不是上传上限。画框 9:16。\n原图像素\n原图像素读取失败。可重试，或打开本页图片后再检测。 重试\n清晰度\n按 810 宽、3 倍屏检查。还不能确认原图是否够用。\n构图\n构图待原图像素确认后再判断。"
+  },
+  "checks": {
+    "node": "22.23.2",
+    "clientPurePassed": 12,
+    "serverTargetPassed": 35,
+    "clientTypecheck": 0,
+    "serverTypecheck": 0,
+    "contractsCheck": 0
+  },
+  "scope": "Read-only review and public GET; actual component route-Mock fixtures are not auth/database or publish acceptance.",
+  "findings": [
+    "R2-1: mobile upload specification 810 treated as CSS display width, recommending 2431 instead of about1171.",
+    "R2-2: unknown source dimensions overridden by old width/height and marked ready/good."
+  ],
+  "notExecuted": [
+    "No business source fixes or service restarts.",
+    "No uploads, database writes, save or publish."
+  ]
+}

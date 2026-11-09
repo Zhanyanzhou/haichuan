@@ -1,0 +1,242 @@
+{
+  "observedDate": "2026-11-04",
+  "timezone": "Asia/Shanghai",
+  "scope": "Isolated local public GET observations and pure in-memory diagnostics; no admin uploads, database writes or publishing.",
+  "environment": {
+    "node": "22.23.2",
+    "sharp": "0.35.5"
+  },
+  "importantCorrection": "Earlier viewport-transition sample returned the desktop source in the mobile frame. Fresh mobile navigation consistently selected the independent 941x1672 mobile source. Do not describe the earlier sample as the stable current mobile page.",
+  "browser": {
+    "desktop": {
+      "viewport": [
+        1440,
+        1000,
+        2
+      ],
+      "source": "http://127.0.0.1:5173/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=2880",
+      "decoded": [
+        2880,
+        1620
+      ],
+      "type": "image/webp",
+      "bytes": 415454,
+      "natural": [
+        1440,
+        810
+      ],
+      "box": [
+        1440,
+        810
+      ],
+      "fit": "cover",
+      "position": "62.2282% 66.571%",
+      "sizes": "100vw",
+      "srcset": "/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=480 480w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=800 800w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=1200 1200w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=1680 1680w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=2400 2400w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=2880 2880w"
+    },
+    "mobile": {
+      "viewport": [
+        390,
+        844,
+        3
+      ],
+      "source": "http://127.0.0.1:5173/uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png?width=1200",
+      "decoded": [
+        941,
+        1672
+      ],
+      "type": "image/webp",
+      "bytes": 116966,
+      "natural": [
+        305,
+        543
+      ],
+      "box": [
+        390,
+        693.328125
+      ],
+      "fit": "cover",
+      "position": "89.589% 47.9589%",
+      "sizes": "100vw",
+      "srcset": "/uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png?width=480 480w, /uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png?width=800 800w, /uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png?width=1200 1200w, /uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png?width=1680 1680w, /uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png?width=2400 2400w, /uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png?width=2880 2880w"
+    },
+    "endpoint767": {
+      "viewport": [
+        767,
+        1024,
+        2
+      ],
+      "source": "http://127.0.0.1:5173/uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png?width=1680",
+      "decoded": [
+        941,
+        1672
+      ],
+      "type": "image/webp",
+      "bytes": 116966,
+      "natural": [
+        429,
+        763
+      ],
+      "box": [
+        520,
+        960
+      ],
+      "fit": "cover",
+      "position": "89.589% 47.9589%",
+      "sizes": "100vw",
+      "srcset": "/uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png?width=480 480w, /uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png?width=800 800w, /uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png?width=1200 1200w, /uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png?width=1680 1680w, /uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png?width=2400 2400w, /uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png?width=2880 2880w"
+    },
+    "endpoint768": {
+      "viewport": [
+        768,
+        1024,
+        2
+      ],
+      "source": "http://127.0.0.1:5173/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=1680",
+      "decoded": [
+        1680,
+        945
+      ],
+      "type": "image/webp",
+      "bytes": 153832,
+      "natural": [
+        768,
+        432
+      ],
+      "box": [
+        768,
+        432
+      ],
+      "fit": "cover",
+      "position": "62.2282% 66.571%",
+      "sizes": "100vw",
+      "srcset": "/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=480 480w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=800 800w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=1200 1200w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=1680 1680w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=2400 2400w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=2880 2880w"
+    },
+    "wide": {
+      "viewport": [
+        1920,
+        1080,
+        2
+      ],
+      "source": "http://127.0.0.1:5173/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=2880",
+      "decoded": [
+        2880,
+        1620
+      ],
+      "type": "image/webp",
+      "bytes": 415454,
+      "natural": [
+        1920,
+        1080
+      ],
+      "box": [
+        1920,
+        1080
+      ],
+      "fit": "cover",
+      "position": "62.2282% 66.571%",
+      "sizes": "100vw",
+      "srcset": "/uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=480 480w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=800 800w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=1200 1200w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=1680 1680w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=2400 2400w, /uploads/page-assets/f77b6e5fbc4cc8d6da02909f1b5beb2d331cb2c124999a86cf1fbf8b4017b2ad.png?width=2880 2880w"
+    },
+    "fresh-mobile": {
+      "viewport": [
+        390,
+        844,
+        3
+      ],
+      "source": "http://127.0.0.1:5173/uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png?width=1200",
+      "decoded": [
+        941,
+        1672
+      ],
+      "type": "image/webp",
+      "bytes": 116966,
+      "natural": [
+        305,
+        543
+      ],
+      "box": [
+        390,
+        693.328125
+      ],
+      "fit": "cover",
+      "position": "89.589% 47.9589%",
+      "sizes": "100vw",
+      "srcset": "/uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png?width=480 480w, /uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png?width=800 800w, /uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png?width=1200 1200w, /uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png?width=1680 1680w, /uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png?width=2400 2400w, /uploads/page-assets/908c88123e1bb187a809cde96b3e9ef22d5b16d7bf44d103fdb953accd3eb5e0.png?width=2880 2880w"
+    }
+  },
+  "inMemoryProbe": {
+    "node": "v22.23.2",
+    "sharp": "0.35.5",
+    "method": "in-memory existing function, no file/database/HTTP writes",
+    "results": [
+      {
+        "name": "small-source",
+        "requestedWidth": 480,
+        "input": {
+          "width": 200,
+          "height": 100,
+          "bytes": 601
+        },
+        "output": {
+          "width": 200,
+          "height": 100,
+          "bytes": 112,
+          "mimeType": "image/webp"
+        }
+      },
+      {
+        "name": "size-fallback",
+        "requestedWidth": 480,
+        "input": {
+          "width": 1000,
+          "height": 500,
+          "bytes": 19713
+        },
+        "output": {
+          "width": 1000,
+          "height": 500,
+          "bytes": 19713,
+          "mimeType": "image/jpeg"
+        }
+      },
+      {
+        "name": "exif-orientation-6",
+        "requestedWidth": 480,
+        "input": {
+          "width": 200,
+          "height": 100,
+          "orientation": 6,
+          "bytes": 1092
+        },
+        "output": {
+          "width": 100,
+          "height": 200,
+          "bytes": 116,
+          "mimeType": "image/webp"
+        }
+      }
+    ]
+  },
+  "baseline": {
+    "clientResponsiveCandidates": {
+      "passed": 6,
+      "failed": 0
+    },
+    "serverPublicUploadsGateway": {
+      "passed": 9,
+      "failed": 0
+    },
+    "contractsCheck": {
+      "passed": true,
+      "schema": 3,
+      "sha256Prefix": "829234be9442"
+    }
+  },
+  "limits": [
+    "No new product decision approved.",
+    "No actual upload/save/publish/write-path acceptance.",
+    "Source dimensions obtained by decoding actual response bytes, not naturalWidth.",
+    "cover inherited-landscape case needs controlled regression; geometry gap is supported by current source."
+  ]
+}

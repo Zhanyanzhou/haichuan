@@ -162,7 +162,7 @@ test("客户 3D 文件数组响应正常渲染待确认版本", async ({ page })
     }],
   }]);
 
-  await page.goto("/customer");
+  await page.goto("/customer?section=quotations");
 
   await expect(page.getByRole("heading", { name: "待确认的 3D 文件" })).toBeVisible();
   await expect(page.getByText("DESIGN-CUSTOMER-41 · V2")).toBeVisible();
@@ -175,7 +175,7 @@ test("客户 3D 文件非数组响应进入可重试错误态而不崩溃", asyn
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await mockCustomerQuotationPanel(page, { list: [], total: 0 });
 
-  await page.goto("/customer");
+  await page.goto("/customer?section=quotations");
 
   await expect(page.getByRole("heading", { name: "我的报价" })).toBeVisible();
   await expect(page.getByRole("alert")).toContainText(
@@ -196,7 +196,7 @@ test("客户 3D 文件畸形数组响应进入可重试错误态且保持交易�
     versions: { status: "SUBMITTED" },
   }]);
 
-  await page.goto("/customer");
+  await page.goto("/customer?section=quotations");
 
   await expect(page.getByRole("alert")).toContainText(
     "3D 文件记录暂时无法加载",
@@ -211,7 +211,7 @@ test("客户 3D 文件返回 403 时显示权限错误且不渲染待确认区",
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await mockCustomerQuotationPanel(page, null, 403);
 
-  await page.goto("/customer");
+  await page.goto("/customer?section=quotations");
 
   await expect(page.getByRole("heading", { name: "我的报价" })).toBeVisible();
   await expect(page.getByRole("alert")).toContainText(
@@ -362,11 +362,11 @@ test("客户确认报价后刷新并聚焦服务端返回的唯一订单", async
     return respond([]);
   });
   await installCustomerSession(page, { name: "转单定位客户" });
-  await page.goto("/customer");
+  await page.goto("/customer?section=quotations");
 
   await page.getByRole("button", { name: "查看报价" }).click();
   await expect(page.getByText("按客户确认的戒围调整尺寸与交期")).toBeVisible();
-  await page.getByLabel("收货地址").click();
+  await page.getByRole("dialog", { name: "报价详情" }).getByRole("combobox", { name: "收货地址" }).click();
   await page.getByText("张女士 · 上海市上海市黄浦区测试路 1 号").click();
   await page.getByRole("button", { name: "确认报价并创建订单" }).click();
   await page.getByRole("button", { name: "确认报价并创建订单" }).last().click();
@@ -466,7 +466,7 @@ test("历史已转单报价会自动展开并聚焦第 5 笔较早订单", async
     return respond([]);
   });
   await installCustomerSession(page, { name: "历史报价客户" });
-  await page.goto("/customer");
+  await page.goto("/customer?section=quotations");
 
   await expect(page.locator(`#customer-order-${targetOrder.id}`)).toHaveCount(0);
   await page.getByRole("button", { name: "查看报价" }).click();
@@ -559,7 +559,7 @@ test("关闭旧报价后迟到详情不会覆盖新打开的报价", async ({ pa
     return respond([]);
   });
   await installCustomerSession(page, { name: "报价竞态客户" });
-  await page.goto("/customer");
+  await page.goto("/customer?section=quotations");
 
   await page.getByRole("button", { name: "查看报价" }).nth(0).click();
   await expect(page.getByRole("dialog", { name: "报价详情" })).toBeVisible();
@@ -717,13 +717,14 @@ test("身份 refresh 切换客户后清空旧报价订单并忽略迟到转单�
     return respond([]);
   });
 
-  await page.goto("/customer");
-  await expect(page.getByText("QUOTE-OWNER-A", { exact: false })).toBeVisible();
+  await page.goto("/customer?section=orders");
   await expect(page.getByText("ORD-OWNER-A", { exact: false })).toBeVisible();
-
   await page.getByRole("button", { name: "查看轨迹" }).click();
+  const shortcuts = page.getByRole("navigation", { name: "会员服务" });
+  await shortcuts.getByRole("link", { name: "我的报价" }).click();
+  await expect(page.getByText("QUOTE-OWNER-A", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "查看报价" }).click();
-  await page.getByLabel("收货地址").click();
+  await page.getByRole("dialog", { name: "报价详情" }).getByRole("combobox", { name: "收货地址" }).click();
   await page.getByText("甲女士 · 上海市上海市黄浦区甲地址 1 号").click();
   await page.getByRole("button", { name: "确认报价并创建订单" }).click();
   await page.getByRole("button", { name: "确认报价并创建订单" }).last().click();
@@ -732,13 +733,14 @@ test("身份 refresh 切换客户后清空旧报价订单并忽略迟到转单�
   releaseTracking();
   await expect.poll(() => refreshCompleted).toBe(true);
   await expect(page.getByText("QUOTE-OWNER-B", { exact: false })).toBeVisible();
-  await expect(page.getByText("ORD-OWNER-B", { exact: false })).toBeVisible();
   await expect(page.getByText("QUOTE-OWNER-A", { exact: false })).toHaveCount(0);
-  await expect(page.getByText("ORD-OWNER-A", { exact: false })).toHaveCount(0);
 
   releaseConfirmation();
   await expect.poll(() => confirmationDelivered).toBe(true);
   await expect(page.getByText("订单 ORD-OWNER-A 已创建", { exact: true })).toHaveCount(0);
+  await shortcuts.getByRole("link", { name: "我的订单" }).click();
+  await expect(page.getByText("ORD-OWNER-B", { exact: false })).toBeVisible();
+  await expect(page.getByText("ORD-OWNER-A", { exact: false })).toHaveCount(0);
   await expect(page.locator("#customer-order-701")).toHaveCount(0);
   await expect(page.locator("#customer-order-801")).toBeVisible();
 });

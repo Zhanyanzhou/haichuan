@@ -1,0 +1,43 @@
+{
+  "status": [
+    "服务端草稿已保存",
+    "宽 390 px × 高 780 px · 标准比例 1:2",
+    "已按每个字段的长度上限生成长文字，用于检查换行、截断和高度稳定性。",
+    "",
+    ""
+  ],
+  "paragraphs": [
+    {
+      "height": 210,
+      "index": 1,
+      "textLength": 240,
+      "width": 350,
+      "x": 20,
+      "y": 64
+    },
+    {
+      "height": 210,
+      "index": 2,
+      "textLength": 240,
+      "width": 350,
+      "x": 20,
+      "y": 306
+    },
+    {
+      "height": 210,
+      "index": 3,
+      "textLength": 240,
+      "width": 350,
+      "x": 20,
+      "y": 548
+    },
+    {
+      "height": 210,
+      "index": 4,
+      "textLength": 240,
+      "width": 350,
+      "x": 20,
+      "y": 790
+    }
+  ]
+}

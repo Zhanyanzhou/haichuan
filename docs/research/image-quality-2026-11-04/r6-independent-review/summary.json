@@ -1,0 +1,26 @@
+{
+  "date": "2026-11-05",
+  "verdict": "R6-01 P2 remains; geometry and regular fallback accepted",
+  "targetTests": {
+    "passed": 20,
+    "failed": 0,
+    "exitCode": 0
+  },
+  "clientTypecheck": {
+    "exitCode": 0,
+    "incremental": false
+  },
+  "contracts": {
+    "exitCode": 0
+  },
+  "browser": {
+    "normalGroupsPassed": 12,
+    "addedRoundtripFailures": 2,
+    "exitCode": 1,
+    "evidence": "independent-cache-cleared-evidence.json",
+    "userPortsUnchanged": true
+  },
+  "businessSourceModified": false,
+  "databaseAccess": false,
+  "userDraftAccess": false
+}

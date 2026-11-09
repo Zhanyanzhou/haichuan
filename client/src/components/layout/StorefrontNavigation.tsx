@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import type { RefObject } from "react";
+import type { MouseEvent, RefObject } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { usePublicSiteSettings } from "@/hooks/usePublicSiteSettings";
 import {
@@ -48,6 +48,15 @@ type StorefrontMenuDrawerProps = {
   returnFocusRef?: RefObject<HTMLButtonElement>;
 };
 
+/** 页头可见字标。页面标题和读屏名称仍用站点名称，不在这里改写。 */
+export function BrandWordmark() {
+  return (
+    <span className="site-header__brand-text" lang="en" translate="no">
+      HAI <span className="site-header__brand-amp">&</span> CHUAN
+    </span>
+  );
+}
+
 const LEGACY_PLACEHOLDER_LOGOS = new Set([
   "/favicon.svg",
   "/images/brand-logo.svg",
@@ -75,7 +84,7 @@ const STOREFRONT_MENU_LABELS = {
   about: "关于海川",
 } as const;
 
-/** 主导航只取内容合同里的品牌页，顺序与后台装修页一致。预约留在下方服务入口。 */
+/** 主导航只取内容合同里的品牌页，顺序与后台装修页一致。联系从页头或页脚进入，订单和资料在我的账户内。 */
 export const storefrontMenuLinks = CONTENT_TEMPLATE_PAGE_KEYS.flatMap((key) => {
   if (!(key in STOREFRONT_MENU_LABELS)) return [];
   return [{
@@ -83,11 +92,6 @@ export const storefrontMenuLinks = CONTENT_TEMPLATE_PAGE_KEYS.flatMap((key) => {
     href: CONTENT_TEMPLATE_PAGE_PATHS[key],
   }];
 });
-
-const storefrontServiceLinks = [
-  { label: "联系与预约", href: "/contact" },
-  { label: "我的账户", href: "/customer" },
-] as const;
 
 const MenuIcon = () => (
   <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
@@ -117,6 +121,20 @@ const AccountIcon = () => (
     <path d="M5 27c.8-5.2 4.2-8 10-8s9.2 2.8 10 8" />
   </svg>
 );
+
+/** 页头账户只进入账户页。订单、心愿单、地址、资料和退出登录都在账户页内，不在页头再展开一层。 */
+export function AccountHeaderLink({
+  onClick,
+}: {
+  onClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
+}) {
+  return (
+    <Link to="/customer" aria-label="我的账户" className="site-header__nav-item" onClick={onClick}>
+      <AccountIcon />
+      <span className="site-header__nav-label hidden sm:inline">我的账户</span>
+    </Link>
+  );
+}
 
 const MenuArrowIcon = () => (
   <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -289,26 +307,6 @@ export function StorefrontMenuDrawer({
             </Link>
           ))}
         </nav>
-
-        <div className="brand-menu__footer">
-          <nav className="brand-menu__service-links" aria-label="客户服务">
-            {storefrontServiceLinks.map((item) => (
-              <Link
-                key={item.href}
-                to={item.href}
-                tabIndex={open ? 0 : -1}
-                aria-current={isActive(item.href) ? "page" : undefined}
-                className={isActive(item.href) ? "is-active" : undefined}
-                onClick={handleLink}
-              >
-                <span>{item.label}</span>
-                <span className="brand-menu__arrow" aria-hidden="true">
-                  <MenuArrowIcon />
-                </span>
-              </Link>
-            ))}
-          </nav>
-        </div>
       </div>
     </div>
   );
@@ -376,7 +374,7 @@ export default function StorefrontNavigation({
       >
         <div className="site-header__inner">
           <div className="site-header__left" />
-          <Link to="/" className="site-header__brand" aria-label={`${siteName}首页`} onClick={handlePreviewLink}>
+          <Link to="/" className="site-header__brand" aria-label={`HAI & CHUAN ${siteName}首页`} onClick={handlePreviewLink}>
             {logoUrl && (
               <img
                 src={logoUrl}
@@ -387,15 +385,12 @@ export default function StorefrontNavigation({
                 onError={(event) => { event.currentTarget.style.display = "none"; }}
               />
             )}
-            <span className="site-header__brand-text">{siteName}</span>
+            <BrandWordmark />
           </Link>
           <div className="site-header__right">
             <SiteContactLink preview={preview} onPreviewNavigate={onPreviewNavigate} />
             <ShoppingBagNavLink onClick={handlePreviewLink} />
-            <Link to="/customer" aria-label="我的账户" className="site-header__nav-item" onClick={handlePreviewLink}>
-              <AccountIcon />
-              <span className="site-header__nav-label hidden sm:inline">我的账户</span>
-            </Link>
+            <AccountHeaderLink onClick={handlePreviewLink} />
           </div>
         </div>
 

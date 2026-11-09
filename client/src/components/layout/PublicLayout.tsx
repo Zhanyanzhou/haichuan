@@ -33,7 +33,7 @@ import {
   type PublishedPageDocumentResource,
 } from "@/page-builder/runtime/usePublishedPageDocument";
 import { getPublishedPageReadiness } from "@/page-builder/runtime/publishedPageReadiness";
-import { resolveSiteLogo, StorefrontMenuDrawer } from "./StorefrontNavigation";
+import { AccountHeaderLink, BrandWordmark, resolveSiteLogo, StorefrontMenuDrawer } from "./StorefrontNavigation";
 import ShoppingBagNavLink from "./ShoppingBagNavLink";
 import SiteContactLink from "./SiteContactLink";
 import StorefrontFooter from "./StorefrontFooter";
@@ -301,20 +301,6 @@ const SearchIcon = () => (
     <line x1="19" y1="19" x2="27" y2="27" />
   </svg>
 );
-const AccountIcon = () => (
-  <svg
-    width="30"
-    height="30"
-    viewBox="0 0 30 30"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.4"
-    strokeLinecap="round"
-  >
-    <circle cx="15" cy="10" r="5" />
-    <path d="M5 27c.8-5.2 4.2-8 10-8s9.2 2.8 10 8" />
-  </svg>
-);
 export default function PublicLayout() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -456,6 +442,7 @@ export default function PublicLayout() {
   const needsCustomerIdentity =
     contentPathname === "/catalog"
     || contentPathname === "/cart"
+    || contentPathname === "/checkout"
     || contentPathname === "/contact"
     || /^\/products\/[^/]+$/.test(contentPathname);
   const pageMeta = usePageMetaStore((state) => state.meta);
@@ -511,7 +498,7 @@ export default function PublicLayout() {
       : null;
   useStructuredData("organization", organizationStructuredData);
 
-  // 选款、作品详情和咨询表单会根据客户身份选择会员事实或预填联系方式。
+  // 选款、作品详情、结算和咨询表单会根据客户身份选择会员事实或预填联系方式。
   // HttpOnly Cookie 无法由 JavaScript 自行探测，因此刷新这些页面时通过最小
   // profile 请求恢复会话。
   useEffect(() => {
@@ -771,7 +758,7 @@ export default function PublicLayout() {
           <Link
             to={withPublicLocalePath("/", localizedPath.locale)}
             className="site-header__brand"
-            aria-label={english ? `${siteName} home` : `${siteName}首页`}
+            aria-label={english ? `HAI & CHUAN ${siteName} home` : `HAI & CHUAN ${siteName}首页`}
             onClick={handleBrandHomeClick}
           >
             {logoUrl && (
@@ -786,22 +773,13 @@ export default function PublicLayout() {
                 }}
               />
             )}
-            <span className="site-header__brand-text">{siteName}</span>
+            <BrandWordmark />
           </Link>
 
           <nav className="site-header__right" aria-label={english ? "Quick links" : "快捷入口"}>
             <SiteContactLink />
             {!english ? <ShoppingBagNavLink /> : null}
-            {!english ? <Link
-              to="/customer"
-              aria-label="我的账户"
-              className="site-header__nav-item"
-            >
-              <AccountIcon />
-              <span className="site-header__nav-label hidden sm:inline">
-                我的账户
-              </span>
-            </Link> : null}
+            {!english ? <AccountHeaderLink /> : null}
           </nav>
         </div>
 

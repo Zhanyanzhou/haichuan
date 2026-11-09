@@ -95,7 +95,7 @@ test("客户中心不列出选款中心之外的推荐作品", async ({ page }) 
   await signInCustomer(page);
 
   await page.goto("/customer");
-  await expect(page.getByText("推荐合同测试客户", { exact: true })).toBeVisible();
+  await expect(page.getByText(/您好，推荐合同测试客户/)).toBeVisible();
   await expect(page.getByRole("region", { name: "为你推荐" })).toHaveCount(0);
   expect(forYouRequested).toBe(false);
 });

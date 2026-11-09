@@ -4,7 +4,6 @@ import type { Response } from 'express';
 import { CartService } from './cart.service';
 import { OptionalCustomerAuthGuard } from '../customers/optional-customer-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
-import { CustomerCommerceGuard } from '../../common/guards/customer-commerce.guard';
 import { AddCartItemDto, UpdateCartItemDto } from './dto/cart-item.dto';
 import type { OptionalCustomerRequest } from '../../common/security/authenticated-principal';
 
@@ -14,8 +13,9 @@ import type { OptionalCustomerRequest } from '../../common/security/authenticate
 // 必须标注 @Public() 让全局 JwtAuthGuard 旁通（JwtStrategy 会拒绝客户令牌），
 // 再由 OptionalCustomerAuthGuard 完成可选客户鉴权。
 @Public()
+// 购物车准备不跟随成交开关。创建订单和支付仍由 CustomerCommerceGuard 拦截。
 // OptionalCustomerAuthGuard：有客户令牌则解析出 req.customer，无令牌匿名放行（游客靠 x-session-id）
-@UseGuards(CustomerCommerceGuard, OptionalCustomerAuthGuard)
+@UseGuards(OptionalCustomerAuthGuard)
 export class CartController {
   constructor(private cartService: CartService) {}
 

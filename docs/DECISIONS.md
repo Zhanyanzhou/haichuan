@@ -28,7 +28,7 @@
 ### A.1 状态管理用 Zustand 4（非 Redux）✅
 - **决策**：前端全局状态用 Zustand 4。
 - **原因**：无 Provider、无 boilerplate、selector 模式避免不必要渲染、体积小（~2KB）。
-- **当前事实**：`authStore`、`shopStore` 用 `persist`；`selectionStore`、`pageMetaStore`、`appStore` 非持久。
+- **当前事实**：只有 `selectionStore` 持久化选款清单。`authStore`、`customerAuthStore`、`pageMetaStore`、`featureFlags` 不持久化。代码里没有 `shopStore` 或 `appStore`。
 
 ### A.2 固定技术栈 ✅
 - **决策**：前端 React 18 + TypeScript 5 + Vite 8 + Ant Design 5 + Tailwind CSS 3 + Zustand 4；后端 NestJS 11 + Prisma 5 + MySQL 8 + JWT + bcrypt + Sharp。当前不常驻 Redis/Bull，未来恢复缓存或队列须单独决策。
@@ -155,12 +155,13 @@
 
 ### D.2 ✅ 当前阶段交易与真实资金保持关闭（2026-08-23）
 <!-- decision-status:D.2=PAUSED -->
-- **决定**：客户交易、购物车、结算和支付开关安全默认关闭。代码存在、页面可访问、Mock/隔离测试、后台人工流程和外部网关凭据是不同事实，均不得单独解释为交易已开放或可上线。
+- **决定**：创建订单和支付安全默认关闭。直接购买可以完成规格选择、购物车和结算核对；只有提交订单和付款默认不能使用。代码存在、页面可访问、Mock/隔离测试、后台人工流程和外部网关凭据是不同事实，均不得单独解释为成交已开放或可上线。
+- **购买准备**（2026-11-09）：成交关闭时不再整段省略购买。`GET /settings/flags` 成功时 `cartEnabled` 为 true，不再跟随 `CUSTOMER_COMMERCE_ENABLED`。购物车读写不再使用 `CustomerCommerceGuard`。结算页可以核对规格、数量和收货信息；`commerceEnabled` 与 `paymentEnabled` 未同时开启时，提交按钮保持禁用，且不得调用结账或支付接口。服务端结账与支付守卫保持关闭。功能开关读取失败时，购物车准备仍随 `SAFE_FLAGS` 关闭。
 - **真实资金门禁**：在真实资金能力另行获批、目标环境与商户配置核验，并完成成功、失败、回调、退款、对账和回退验收前，客户与后台均不得发起外部支付网关收款；后台可保留历史查看、非网关人工审核和售后。服务端必须以单一、显式且安全默认关闭的门禁阻止所有新网关交易，同时继续安全处理暂停前已创建交易的有效回调；具体接线和验证状态只认代码与 `docs/CURRENT_STATE.md`。
 - **后续解冻**：支付和生产上线最后单独讨论；必须逐能力记录环境、身份、真实数据、凭据、资金路径、审计、回退和上线批准，不得整体一次性解冻。
 
 ### D.3 ✅ Feature Flags 已服务端单一来源化（2026-08-15 复核修订）
-- **已落地**：服务端 `GET /settings/flags` 读取 `CUSTOMER_COMMERCE_ENABLED` 环境变量作为**单一来源**；前端 `featureFlags.ts` 拉取该端点，请求失败回退 `SAFE_FLAGS`（三项全 false，安全默认关）。服务端 `CustomerCommerceGuard` 仍是最终安全边界。
+- **已落地**：服务端 `GET /settings/flags` 读取发布档位与 `CUSTOMER_COMMERCE_ENABLED` 作为订单创建开关；`paymentEnabled` 单独读取支付网关开关。`cartEnabled` 表示购物车准备，成功响应时为 true。前端失败回退 `SAFE_FLAGS`（含购物车准备在内全部关闭）。`CustomerCommerceGuard` 仍拦截结账与支付写入，不再拦截购物车。
 - **2026-08-20 校正：** `docker-compose.yml` 与 `.env.example` 均以 `false` 为默认值；获批环境必须显式设置为 `true`，不得依赖缺失变量时的默认开放。
 - **历史状态（已过时）**：曾为前端硬编码 false。
 
@@ -371,7 +372,7 @@
 <!-- decision-contract:D.32 {"scope":["mainland-china","zh-web","commerce-candidate"],"activation":["approved-candidate","target-environment","merchant-and-channel-identity","end-to-end-funds","production-approval"],"supersedes":[],"validation":["test:trade","commerce-e2e","target-environment"]} -->
 
 - **目标范围**：下一交易候选面向中国大陆中文桌面网站和手机网站，标准零售以微信支付优先；支付宝和小程序按各自条件后续纳入。英文网站与英文交易已由 D.35 退役，不属于后续候选。
-- **当前状态**：`TARGET` 不是 `ENABLED`。D.2 继续生效，`commerce`、客户交易和支付网关开关保持安全关闭；代码入口、SDK、Mock、隔离测试或商户资料中的任一单项都不能把状态改为开放。
+- **当前状态**：`TARGET` 不是 `ENABLED`。D.2 继续生效：顾客可以完成购买准备，但客户交易和支付网关开关保持安全关闭，不能提交订单或付款。代码入口、SDK、Mock、隔离测试或商户资料中的任一单项都不能把成交状态改为开放。
 - **解冻条件**：必须绑定精确候选、目标环境、商户与渠道身份，完成客户本人确认、订单与金额快照、回调验签、主动查单、关单、退款、对账、故障恢复和回退验收，并取得真实资金与生产上线批准。未受阻的本地实现和自动验证可由 Codex 在授权范围内推进。
 - **边界**：本决定只收敛产品目标和候选语言，不授权生产部署、真实资金、真实数据修改、付费服务或扩大权限。
 

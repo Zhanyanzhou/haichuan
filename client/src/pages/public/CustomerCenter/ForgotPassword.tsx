@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { customerApi } from '@/services/api';
+import { MemberGate } from './MemberGate';
 import {
   getRequestErrorMessage,
   requestRetryAfterSeconds,
@@ -21,6 +22,7 @@ export default function ForgotPassword() {
   const [retryAfterSeconds, setRetryAfterSeconds] = useState(0);
   const submittingRef = useRef(false);
   const mountedRef = useRef(true);
+  const emailId = useId();
 
   useEffect(() => {
     mountedRef.current = true;
@@ -71,81 +73,72 @@ export default function ForgotPassword() {
   };
 
   return (
-    <div className="min-h-[70vh] flex items-center justify-center px-4 py-16">
-      <div className="w-full max-w-md bg-white border border-brand-line p-10">
-        <h1 className="text-2xl font-display font-semibold text-brand-text">找回密码</h1>
-        <p className="text-sm text-brand-muted mt-2">
-          输入注册邮箱。若账户匹配，系统会处理一次性重置链接（链接 30 分钟内有效）。
-        </p>
-
-        {view === 'accepted' ? (
-          <div className="mt-8 space-y-4" role="status" aria-live="polite">
-            <h2 className="text-base font-medium text-brand-text">找回请求已受理</h2>
-            <p className="text-sm text-brand-text leading-relaxed">
-              若该邮箱已注册，我们已受理找回请求。邮件可能需要几分钟，请同时检查垃圾邮件文件夹。
-            </p>
-            <p className="text-xs text-brand-muted">请勿连续提交；若稍后仍未收到，请联系您的专属顾问协助重置。</p>
-            <Link to="/customer" className="inline-flex min-h-11 items-center text-sm font-medium text-brand-text underline underline-offset-4 hover:text-brand-muted">
-              返回客户中心登录
-            </Link>
+    <MemberGate
+      kicker="Private Membership"
+      title="找回密码"
+      lede={<p>输入注册邮箱。若账户匹配，系统会处理一次性重置链接，链接 30 分钟内有效。</p>}
+    >
+      {view === 'accepted' ? (
+        <div className="member-recovery" role="status" aria-live="polite">
+          <h2>找回请求已受理</h2>
+          <p>若该邮箱已注册，我们已受理找回请求。邮件可能需要几分钟，请同时检查垃圾邮件文件夹。</p>
+          <p>请勿连续提交；若稍后仍未收到，请联系顾问协助重置。</p>
+          <div className="member-recovery__links">
+            <Link to="/customer">返回登录</Link>
           </div>
-        ) : view === 'uncertain' ? (
-          <div className="mt-8 space-y-4" role="alert" aria-live="assertive">
-            <h2 className="text-base font-medium text-brand-text">请求结果待确认</h2>
-            <p className="text-sm text-brand-text leading-relaxed">
-              网络响应未能确认。若该邮箱已注册，邮件仍可能送达；请先等待几分钟并检查垃圾邮件，不要连续提交。
-            </p>
-            <div className="flex flex-wrap gap-x-5 gap-y-3 text-sm">
-              <Link to="/customer" className="inline-flex min-h-11 items-center font-medium text-brand-text underline underline-offset-4 hover:text-brand-muted">
-                返回客户中心登录
-              </Link>
-              <Link to="/contact" className="inline-flex min-h-11 items-center text-brand-muted underline underline-offset-4 hover:text-brand-text">
-                联系顾问
-              </Link>
-            </div>
+        </div>
+      ) : view === 'uncertain' ? (
+        <div className="member-recovery" role="alert" aria-live="assertive">
+          <h2>请求结果待确认</h2>
+          <p>网络响应未能确认。若该邮箱已注册，邮件仍可能送达；请先等待几分钟并检查垃圾邮件，不要连续提交。</p>
+          <div className="member-recovery__links">
+            <Link to="/customer">返回客户中心登录</Link>
+            <Link to="/contact">联系顾问</Link>
           </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="mt-8 space-y-5">
-            <label className="block">
-              <span className="text-sm text-brand-text">注册邮箱</span>
-              <input
-                type="email"
-                value={email}
-                onChange={(event) => {
-                  setEmail(event.target.value);
-                  setFeedback(null);
-                }}
-                disabled={submitting}
-                maxLength={100}
-                required
-                autoFocus
-                className="mt-2 w-full border border-brand-line px-4 py-3 text-sm focus:border-brand-text focus:outline-none focus:ring-2 focus:ring-brand-text focus:ring-offset-2"
-              />
-            </label>
-            <button
-              type="submit"
-              disabled={submitting || retryAfterSeconds > 0}
-              className="w-full bg-brand-text text-white py-3 text-sm tracking-widest hover:opacity-90 disabled:opacity-50"
-            >
-              {submitting
-                ? '提交中…'
-                : retryAfterSeconds > 0
-                  ? `${retryAfterSeconds} 秒后可重试`
-                  : '提交找回请求'}
-            </button>
-            {retryAfterSeconds > 0 ? (
-              <p role="alert" className="text-sm text-[#8C3F3B]">
-                操作过于频繁，请在 {retryAfterSeconds} 秒后重试。
-              </p>
-            ) : feedback ? (
-              <p role="alert" className="text-sm text-[#8C3F3B]">{feedback}</p>
-            ) : null}
-            <Link to="/customer" className="flex min-h-11 items-center justify-center text-center text-xs text-brand-muted underline underline-offset-4 hover:text-brand-text">
-              返回登录
-            </Link>
-          </form>
-        )}
-      </div>
-    </div>
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit} className="member-recovery" noValidate>
+          <div className="member-field">
+            <label htmlFor={emailId}>注册邮箱</label>
+            <input
+              id={emailId}
+              type="email"
+              value={email}
+              onChange={(event) => {
+                setEmail(event.target.value);
+                setFeedback(null);
+              }}
+              disabled={submitting}
+              maxLength={100}
+              required
+              autoFocus
+              autoComplete="email"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={submitting || retryAfterSeconds > 0}
+            className="account-button account-button--dark member-submit"
+            aria-busy={submitting}
+          >
+            {submitting
+              ? '提交中…'
+              : retryAfterSeconds > 0
+                ? `${retryAfterSeconds} 秒后可重试`
+                : '提交找回请求'}
+          </button>
+          {retryAfterSeconds > 0 ? (
+            <p role="alert" className="member-error">
+              操作过于频繁，请在 {retryAfterSeconds} 秒后重试。
+            </p>
+          ) : feedback ? (
+            <p role="alert" className="member-error">{feedback}</p>
+          ) : null}
+          <div className="member-recovery__links">
+            <Link to="/customer">返回登录</Link>
+          </div>
+        </form>
+      )}
+    </MemberGate>
   );
 }

@@ -7,9 +7,10 @@
 .customer-notification-preferences__heading h3 {
   margin: 0;
   color: var(--ink);
-  font-size: 18px;
-  font-weight: 500;
-  line-height: 1.5;
+  font-family: "Noto Serif SC", "Songti SC", SimSun, serif;
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.4;
 }
 
 .customer-notification-preferences__heading p,

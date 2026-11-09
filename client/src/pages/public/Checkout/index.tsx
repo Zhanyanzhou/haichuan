@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { App as AntdApp, Form, Input } from "antd";
 import RouteLoading from "@/components/common/RouteLoading";
 import { CheckCircleOutlined } from "@ant-design/icons";
-import { cartApi, customerApi } from "@/services/api";
+import { cartApi, customerApi, productApi, type CustomerCheckoutRequest } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { trackBeginCheckout, trackOrderCreated } from "@/hooks/useAnalytics";
 import CustomerPaymentDialog from "@/components/commerce/CustomerPaymentDialog";
 import { useCustomerAuthStore } from "@/store/customerAuthStore";
+import { useCommerceCapabilities } from "@/store/featureFlags";
 import { getRequestErrorMessage } from "@/services/httpClient";
 import { isStaleSessionResponseError } from "@/services/sessionEpoch";
 import { clampProductTitle } from "@/utils/productTitleLength";
+import { getMaterialLabel } from "@/utils/material";
+import { normalizePublicProductReference } from "@/utils/publicProductPath";
+import type { Product } from "@/types";
 
 type CartItem = {
   id: number;
@@ -18,6 +22,7 @@ type CartItem = {
   quantity: number;
   product: { name: string };
   sku: { price: number | string };
+  skuLabel?: string;
   availability?: {
     available: boolean;
     status: string;
@@ -28,7 +33,7 @@ type CartItem = {
 const getItemPrice = (item: CartItem) => Number(item.sku.price || 0);
 
 type CreatedOrder = { id: number; orderNo: string; finalAmount: number };
-type PendingPaymentOrder = { ownerId: number; order: CreatedOrder };
+type PendingPaymentOrder = { ownerId: number; order: CreatedOrder; directSearch?: string };
 type UsableCoupon = {
   id: number;
   name: string;
@@ -45,12 +50,7 @@ const PENDING_PAYMENT_ORDER_KEY = "haichuan:pending-payment-order";
 const CHECKOUT_ATTEMPT_KEY = "haichuan:checkout-attempt";
 let volatileCheckoutAttempt: { requestHash: string; key: string } | null = null;
 
-async function checkoutRequestHash(customerId: number, request: {
-  address: string;
-  customerEmail?: string;
-  couponId?: number;
-  items: Array<{ skuId: number; quantity: number }>;
-}) {
+async function checkoutRequestHash(customerId: number, request: CustomerCheckoutRequest) {
   const quantities = new Map<number, number>();
   for (const item of request.items) {
     quantities.set(item.skuId, (quantities.get(item.skuId) ?? 0) + item.quantity);
@@ -61,6 +61,7 @@ async function checkoutRequestHash(customerId: number, request: {
     address: request.address.trim(),
     customerEmail: request.customerEmail?.trim() || null,
     couponId: request.couponId ?? null,
+    purchaseSource: request.purchaseSource,
     items: [...quantities]
       .sort(([left], [right]) => left - right)
       .map(([skuId, quantity]) => ({ skuId, quantity })),
@@ -112,7 +113,7 @@ function clearCheckoutAttempt(idempotencyKey: string) {
   }
 }
 
-function restorePendingPaymentOrder(ownerId: number | null): PendingPaymentOrder | null {
+function restorePendingPaymentOrder(ownerId: number | null, directSearch?: string): PendingPaymentOrder | null {
   if (typeof window === "undefined" || ownerId === null) return null;
   try {
     const parsed = JSON.parse(
@@ -123,7 +124,7 @@ function restorePendingPaymentOrder(ownerId: number | null): PendingPaymentOrder
       parsed.order &&
       Number.isInteger(parsed.order.id)
     ) {
-      return parsed as PendingPaymentOrder;
+      return parsed.directSearch === directSearch ? parsed as PendingPaymentOrder : null;
     }
     // 旧格式没有账户归属，或记录属于另一客户时失败关闭，避免跨账户展示订单。
     sessionStorage.removeItem(PENDING_PAYMENT_ORDER_KEY);
@@ -141,28 +142,50 @@ function paymentReturnOrderId(search: string): number | null {
   return Number.isSafeInteger(orderId) ? orderId : null;
 }
 
+function positiveIntegerParam(params: URLSearchParams, name: string): number | null {
+  const [raw, ...extra] = params.getAll(name);
+  if (extra.length || !raw || !/^[1-9]\d*$/.test(raw)) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) ? value : null;
+}
+
 export default function Checkout() {
+  const { search } = useLocation();
+  const params = new URLSearchParams(search);
+  const directSearch = ["product", "sku", "quantity"].some((name) => params.has(name)) ? search : undefined;
   const authenticatedCustomerId = useCustomerAuthStore(
     (state) => state.customer?.id ?? null,
   );
   // 客户身份是结算会话边界；同页换号时必须连同表单、购物车、优惠券和在途 UI 状态一起重建。
   return (
     <CheckoutSession
-      key={authenticatedCustomerId ?? "anonymous"}
+      key={JSON.stringify([authenticatedCustomerId, directSearch])}
       authenticatedCustomerId={authenticatedCustomerId}
+      directSearch={directSearch}
     />
   );
 }
 
 function CheckoutSession({
   authenticatedCustomerId,
+  directSearch,
 }: {
   authenticatedCustomerId: number | null;
+  directSearch?: string;
 }) {
   const { message } = AntdApp.useApp();
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [directUnavailable, setDirectUnavailable] = useState(false);
+  const directParams = new URLSearchParams(directSearch);
+  const reference = directParams.getAll("product").length === 1
+    ? normalizePublicProductReference(directParams.get("product")) : null;
+  const directSkuId = positiveIntegerParam(directParams, "sku");
+  const directQuantity = positiveIntegerParam(directParams, "quantity");
+  const backToProduct = reference
+    ? `/products/${encodeURIComponent(reference)}`
+    : "/catalog";
   const [submitting, setSubmitting] = useState(false);
   const [pendingPaymentOrder, setPendingPaymentOrder] = useState<PendingPaymentOrder | null>(null);
   const returnedFromPayment =
@@ -182,6 +205,9 @@ function CheckoutSession({
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
   // P0-1 联动：后端 checkout 已要求登录态；未登录需引导先登录/注册
   const isSignedIn = useCustomerAuthStore((state) => state.isLoggedIn);
+  const { flags, loading: commerceFlagsLoading } = useCommerceCapabilities();
+  const completionOpen = flags?.commerceEnabled === true && flags.paymentEnabled === true;
+  const completionStatusPending = commerceFlagsLoading || !flags;
   const [customer, setCustomer] = useState<{ name?: string; phone?: string; email?: string } | null>(null);
   const createdOrder = pendingPaymentOrder?.ownerId === authenticatedCustomerId
     ? pendingPaymentOrder.order
@@ -191,7 +217,7 @@ function CheckoutSession({
     setPaymentConfirmed(false);
     setPaymentInitialAction(returnedFromPayment ? "query" : "create");
     if (!returnedFromPayment) {
-      setPendingPaymentOrder(restorePendingPaymentOrder(authenticatedCustomerId));
+      setPendingPaymentOrder(restorePendingPaymentOrder(authenticatedCustomerId, directSearch));
       setPaymentOpen(false);
       setReturnOrderState("idle");
       return;
@@ -242,7 +268,7 @@ function CheckoutSession({
     return () => {
       cancelled = true;
     };
-  }, [authenticatedCustomerId, isSignedIn, returnedFromPayment, returnedOrderId, returnRetry]);
+  }, [authenticatedCustomerId, directSearch, isSignedIn, returnedFromPayment, returnedOrderId, returnRetry]);
 
   // 结算契约对齐（P0 修复）：后端 checkout 仅接受 { address, items, customerEmail? }，
   // 客户身份（姓名/手机号）来自登录态；订单创建后由客户本人发起微信支付。
@@ -258,24 +284,66 @@ function CheckoutSession({
     }
   }, [isSignedIn]);
 
-  const loadCart = useCallback(async () => {
+  const loadItems = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setLoadError(false);
+    setDirectUnavailable(false);
+    setCartItems([]);
     try {
-      const response = await cartApi.get();
-      setCartItems(unwrapResponse<CartItem[]>(response) || []);
+      if (!directSearch) {
+        const response = await cartApi.get();
+        if (!signal?.aborted) setCartItems(unwrapResponse<CartItem[]>(response) || []);
+        return;
+      }
+      if (!reference || !directSkuId || !directQuantity || directQuantity > 99) {
+        setDirectUnavailable(true);
+        return;
+      }
+      const response = await productApi.getPublicById(reference, { suppressGlobalError: true, signal });
+      if (signal?.aborted) return;
+      const product = unwrapResponse<Product>(response);
+      const sku = product?.skus?.find(({ id, isActive }) => id === directSkuId && isActive);
+      if (
+        product?.salesMode !== "DIRECT_PURCHASE" ||
+        product.isAvailableForPurchase !== true ||
+        sku?.isAvailableForPurchase !== true ||
+        !Number.isFinite(Number(sku.price)) ||
+        !(Number(sku.price) > 0) ||
+        (product.inventoryPolicy === "SINGLE_UNIT" && directQuantity !== 1)
+      ) {
+        setDirectUnavailable(true);
+        return;
+      }
+      const material = getMaterialLabel(sku.material);
+      const skuLabel = [
+        material !== "其他" ? material : "",
+        sku.color,
+        sku.size,
+        Number(sku.goldWeight) > 0 ? `${sku.goldWeight}g` : "",
+      ].filter(Boolean).join(" · ");
+      setCartItems([{
+        id: sku.id,
+        skuId: sku.id,
+        quantity: directQuantity,
+        product: { name: product.name },
+        sku: { price: sku.price },
+        skuLabel,
+        availability: { available: true, status: "AVAILABLE", message: null },
+      }]);
     } catch {
-      setLoadError(true);
-      setCartItems([]);
+      if (!signal?.aborted) setLoadError(true);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
-  }, []);
+  }, [directQuantity, directSearch, directSkuId, reference]);
 
   useEffect(() => {
-    void loadCart();
+    if (!isSignedIn || returnedFromPayment) return;
+    const controller = new AbortController();
+    void loadItems(controller.signal);
     void loadCustomer();
-  }, [loadCart, loadCustomer]);
+    return () => controller.abort();
+  }, [isSignedIn, loadItems, loadCustomer, returnedFromPayment]);
 
   const total = cartItems.reduce(
     (sum, item) => sum + getItemPrice(item) * item.quantity,
@@ -314,6 +382,10 @@ function CheckoutSession({
   );
 
   const handleSubmit = async (values: CheckoutFormValues) => {
+    if (!flags?.commerceEnabled || !flags.paymentEnabled) {
+      message.warning("线上成交尚未开放，暂时不能提交订单或付款。");
+      return;
+    }
     if (cartItems.length === 0) {
       message.warning("购物车为空");
       return;
@@ -327,10 +399,11 @@ function CheckoutSession({
       trackBeginCheckout(cartItems.length, total);
       // 结算契约对齐（P0）：仅传后端会使用的字段 { address, items, customerEmail? }。
       // 客户身份（姓名/手机号）由后端从登录态取，支付场景由服务端按终端判断。
-      const request = {
+      const request: CustomerCheckoutRequest = {
         address: values.address,
         customerEmail: values.customerEmail || undefined,
         couponId: selectedCouponId ?? undefined,
+        purchaseSource: directSearch ? "DIRECT" : undefined,
         items: cartItems.map((item) => ({ skuId: item.skuId, quantity: item.quantity })),
       };
       if (authenticatedCustomerId === null) {
@@ -348,6 +421,7 @@ function CheckoutSession({
       const pendingOrder = {
         ownerId: authenticatedCustomerId,
         order: result.order,
+        directSearch,
       };
       setPendingPaymentOrder(pendingOrder);
       sessionStorage.setItem(
@@ -462,10 +536,16 @@ function CheckoutSession({
     );
   }
 
-  if (loadError) {
+  if (loadError || directUnavailable) {
     return (
       <div className="min-h-screen bg-brand-bg flex items-center justify-center px-6">
-        <div className="text-center" role="alert"><h1 className="text-xl font-display mb-4">结算信息暂时无法加载</h1><button type="button" onClick={() => void loadCart()} className="btn btn-primary">重新加载</button></div>
+        <div className="text-center" role="alert">
+          <h1 className="text-xl font-display mb-4">{directUnavailable ? "所选规格暂时无法购买" : "结算信息暂时无法加载"}</h1>
+          {directUnavailable ? <p className="text-brand-muted mb-4">请返回商品详情核对款式、金重和数量。</p> : (
+            <button type="button" onClick={() => void loadItems()} className="btn btn-primary">重新加载</button>
+          )}
+          {directSearch ? <Link to={backToProduct} className="btn btn-secondary">返回选购</Link> : null}
+        </div>
       </div>
     );
   }
@@ -505,7 +585,10 @@ function CheckoutSession({
             <h3 className="font-display text-lg mb-3">订单商品</h3>
             {cartItems.map((item) => (
               <div key={item.id} className="flex justify-between text-sm py-2">
-                <span title={item.product.name}>{clampProductTitle(item.product.name)} × {item.quantity}</span>
+                <div className="min-w-0">
+                  <span title={item.product.name}>{clampProductTitle(item.product.name)} × {item.quantity}</span>
+                  {item.skuLabel ? <p className="mt-1 text-xs text-brand-muted">{item.skuLabel}</p> : null}
+                </div>
                 <span className="text-brand-gold">¥{(getItemPrice(item) * item.quantity).toLocaleString()}</span>
               </div>
             ))}
@@ -584,19 +667,39 @@ function CheckoutSession({
               <Input type="email" placeholder="用于接收订单通知" />
             </Form.Item>
             <div className="mb-6">
-              <span className="text-sm text-brand-muted">
-                支付方式：微信支付（桌面端扫码，手机浏览器唤起微信）
-              </span>
-              <p className="mt-2 text-xs leading-5 text-brand-muted">
-                微信内网页的 JSAPI 支付尚未开放；请使用系统浏览器完成支付。
-              </p>
+              {completionOpen ? (
+                <>
+                  <span className="text-sm text-brand-muted">
+                    支付方式：微信支付（桌面端扫码，手机浏览器唤起微信）
+                  </span>
+                  <p className="mt-2 text-xs leading-5 text-brand-muted">
+                    微信内网页的 JSAPI 支付尚未开放；请使用系统浏览器完成支付。
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm leading-6 text-brand-muted" role="status">
+                  {completionStatusPending
+                    ? "正在确认成交状态。"
+                    : "线上成交尚未开放。您可以核对此处的规格、数量和收货信息，暂时不能提交订单或付款。"}
+                </p>
+              )}
             </div>
-            <button type="submit" className="btn btn-primary w-full" disabled={submitting}>
-              {submitting ? "提交中..." : `提交订单并支付 ¥${payableTotal.toLocaleString()}`}
+            <button type="submit" className="btn btn-primary w-full" disabled={submitting || !completionOpen}>
+              {submitting
+                ? "提交中..."
+                : completionStatusPending
+                  ? "正在确认成交状态"
+                  : completionOpen
+                    ? `提交订单并支付 ¥${payableTotal.toLocaleString()}`
+                    : "暂时不能提交订单"}
             </button>
           </Form>
         </div>
-        <div className="text-center mt-6"><Link to="/cart" className="text-sm text-brand-muted hover:text-brand-gold transition-colors">← 返回购物车</Link></div>
+        <div className="text-center mt-6">
+          <Link to={directSearch ? backToProduct : "/cart"} className="text-sm text-brand-muted hover:text-brand-gold transition-colors">
+            {directSearch ? "← 返回商品详情" : "← 返回购物车"}
+          </Link>
+        </div>
       </div>
     </div>
   );

@@ -14,6 +14,10 @@
     "preview": "vite preview --config vite.config.ts",
     "lint": "eslint .",
     "test:public-env": "node --test vite-public-env.spec.mjs",
+    "test:image-quality": "node --experimental-strip-types --test responsiveUploadsImage.spec.ts imageDeliveryGeometry.spec.ts trustedMediaSize.spec.ts tests/media-picker-image-quality.unit.mjs",
+    "test:storybook:state": "playwright test --config playwright.storybook.config.ts --grep @state",
+    "test:visual": "playwright test --config playwright.storybook.config.ts --grep @visual --update-snapshots=none",
+    "test:visual:candidate": "node ../scripts/create-storybook-visual-candidates.mjs",
     "test:e2e": "playwright test",
     "test:a11y": "playwright test public-accessibility.spec.ts --project=public-chromium",
     "storybook": "storybook dev",
@@ -21,6 +25,7 @@
   },
   "dependencies": {
     "@ant-design/icons": "^5.2.6",
+    "@fontsource-variable/bodoni-moda": "5.3.0",
     "@fontsource/cormorant-garamond": "^5.3.0",
     "@fontsource/inter": "^5.3.0",
     "@fontsource/noto-serif-sc": "^5.2.8",

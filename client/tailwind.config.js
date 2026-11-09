@@ -1,6 +1,9 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+  content: {
+    relative: true,
+    files: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+  },
   theme: {
     extend: {
       colors: {
@@ -25,9 +28,10 @@ export default {
         },
       },
       fontFamily: {
+        // display：英文标题。body：中文标题衬线，只用于标题，不用于正文。
         'display': ['"Cormorant Garamond"', 'Georgia', 'serif'],
         'body':    ['"Noto Serif SC"', '"Source Han Serif CN"', 'serif'],
-        'sans':    ['Inter', 'system-ui', 'sans-serif'],
+        'sans':    ['Inter', 'system-ui', '-apple-system', '"PingFang SC"', '"Microsoft YaHei"', '"Noto Sans SC"', 'sans-serif'],
       },
       // 字号 Token
       fontSize: {

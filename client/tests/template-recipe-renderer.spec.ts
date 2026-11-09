@@ -1710,7 +1710,7 @@ test("首页首屏旧画布与新画框在指定视口分开成立", async ({ pa
   expect(oldPublic.pairedNote).toBeNull();
 
   const shot = (name: string) => page.screenshot({
-    path: `G:/网站搭建2/.codex-tmp/hero-home-proof/${name}.png`,
+    path: `G:/海川珠宝官方网站开发/.codex-tmp/hero-home-proof/${name}.png`,
   });
   await shot("old-390x844-public");
   await show({ geometry: "old", device: "mobile", mode: "editor", title: longCopy, subtitle: longCopy });

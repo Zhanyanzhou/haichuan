@@ -23,9 +23,12 @@
 | `SELECTION` | 选款咨询 | 否 | 否 |
 | `APPOINTMENT` | 预约到店/看货 | 否 | 否 |
 | `CUSTOM_INQUIRY` | 定制报价 | 否 | 否 |
-| `DIRECT_PURCHASE` | 直接购买 | 是：有效 SKU、SKU 成交价、Inventory 记录、配送方式及库存策略约束 | 仅在交易开关获批开启且库存足够时允许 |
+| `DIRECT_PURCHASE` | 直接购买 | 是：确认材质、有效 SKU 与成交价、包邮模板、配送方式、备货及发出时效、适用的类目资料 | 仅在交易开关获批开启且库存足够时允许 |
 
-- 五种模式发布时均需满足有效名称、款号、启用分类和至少一张可读取的非视频商品图片。
+- 新上架或重新上架需要正式名称、唯一款号和启用且允许上架的类目。对客发布还需要指定可读取、公开授权有效的非视频主图。随附证书或类目要求证书时，需要有效的 `Certificate` 记录。
+- `Category.publicationRules` 只作用于直接归入当前类目的商品。`GROUP_ONLY` 仅用于组织分类。直购规则可要求每个有效 SKU 的圈口、内径或链长、贵金属纯度与净金重，以及主石、镶托、宝石来源、处理、克拉或净度。类目规则由后台分类详情维护，历史分类缺省使用通用规则。
+- 草稿可分次补齐。立即、审核通过、批量和定时上架共用服务端校验。历史在售商品普通保存继续按原门槛处理，重新上架、变更类目、转为直购、从仅内部转为对客可见或明确采用新规则时适用新增校验。通过后由系统记录 `publicationRulesAcceptedAt`。
+- 已保存直购商品通过同一次商品更新提交价格和规格变更，并在事务内重算最低价、检查库存策略和发布条件。审核、媒体和仓库库存仍各有独立操作入口。
 - 当前代码中，零售购物车、零售结算和直接下单只允许 `DIRECT_PURCHASE`；是否有参考价格不能改变当前边界。这只是现有零售路径的门禁，不表示未来只有 `DIRECT_PURCHASE` 才能形成订单。
 - 同一设计可以独立存在标准零售、高级定制和合作蜡模报价通道；高级定制与合作蜡模在客户本人确认有效报价后按独立状态机事务转单，不通过篡改 `SalesMode` 绕过现有零售门禁。业务定义只认 `docs/DECISIONS.md` D.19。
 - `DIRECT_PURCHASE` 的 0 库存商品可以发布并展示为售罄，但购物车和下单必须拒绝。
@@ -44,7 +47,7 @@
 | `shortDescription`                                           | 简介                          | VarChar(500)                 | 可选     | `null`                           | 人工/AI 文案                             | —                                                                                                                  |
 | `description`                                                | 详情正文                      | Text                         | 可选     | `null`                           | 人工/AI 文案                             | ⚠️ `findAll` 不返回（仅 `findById` 返回）                                                                          |
 | `categoryId`                                                 | 所属分类（单分类）            | Int FK                       | **必填** | —                                | 分类树 id                                | ⚠️ 强校验且不自动建分类；导入前必须预建分类树；现脚本硬编码 `1`/`9`                                                |
-| `materialType`                                               | 材质                          | enum `MaterialType`（10 值） | 可选     | `GOLD_999`                       | 业务给定                                 | ⚠️ 现脚本硬编码 `GOLD_999`，与真实材质可能不符                                                                     |
+| `materialType`                                               | 材质                          | enum `MaterialType`（10 值） | 直购发布必填 | `OTHER`（新建接口）            | 业务给定                                 | `OTHER` 表示未确认，直购发布须选真实材质。历史数据及脚本可能写入 `GOLD_999`。 |
 | `goldWeight`                                                 | 金重(g)                       | Decimal(8,2)                 | 可选     | `0`                              | 业务给定/称重                            | ⚠️ `=0` 时**不参与金价调价**；与 `weight`(总重)易混                                                                |
 | `craftFee`                                                   | 工费                          | Decimal(10,2)                | 可选     | `0`                              | 业务给定                                 | 金价调价公式用到；跟随父商品同步到 SKU                                                                             |
 | `price`                                                      | 有效且有价 SKU 的派生最低价缓存 | Decimal(10,2)              | 系统派生 | `0`                              | `ProductsService` 由 SKU 重算            | **禁止作为 `DIRECT_PURCHASE` 成交价事实源或由导入直接写入**；成交价只认 `ProductSKU.price`                         |
@@ -59,14 +62,14 @@
 | `inventoryPolicy`                                            | 库存策略                      | enum `InventoryPolicy`       | 可选     | `STANDARD`                       | 业务                                     | `STANDARD` 为普通库存；`SINGLE_UNIT` 只允许一个有效 SKU，库存总量与单次购买量不超过 1                               |
 | `fulfillmentType`                                            | 备货类型                      | enum `ProductFulfillmentType` | 可选    | `IN_STOCK`                       | 业务核实                                 | `IN_STOCK` / `PREORDER` / `CUSTOM` 是客户可见履约事实；当前默认值不能代替运营确认                                  |
 | `dispatchTime` / `customLeadTime`                             | 发出时间与约定备货周期        | enum + VarChar(100)          | 可选     | `WITHIN_48_HOURS` / `null`       | 业务核实                                 | `CUSTOM` 发布时必须填写真实周期；固定时效不得继续公开旧的 `customLeadTime`                                         |
-| `deliveryMethods` / `shippingTemplateId`                      | 提取方式与运费模板            | Json + Int FK?               | 可选     | `['EXPRESS']` / `null`           | 业务核实                                 | 提取方式只允许 `EXPRESS` / `STORE_PICKUP` / `DEDICATED`；运费模板只承载配送计费与覆盖事实，不等于其他服务费用      |
+| `deliveryMethods` / `shippingTemplateId`                      | 提取方式与运费模板            | Json + Int FK?               | 直购发布必填 | `[]` / `null`                  | 业务核实                                 | 提取方式只允许 `EXPRESS` / `STORE_PICKUP` / `DEDICATED`；运费模板只承载配送计费与覆盖事实，不等于其他服务费用      |
 | `requiresInsuredShipping` / `requiresSignature`               | 保价与签收要求                | Boolean                      | 可选     | `true` / `true`                  | 业务核实                                 | 客户可见的正向服务事实；现有默认值不能单独证明运营已确认                                                           |
-| `includesCertificate` / `packageType`                          | 随附证书与包装类型            | Boolean + VarChar(100)       | 可选     | `true` / `null`                  | 业务核实                                 | 证书公开展示仍以实际有效 `Certificate` 记录为准；编辑器不再预填“品牌礼盒”                                         |
+| `includesCertificate` / `packageType`                          | 随附证书与包装类型            | Boolean + VarChar(100)       | 可选     | `false` / `null`                 | 业务核实                                 | 对客发布承诺随附时须有关联的有效 `Certificate` 记录。                                                         |
 | `isHot/isNew/isRecommended/isLimited/isCustom/multiDiscount` | 展示标记                      | Boolean                      | 可选     | `false`                          | 运营                                     | —                                                                                                                  |
 | `sortOrder`                                                  | 排序                          | Int                          | 可选     | `0`                              | 运营                                     | `sortBy='sortOrder'` 时按其 asc                                                                                    |
 | `primaryImageId`                                             | 主图指针                      | Int FK?                      | 系统     | `null`                           | `setPrimaryImage` 维护                   | ⚠️ `setPrimaryImage` 会**改写图片 type**（FRONT↔SIDE），破坏视角语义                                               |
 | `listingImageId`                                             | 列表图指针（可裁切派生）      | Int FK?                      | 系统     | `null`                           | `setListingImage`/裁切维护               | 与 primary 可不同；裁切生成 1200×1200 WebP                                                                         |
-| `publishedAt`                                                | 首次发布时间                  | DateTime?                    | 系统     | `null`（create 不写）            | `updateStatus`→PUBLISHED 时写            | ⚠️ `create` 即使 `status=PUBLISHED` 也不写；下架不清空（永久语义）                                                 |
+| `publishedAt`                                                | 首次发布时间                  | DateTime?                    | 系统     | 草稿为 `null`                   | 首次成功发布时写入                        | 下架后重新上架保留首次发布时间。 |
 | `viewCount`/`salesCount`                                     | 浏览/销量                     | Int                          | 系统     | `0`                              | 系统累计                                 | 不得编造                                                                                                           |
 | `deletedAt`                                                  | 历史软删除标记                | DateTime?                    | 系统     | `null`                           | 兼容旧数据                               | 列表过滤有历史软删除标记的商品                                                                                       |
 
@@ -78,7 +81,9 @@
 
 当前事实边界：
 
-- `Product.size` 与 `ProductSKU.size` 只表达当前作品/规格的尺寸文本，不是尺寸测量、适配、改圈或选择指导；把后者塞进自由文本会失去可识别语义与发布校验。
+- `Product.size` 与 `ProductSKU.size` 只表达当前作品或规格的尺寸文本。直购类目要求尺寸时，以有效 `ProductSKU.size` 为准。单一 SKU 可以在商品编辑器中同步填写，多 SKU 分别维护。
+- `Product.fulfillmentConfirmed` 记录运营确认配送、备货和发出时效，默认 `false`。未重新确认的履约事实变更会撤销确认。新建接口缺省材质用 `OTHER`，缺省配送方式为空，随附证书默认 `false`。
+- 证书从商品编辑器维护 `Certificate` 记录。发布校验和公开详情共用该来源，历史 `gemInfo` 证书文字只作兼容。证书变更后，已上架商品需要重新核验发布资料。
 - `ShippingTemplate` 只表达配送计费、偏远附加、免邮门槛和排除区域；报价附加费用继续使用既有报价费用合同，不能写入商品运费字段。
 - 当前没有专用的养护、保修、改圈、售后或通用服务说明字段。`description` / `detailContent` 可承载已核实的展示内容，但不能冒充可结构化校验的经营政策。若这些事实要作为统一商品合同、筛选条件或发布必填项，需要单独确定字段、适用分类、责任人和历史数据迁移。
 - 发布质量快照 v3 覆盖当前公开规格、宝石/工艺、履约、交付、服务标记、运费模板、SKU、证书，以及公开图片类型/排序事实；这些事实变化会使既有 READY 哈希失效。升级 migration 会先把旧 READY 全部隔离并清空 hash/核验时间，v2 哈希在当前报告与 SEO 导出中也视为不新鲜，须重新执行发布质量核验；哈希只能证明“复核后未变化”，不能证明默认值曾由运营明确确认。

@@ -23,6 +23,7 @@ import {
   parseConsultationSubmissionReceipt,
   type ConsultationSubmissionReceipt,
 } from "@/services/clients/consultationSubmissionReceipt";
+import "./contact.css";
 import {
   activateContactSubmissionContext,
   clearContactConsultationDraft,
@@ -77,6 +78,8 @@ const SOURCE_TYPE_TO_CONSULTATION: Record<string, string> = {
   product: "选款建议",
   "purchase-support": "选款建议",
   custom: "高级定制",
+  order: "其他",
+  care: "售后保养",
   privacy: "其他",
 };
 const PRIVACY_REQUEST_MESSAGE =
@@ -135,20 +138,32 @@ const SERVICES = [
 
 const FAQS = [
   {
-    q: "提交咨询需求后多久会与我联系？",
-    a: "我们会根据您提供的联系方式与您联系，具体时间与安排以实际沟通为准。",
+    q: "如何添加海川珠宝顾问微信？",
+    a: "在本页复制微信号，或保存二维码后在微信中识别添加。正在用手机浏览时，无法扫描自己屏幕上的二维码。",
   },
   {
-    q: "是否支持到店咨询？",
-    a: "您可在需求中说明希望到店咨询，是否可提供接待、时间与地点以实际沟通为准。",
+    q: "如何咨询珠宝的材质和规格？",
+    a: "请在咨询中写明作品和想了解的材质、尺寸或证书问题。具体说明以顾问沟通为准，本页不替代实物鉴定。",
   },
   {
-    q: "是否可以线上沟通？",
-    a: "您可选择方便的联系方式；具体沟通方式与时间将结合实际情况确认。",
+    q: "是否支持珠宝定制？",
+    a: "可以提交定制意向。是否可制作、可选材质与周期，以实际评估为准。",
   },
   {
-    q: "能咨询旧款相关事项吗？",
-    a: "可以提交旧款相关需求；是否可进行重制、尺寸调整、翻新、保养或维修，以实际沟通与评估结果为准。",
+    q: "如何查询订单状态？",
+    a: "请登录我的账户查看您的订单。若需要人工协助，可在本页留下订单相关问题。",
+  },
+  {
+    q: "如何了解配送信息？",
+    a: "配送安排以对应订单和实际沟通为准。您可以在咨询中说明需要了解的订单。",
+  },
+  {
+    q: "是否提供珠宝保养或维修？",
+    a: "可以提交保养或维修需求。是否承接、费用与时间，以实际评估为准。",
+  },
+  {
+    q: "如何联系售后？",
+    a: "可通过本页微信、电话或咨询表单联系。提交后会生成可跟进的服务记录。",
   },
 ];
 
@@ -667,133 +682,48 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
     return (
       <div
         id={embedded ? "consultation" : undefined}
-        style={{
-          background: T.warmBg,
-          minHeight: embedded ? undefined : "70vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
+        className={`contact-success${embedded ? " contact-success--embedded" : ""}`}
       >
-        <div
-          style={{ textAlign: "center", maxWidth: 480, padding: "40px 24px" }}
-        >
-          <div
-            style={{
-              width: 56,
-              height: 56,
-              borderRadius: "50%",
-              background: T.gold,
-              color: "#fff",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 24,
-              marginBottom: 24,
-            }}
-          >
-            ✓
-          </div>
+        <div className="contact-success__sheet">
           <SuccessTitle
             ref={successHeadingRef}
             tabIndex={-1}
-            style={{
-              fontSize: 24,
-              fontWeight: 400,
-              color: T.txt,
-              marginBottom: 12,
-              outline: "none",
-              textDecorationLine: "underline",
-              textDecorationColor: T.txt,
-              textDecorationThickness: 2,
-              textUnderlineOffset: 6,
-            }}
+            className="contact-success__title"
           >
             需求已提交
           </SuccessTitle>
-          <p
-            style={{
-              fontSize: 14,
-              color: T.sec,
-              marginBottom: 32,
-              lineHeight: 1.6,
-            }}
-          >
+          <p>
             我们会根据您提供的联系方式与您联系，具体时间与安排以实际沟通为准。
           </p>
           {receipt ? (
-            <dl
-              aria-label="咨询回执"
-              style={{
-                width: "min(420px, 100%)",
-                margin: "0 0 28px",
-                padding: "18px 20px",
-                border: `1px solid ${T.line}`,
-                display: "grid",
-                gridTemplateColumns: "auto 1fr",
-                gap: "8px 20px",
-                textAlign: "left",
-                fontSize: 13,
-              }}
-            >
-              <dt style={{ color: T.sec }}>咨询编号</dt>
-              <dd style={{ margin: 0, color: T.txt }}>#{receipt.sourceId}</dd>
-              <dt style={{ color: T.sec }}>当前状态</dt>
-              <dd style={{ margin: 0, color: T.txt }}>
-                {getConsultationSubmissionStatusCopy(receipt.status)}
-              </dd>
-              <dt style={{ color: T.sec }}>提交时间</dt>
-              <dd style={{ margin: 0, color: T.txt }}>
-                {new Date(receipt.createdAt).toLocaleString("zh-CN")}
-              </dd>
+            <dl aria-label="咨询回执">
+              <dt>咨询编号</dt>
+              <dd>#{receipt.sourceId}</dd>
+              <dt>当前状态</dt>
+              <dd>{getConsultationSubmissionStatusCopy(receipt.status)}</dd>
+              <dt>提交时间</dt>
+              <dd>{new Date(receipt.createdAt).toLocaleString("zh-CN")}</dd>
             </dl>
           ) : null}
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 16,
-            }}
-          >
+          <div className="contact-success__actions">
             {authenticatedCustomer && receipt ? (
               <Link
                 to={`/customer?section=consultations&leadId=${receipt.leadId}`}
                 className="contact-success__primary"
-                style={{
-                  padding: "10px 28px",
-                  border: `1px solid ${T.txt}`,
-                  fontSize: 13,
-                  color: T.txt,
-                  textDecoration: "none",
-                }}
               >
                 查看本次咨询
               </Link>
+            ) : (
+              <Link to="/catalog" className="contact-success__primary">
+                浏览作品
+              </Link>
+            )}
+            {authenticatedCustomer && receipt ? (
+              <Link to="/catalog" className="contact-success__secondary">
+                浏览作品
+              </Link>
             ) : null}
-            <Link
-              to="/catalog"
-              className="contact-success__primary"
-              style={{
-                padding: "10px 28px",
-                border: `1px solid ${T.txt}`,
-                fontSize: 13,
-                color: T.txt,
-                textDecoration: "none",
-              }}
-            >
-              浏览作品
-            </Link>
-            <Link
-              to="/"
-              className="contact-success__secondary"
-              style={{
-                fontSize: 13,
-                color: T.sec,
-                textDecoration: "underline",
-                textUnderlineOffset: 4,
-              }}
-            >
+            <Link to="/" className="contact-success__secondary">
               返回首页
             </Link>
           </div>
@@ -814,43 +744,17 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
             预约咨询
           </h2>
           <p style={{ fontSize: 16, color: T.sec, margin: 0, maxWidth: "36em", lineHeight: 1.75 }}>
-            微信和电话可直接沟通。若暂时不便联系，可在此留下选款、定制或到店需求，我们按您选择的方式回复。
+            告诉我们感兴趣的作品或服务。方便联系的时间只是偏好，不是已确认的预约；顾问会再与您确认。
           </p>
         </div>
       ) : null}
       {hasPageDecoration && !embedded ? <h1 className="sr-only">{taskHeading}</h1> : null}
       {/* ═══ 标题区（紧凑） ═══ */}
-      {!hasPageDecoration && !embedded && <section
-        style={{
-          padding: "calc(clamp(32px,5vh,56px) + var(--site-header-height)) 0 clamp(20px,3vh,32px)",
-          borderBottom: `1px solid ${T.line}`,
-        }}
-      >
-        <div style={{ maxWidth: MW, marginInline: "auto", paddingInline: PX }}>
-            <p
-            style={{
-              fontSize: 10,
-              letterSpacing: "0.08em",
-              color: T.light,
-              marginBottom: 6,
-            }}
-          >
-            预约咨询
-          </p>
-          <h1
-            style={{
-              fontSize: "clamp(22px,2.8vw,32px)",
-              fontWeight: 400,
-              color: T.txt,
-              margin: "0 0 8px",
-              letterSpacing: "0.04em",
-            }}
-          >
-            {taskHeading}
-          </h1>
-          <p style={{ fontSize: 14, color: T.sec, margin: 0, maxWidth: 480 }}>
-            您可提交选款、定制或旧款相关需求；具体服务内容与安排以实际沟通为准。
-          </p>
+      {!hasPageDecoration && !embedded && <section className="contact-request-masthead">
+        <div className="contact-request-masthead__inner">
+          <h1>{taskHeading}</h1>
+          <p className="contact-request-masthead__name">预约咨询</p>
+          <p>您可提交选款、定制或旧款相关需求；具体服务内容与安排以实际沟通为准。</p>
         </div>
       </section>}
 
@@ -875,13 +779,8 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
           <div className="contact-request">
             {isPrivacyRequest && (
               <section
+                className="contact-privacy-note"
                 aria-labelledby="privacy-request-title"
-                style={{
-                  border: `1px solid ${T.line}`,
-                  background: T.warmBg,
-                  padding: "16px 18px",
-                  marginBottom: 16,
-                }}
               >
                 <strong
                   id="privacy-request-title"
@@ -898,12 +797,6 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
               <section
                 className="contact-product-context"
                 aria-live="polite"
-                style={{
-                  border: `1px solid ${T.line}`,
-                  background: T.bg,
-                  padding: "16px 18px",
-                  marginBottom: 16,
-                }}
               >
                 {productContextStatus === "loading" && (
                   <p role="status" style={{ margin: 0, color: T.sec, fontSize: 13 }}>
@@ -912,7 +805,7 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
                 )}
                 {productContextStatus === "ready" && sourceProduct && (
                   <div>
-                    <p style={{ margin: "0 0 4px", color: T.light, fontSize: 11, letterSpacing: "0.1em" }}>
+                    <p style={{ margin: "0 0 4px", color: T.light, fontSize: 13, letterSpacing: 0 }}>
                       本次咨询作品
                     </p>
                     <strong style={{ display: "block", color: T.txt, fontSize: 15, fontWeight: 500 }}>
@@ -960,15 +853,10 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
             )}
             <form
               ref={formRef}
-              className={embedded ? "contact-form contact-form--quiet" : "contact-form"}
+              className="contact-form contact-form--quiet"
               aria-busy={submitting}
               onSubmit={handleSubmit}
               noValidate
-              style={embedded ? undefined : {
-                background: T.warmBg,
-                padding: "clamp(24px,4vw,40px)",
-                border: `1px solid ${T.line}`,
-              }}
             >
               <fieldset disabled={submitting} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
               <div
@@ -1397,17 +1285,13 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
                 >
                   <p
                     style={{
-                      fontSize: 15,
+                      fontFamily: '"Noto Serif SC", "Songti SC", SimSun, serif',
+                      fontSize: 18,
                       fontWeight: 400,
                       color: T.txt,
                       margin: "0 0 4px",
                     }}
                   >
-                    <span
-                      style={{ color: T.gold, marginRight: 8, fontWeight: 300 }}
-                    >
-                      0{i + 1}
-                    </span>
                     {s.title}
                   </p>
                   <p
@@ -1499,40 +1383,20 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
           >
             常见问题
           </h2>
-          <div style={{ display: "grid", gap: 24, maxWidth: "40em" }}>
-            {FAQS.map((faq, i) => (
-              <div
-                key={i}
-                style={{
-                  paddingBottom: i < FAQS.length - 1 ? 24 : 0,
-                  borderBottom:
-                    i < FAQS.length - 1 ? `1px solid ${T.line}` : "none",
-                }}
-              >
-                <p
-                  style={{
-                    fontSize: 16,
-                    fontWeight: 400,
-                    lineHeight: 1.75,
-                    color: T.txt,
-                    margin: "0 0 8px",
-                  }}
-                >
-                  {faq.q}
-                </p>
-                <p
-                  style={{
-                    fontSize: 15,
-                    color: T.sec,
-                    margin: 0,
-                    lineHeight: 1.75,
-                  }}
-                >
-                  {faq.a}
-                </p>
-              </div>
+          <div className="contact-faq__list">
+            {FAQS.map((faq) => (
+              <details key={faq.q} className="contact-faq__item">
+                <summary>{faq.q}</summary>
+                <p>{faq.a}</p>
+              </details>
             ))}
           </div>
+          <ul className="contact-assurances" aria-label="服务说明">
+            <li>微信与电话可直接联系</li>
+            <li>咨询会生成可跟进的服务记录</li>
+            <li>到店接待以本页地址与服务时间为准</li>
+            <li>保养与售后是否承接，以实际评估为准</li>
+          </ul>
         </div>
       </section>
 

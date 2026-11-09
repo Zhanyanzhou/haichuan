@@ -22,7 +22,7 @@
 
 ## 初轮验证记录
 
-所有命令均在 `G:\网站搭建2\client` 执行，并直接调用 Node 22 安装路径，避免系统默认 Node 25 污染结论。
+所有命令均在 `G:\海川珠宝官方网站开发\client` 执行，并直接调用 Node 22 安装路径，避免系统默认 Node 25 污染结论。
 
 1. TypeScript：退出码 0，0 error。
 
@@ -72,7 +72,7 @@
 - 再次显式保存仅 PATCH 新副本的 `/draft`，请求体 ID 也为副本 ID；来源没有 PUT/PATCH 请求，来源定义完全不变。
 - 异步测试使用可控响应 Promise，在副本创建响应返回前通过产品 Session 注入一次本地编辑；响应返回后来源的完整状态与更新后的快照一致，Undo/Redo 仍回放来源编辑，修复场景的恢复标记保留。
 
-R1 最终验证使用 Node.js `v22.23.2`、npm `10.9.8`，命令在 `G:\网站搭建2\client` 执行。每个 PowerShell 验证进程先执行以下进程内 PATH 设置，使 Playwright/Vite 子进程也沿用 Node 22；未修改用户或系统 PATH：
+R1 最终验证使用 Node.js `v22.23.2`、npm `10.9.8`，命令在 `G:\海川珠宝官方网站开发\client` 执行。每个 PowerShell 验证进程先执行以下进程内 PATH 设置，使 Playwright/Vite 子进程也沿用 Node 22；未修改用户或系统 PATH：
 
 ```powershell
 $env:PATH='C:\Users\Administrator\AppData\Roaming\fnm\node-versions\v22.23.2\installation;' + $env:PATH

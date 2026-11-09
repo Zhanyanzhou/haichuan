@@ -7,7 +7,7 @@
  *   尚未迁移的旧区块仍靠 fallback 保底可看。
  * - 迁移完成后禁止在区块里新增硬编码色值/字体串/间距像素;
  *   旧字面值仅作为 fallback 保留。
- * - 比例调色板 5 档(2026-08-19 收敛),权威来源是内容模板契约;RATIOS 仅为设计令牌别名,不允许新造比例值。
+ * - RATIOS 只别名 templateDimensions 里可保存的常用比例，不另造分数。
  */
 
 /* ═══ 内容宽度(4 档,终结每区块自定 maxWidth) ═══ */
@@ -26,15 +26,19 @@ export const WIDTHS = {
 
 export type WidthToken = keyof typeof WIDTHS;
 
-/* ═══ 规范图片比例(唯一合法集合,不要新增) ═══ */
+/* 与 templateDimensions 的可保存比例一致。21:9 不写入。旧 21:6 没有调用方。 */
 export const RATIOS = {
-  // 2026-08-19 调色板收敛 8→5:16:7 / 3:4 / 2:3 撤编(旧数据由渲染层兼容渲染);
-  // 21:9 已于 2026-08-16 清退。权威默认值以契约 roles[].defaultRatioByViewport 为准。
-  "21:6": "21 / 6",
+  "2:1": "2 / 1",
   "16:9": "16 / 9",
   "3:2": "3 / 2",
-  "4:5": "4 / 5",
+  "4:3": "4 / 3",
+  "5:4": "5 / 4",
   "1:1": "1 / 1",
+  "1:2": "1 / 2",
+  "4:5": "4 / 5",
+  "3:4": "3 / 4",
+  "2:3": "2 / 3",
+  "9:16": "9 / 16",
 } as const;
 
 export type RatioToken = keyof typeof RATIOS;
@@ -45,7 +49,7 @@ export type SpacingLevel = "compact" | "normal" | "spacious" | "grand";
 
 /* ═══ 字体(品牌字串唯一来源,区块不再各自拼写) ═══ */
 export const FONT_DISPLAY = '"Cormorant Garamond","Noto Serif SC",serif';
-export const FONT_SANS = "Inter,system-ui,-apple-system,sans-serif";
+export const FONT_SANS = 'Inter,system-ui,-apple-system,"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif';
 
 /* ═══ 中性色板（保留历史键名以兼容已保存文档） ═══ */
 export type ToneKey = "ivory" | "champagne" | "ink" | "brand";

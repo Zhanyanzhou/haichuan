@@ -485,8 +485,12 @@ test("联系与预约共用公开资料，默认同页展示直接联系和咨�
   await page.goto("/privacy");
   await page.getByRole("button", { name: "打开菜单", exact: true }).click();
   const menu = page.getByRole("dialog", { name: "品牌菜单", exact: true });
-  await expect(menu.getByRole("link", { name: "联系与预约", exact: true })).toHaveAttribute("href", "/contact");
+  await expect(menu.getByRole("link", { name: "首页", exact: true })).toBeVisible();
+  await expect(menu.getByRole("link", { name: "联系与预约", exact: true })).toHaveCount(0);
+  await expect(menu.getByRole("link", { name: "账户首页", exact: true })).toHaveCount(0);
+  await expect(menu.getByRole("link", { name: "我的订单", exact: true })).toHaveCount(0);
   await page.keyboard.press("Escape");
+  await expect(page.getByRole("contentinfo").getByRole("link", { name: "联系与咨询", exact: true })).toHaveAttribute("href", "/contact");
   await page.locator(".site-header__right").getByRole("link", { name: "联系与预约", exact: true }).click();
   await expect(page).toHaveURL(/\/contact$/);
   const main = page.getByRole("main");
@@ -522,7 +526,7 @@ test("显式咨询入口保留原表单并完成到店需求", async ({ page }) 
 test("其他公开路由继续显示唯一共享页脚服务条", async ({ page }) => {
   const writes = await mockPublicServiceThirdBatch(page);
   await page.goto("/privacy");
-  await expect(page.locator("footer").getByRole("link", { name: "联系与预约" })).toBeVisible();
+  await expect(page.locator("footer").getByRole("link", { name: "联系与咨询" })).toBeVisible();
   await expect(page.getByText("私人预约", { exact: true })).toHaveCount(0);
   await expect(page.locator("footer.site-footer")).toHaveCount(1);
   await expectWriteGate(writes);

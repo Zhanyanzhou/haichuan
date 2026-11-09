@@ -1,0 +1,188 @@
+:
+    - strong: 主图片
+    - generic "首页高级定制 / 布局结构"
+    - generic: 当前查看：手机端
+    - button "删除"
+    - tablist "模板属性任务":
+      - tab "设计" [selected]
+      - tab "页面开放范围"
+    - tabpanel "模板属性功能区":
+      - region "对象设计属性":
+        - generic "当前编辑范围":
+          - status:
+            - generic: 当前设备
+            - strong: 手机
+          - generic: 修改范围
+          - combobox "修改作用域":
+            - option "仅手机独立设置" [selected]
+            - option "桌面基础（保留各端覆盖）"
+        - group "模板默认内容":
+          - generic "模板默认图片 用于模板内容，不改变槽位外框":
+            - text: 模板默认图片
+            - generic: 用于模板内容，不改变槽位外框
+        - heading "图片适配与焦点" [level=3]
+        - text: 画面焦点
+        - generic: 拖动画面上的点调整构图，比填写百分比更准确
+        - button "在画布上拖动调整"
+        - slider "画面焦点拖动点":
+          - generic: 没有图片时仍可设定焦点，画布有图后才会看到裁切结果
+          - generic: +
+        - paragraph: 点住画面中的十字并拖动；方向键可微调 1%，按住 Shift 步进 10%。
+        - group "画面焦点常用位置":
+          - button "左上":
+            - generic: 左上
+          - button "顶部居中":
+            - generic: 上
+          - button "右上":
+            - generic: 右上
+          - button "左侧居中":
+            - generic: 左
+          - button "居中" [pressed]:
+            - generic: 中
+          - button "右侧居中":
+            - generic: 右
+          - button "左下":
+            - generic: 左下
+          - button "底部居中":
+            - generic: 下
+          - button "右下":
+            - generic: 右下
+        - button "精确百分比":
+          - generic: 精确百分比
+        - text: 图片适配
+        - combobox "图片适配":
+          - option "未显式设置" [disabled]
+          - option "裁切填满" [selected]
+          - option "完整显示"
+        - generic "继承桌面"
+        - heading "尺寸与位置" [level=3]
+        - generic "当前画布对象外框尺寸":
+          - generic: 当前预览尺寸 · 只读
+          - text: 实际宽
+          - strong: 390 px
+          - text: 实际高
+          - strong: 260 px
+          - text: 高度规则
+          - strong: 4:5
+          - generic "实际宽度与高度收成最近的标准比例，不会自动改写图片。":
+            - text: 图片框实测比例
+            - strong: 3:2
+          - text: 设定比例
+          - strong: 4:5
+        - text: 宽度方式
+        - combobox "宽度方式":
+          - option "未显式设置" [disabled]
+          - option "填满可用空间" [selected]
+          - option "适应内容"
+          - option "自动"
+          - option "固定尺寸"
+        - button "恢复继承"
+        - generic "手机覆盖"
+        - text: 高度方式
+        - combobox "高度方式":
+          - option "未显式设置" [disabled]
+          - option "随内容变化"
+          - option "适应内容"
+          - option "填满可用空间（父容器高度随内容变化，不能同时让子对象填满；请先确定父容器高度）" [disabled]
+          - option "固定高度"
+          - option "最小高度"
+          - option "按比例（内容可增高）" [selected]
+        - generic "查看尺寸方式限制"
+        - button "恢复继承"
+        - generic "手机覆盖"
+        - generic "左右拖动标签调整数值，也可直接输入": 比例宽
+        - spinbutton "比例宽": "4"
+        - button "恢复继承"
+        - generic "手机覆盖"
+        - generic "左右拖动标签调整数值，也可直接输入": 比例高
+        - spinbutton "比例高": "5"
+        - button "恢复继承"
+        - generic "手机覆盖"
+        - group "对象外框比例预设":
+          - generic "调整对象高度与宽度的关系，不修改图片内容焦点": 外框比例
+          - button "1:1":
+            - generic: 1:1
+          - button "4:5" [pressed]:
+            - generic: 4:5
+          - button "16:9":
+            - generic: 16:9
+        - generic "› 间距与对齐 未单独设置":
+          - text: ›
+          - generic: 间距与对齐
+          - generic: 未单独设置
+        - option "px" [selected]
+        - option "%"
+        - option "rem"
+        - option "vw"
+        - option "vh"
+        - option "px" [selected]
+        - option "%"
+        - option "rem"
+        - option "vw"
+        - option "vh"
+        - option "px" [selected]
+        - option "%"
+        - option "rem"
+        - option "vw"
+        - option "vh"
+        - option "px" [selected]
+        - option "%"
+        - option "rem"
+        - option "vw"
+        - option "vh"
+        - generic "› 尺寸限制 未单独设置":
+          - text: ›
+          - generic: 尺寸限制
+          - generic: 未单独设置
+        - option "px" [selected]
+        - option "%"
+        - option "rem"
+        - option "vw"
+        - option "vh"
+        - option "px" [selected]
+        - option "%"
+        - option "rem"
+        - option "vw"
+        - option "vh"
+        - option "px" [selected]
+        - option "%"
+        - option "rem"
+        - option "vw"
+        - option "vh"
+        - option "px" [selected]
+        - option "%"
+        - option "rem"
+        - option "vw"
+        - option "vh"
+        - generic "› 背景与边框 未单独设置":
+          - text: ›
+          - generic: 背景与边框
+          - generic: 未单独设置
+        - option "未显式设置" [disabled] [selected]
+        - option "白色"
+        - option "浅灰"
+        - option "石墨"
+        - option "柔灰"
+        - option "未显式设置" [disabled] [selected]
+        - option "细边框"
+        - option "深边框"
+        - option "强调边框"
+        - option "px" [selected]
+        - option "%"
+        - option "rem"
+        - option "vw"
+        - option "vh"
+        - option "未显式设置" [disabled]
+        - option "允许越界显示"
+        - option "裁剪越界内容" [selected]
+        - generic "设备覆盖 断点显示与继承":
+          - generic: 设备覆盖
+          - generic: 断点显示与继承
+        - option "桌面" [selected]
+      - strong: 结构锁定
+      - generic: 锁定后仍可选中和查看
+      - generic: 锁定位置、尺寸和层级
+      - switch "锁定位置、尺寸和层级"
+      - generic: 锁定后不能拖动、缩放、删除或改变父级；可在此解除。
+  - status
+- status

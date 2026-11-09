@@ -16,7 +16,7 @@
 
 ### 开发与实现入口（2026-08-20 核对）
 
-- 当前工作区为 `G:\网站搭建2`，前端路径别名 `@/` 指向 `client/src/`。
+- 当前工作区为 `G:\海川珠宝官方网站开发`，前端路径别名 `@/` 指向 `client/src/`。
 - 本地开发端口所有权：宿主机后端 `3000`，Vite 前端 `5173`；容器后端仅映射 `127.0.0.1:3002`，完整容器栈通过 `:80` 访问。运行说明见 `docs/DEVELOPMENT_WORKFLOW.md`，决策原因见 `docs/DECISIONS.md` A.12。
 - 前端共享传输、鉴权和错误拦截器当前位于 `client/src/services/httpClient.ts`；领域客户端逐步收敛到 `client/src/services/clients/*`，`client/src/services/api.ts` 暂作兼容门面。不得在迁移剩余消费者时建立第二套传输或鉴权事实源。
 - 响应解包入口为 `client/src/utils/unwrap.ts`；商品图选取入口为 `client/src/utils/productImage.ts`；材质标签入口为 `client/src/utils/material.ts`。

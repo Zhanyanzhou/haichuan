@@ -1,0 +1,15 @@
+# 默认文本检索聚焦当前源码；历史内容可用 rg --no-ignore <明确路径> 单独查询。
+/.worktrees/
+/.agents/worktrees/
+/.tmp/
+/.tmp-ci/
+/.codex-tmp/
+/.codex-artifacts/
+/.codex-release-artifacts/
+/.playwright-mcp/
+/.kimi-temp/
+/acceptance-artifacts/
+/backups/
+/_local_backups/
+/docs/archived/
+/.agents/skills/skill-creator/

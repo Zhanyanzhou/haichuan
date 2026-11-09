@@ -91,21 +91,22 @@ enum Status {
 // ========== 分类管理（四级自关联） ==========
 
 model Category {
-  id          Int       @id @default(autoincrement())
-  name        String    @db.VarChar(100)
-  slug        String    @unique @db.VarChar(150)
-  level       Int       @default(1) // 1-4
-  parentId    Int?      @map("parent_id")
-  icon        String?   @db.VarChar(500)
-  coverImage  String?   @map("cover_image") @db.VarChar(500)
-  sortOrder   Int       @default(0) @map("sort_order")
-  seoTitle    String?   @map("seo_title") @db.VarChar(200)
-  seoDesc     String?   @map("seo_desc") @db.VarChar(500)
-  seoKeywords String?   @map("seo_keywords") @db.VarChar(300)
-  isActive    Boolean   @default(true) @map("is_active")
-  deletedAt   DateTime? @map("deleted_at") // 软删除标记
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  id               Int       @id @default(autoincrement())
+  name             String    @db.VarChar(100)
+  slug             String    @unique @db.VarChar(150)
+  level            Int       @default(1) // 1-4
+  parentId         Int?      @map("parent_id")
+  icon             String?   @db.VarChar(500)
+  coverImage       String?   @map("cover_image") @db.VarChar(500)
+  sortOrder        Int       @default(0) @map("sort_order")
+  seoTitle         String?   @map("seo_title") @db.VarChar(200)
+  seoDesc          String?   @map("seo_desc") @db.VarChar(500)
+  seoKeywords      String?   @map("seo_keywords") @db.VarChar(300)
+  isActive         Boolean   @default(true) @map("is_active")
+  publicationRules Json?     @map("publication_rules")
+  deletedAt        DateTime? @map("deleted_at") // 软删除标记
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
   parent       Category?             @relation("CategoryTree", fields: [parentId], references: [id])
   children     Category[]            @relation("CategoryTree")
@@ -139,6 +140,7 @@ model Product {
   publicationQualityStatus    ProductPublicationQualityStatus @default(QUARANTINED) @map("publication_quality_status")
   publicationQualityHash      String?                         @map("publication_quality_hash") @db.Char(64)
   publicationQualityCheckedAt DateTime?                       @map("publication_quality_checked_at")
+  publicationRulesAcceptedAt  DateTime?                       @map("publication_rules_accepted_at")
   // 商品可见范围分级（受控产品库核心字段）
   // PUBLIC=公开宣传款（本期不迁移旧商品到此）；MEMBER=登录会员可见（默认）；
   // PARTNER=仅审核通过的合作商家可见；INTERNAL=仅后台员工可见，前台永不展示。
@@ -150,12 +152,13 @@ model Product {
   scheduledPublishAt          DateTime?                       @map("scheduled_publish_at")
   scheduledPublishError       String?                         @map("scheduled_publish_error") @db.VarChar(500)
   fulfillmentType             ProductFulfillmentType          @default(IN_STOCK) @map("fulfillment_type")
+  fulfillmentConfirmed        Boolean                         @default(false) @map("fulfillment_confirmed")
   dispatchTime                ProductDispatchTime             @default(WITHIN_48_HOURS) @map("dispatch_time")
   shippingTemplateId          Int?                            @map("shipping_template_id")
   deliveryMethods             Json?                           @map("delivery_methods")
   requiresInsuredShipping     Boolean                         @default(true) @map("requires_insured_shipping")
   requiresSignature           Boolean                         @default(true) @map("requires_signature")
-  includesCertificate         Boolean                         @default(true) @map("includes_certificate")
+  includesCertificate         Boolean                         @default(false) @map("includes_certificate")
   packageType                 String?                         @map("package_type") @db.VarChar(100)
   customLeadTime              String?                         @map("custom_lead_time") @db.VarChar(100)
   sortOrder                   Int                             @default(0) @map("sort_order")
@@ -648,6 +651,8 @@ model Order {
 model Customer {
   id                  Int                          @id @default(autoincrement())
   phone               String                       @unique @db.VarChar(20)
+  // 可选登录名。为空的既有会员仍用手机号或微信；用户名登录不替代手机号身份。
+  username            String?                      @unique @db.VarChar(32)
   name                String?                      @db.VarChar(50)
   email               String?                      @unique @db.VarChar(100)
   passwordHash        String?                      @map("password_hash") @db.VarChar(255)

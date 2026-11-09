@@ -1,3 +1,4 @@
+import { Transform } from 'class-transformer';
 import {
   IsEmail,
   IsNotEmpty,
@@ -7,6 +8,7 @@ import {
   Matches,
   MaxLength,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 import {
   ACCOUNT_PASSWORD_MAX_LENGTH,
@@ -15,6 +17,7 @@ import {
 } from '../../users/staff-password-policy';
 
 export const CUSTOMER_PHONE_REGEX = /^1[3-9]\d{9}$/;
+export const CUSTOMER_USERNAME_REGEX = /^[a-z][a-z0-9_]{3,31}$/;
 
 class CustomerPhoneDto {
   @IsString()
@@ -49,7 +52,18 @@ export class CustomerRegisterDto extends AccountPasswordDto {
   smsCode!: string;
 }
 
-export class CustomerLoginDto extends CustomerPhoneDto {
+export class CustomerLoginDto {
+  @ValidateIf((dto: CustomerLoginDto) => !dto.username?.trim())
+  @IsString({ message: '请提供有效的手机号码' })
+  @Matches(CUSTOMER_PHONE_REGEX, { message: '请提供有效的手机号码' })
+  phone?: string;
+
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
+  @ValidateIf((dto: CustomerLoginDto) => !dto.phone?.trim())
+  @IsString({ message: '请填写有效的用户名' })
+  @Matches(CUSTOMER_USERNAME_REGEX, { message: '用户名需为 4–32 位小写字母、数字或下划线，并以字母开头' })
+  username?: string;
+
   @IsString()
   @IsNotEmpty({ message: '请输入登录密码' })
   // 登录只核对既有哈希并保留历史密码兼容；长度合同用于新建/重置。

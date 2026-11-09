@@ -1,0 +1,130 @@
+{
+  "acceptanceId": "r5",
+  "generatedAt": "2026-11-04T16:46:30.000Z",
+  "node": "v22.23.2",
+  "r4FilesPreserved": true,
+  "readChain": {
+    "file": "docs/research/image-quality-2026-11-04/cursor-acceptance-r5-runtime.json",
+    "generatedAt": "2026-11-04T16:18:06.237Z",
+    "exitCode": 0,
+    "ports": { "api": 3018, "web": 5176 },
+    "factCount": 14,
+    "desktopDecoded": { "width": 3840, "height": 2160, "format": "webp", "bytes": 645170 },
+    "cacheRevocation": {
+      "afterRevokeStatus": 404,
+      "databaseRevocationBefore": "ACTIVE",
+      "databaseRevocationAfter": "ACTIVE",
+      "persistedToDatabase": false
+    }
+  },
+  "tempGuard": {
+    "command": "node --test scripts/image-quality-acceptance/temp-guard.spec.mjs",
+    "exitCode": 0,
+    "pass": 7,
+    "fail": 0,
+    "durationMs": 188.1033
+  },
+  "clientTypecheck": {
+    "command": "npx tsc --noEmit -p tsconfig.json",
+    "cwd": "client",
+    "exitCode": 0
+  },
+  "closure": {
+    "file": "docs/research/image-quality-2026-11-04/cursor-acceptance-r5-closure.json",
+    "generatedAt": "2026-11-04T16:44:42.800Z",
+    "exitCode": 0,
+    "passed": true,
+    "isolation": {
+      "databaseName": "haichuan_image_r5",
+      "databaseHost": "127.0.0.1",
+      "mysqlPort": 33173,
+      "apiPort": 3019,
+      "webPort": 5177,
+      "collation": "utf8mb4_unicode_ci",
+      "migrationCount": 71,
+      "dockerServer": "29.8.0",
+      "tempRootRemoved": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\haichuan-image-r5-78048",
+      "businessDatabaseUsed": false
+    },
+    "userPorts": {
+      "before": { "3000": [65740], "5173": [16412] },
+      "after": { "3000": [65740], "5173": [16412] }
+    },
+    "http": {
+      "staffLogin": 201,
+      "upload": 201,
+      "save": 200,
+      "reopen": 200,
+      "publish": 200,
+      "publicStatus": 200,
+      "documentStatus": "PUBLISHED",
+      "factWidths": { "desktop": 3840, "mobile": 941 }
+    },
+    "browser": {
+      "desktop": {
+        "cssWidth": 1920,
+        "dpr": 2,
+        "sizes": "calc(max(100vw, calc(max(620px, 100svh) * 1.7778)))",
+        "decoded": { "format": "webp", "width": 3840, "height": 2160, "bytes": 14818, "etag": "w3840-v2-b728d02ebbdb705f" }
+      },
+      "phone": {
+        "cssWidth": 390,
+        "dpr": 3,
+        "chosenDescriptor": "941w",
+        "urlWidth": 1200,
+        "decoded": { "format": "webp", "width": 941, "height": 1672, "bytes": 2892, "etag": "w1200-v2-f4b8a9104e1d33d9" }
+      },
+      "cover": {
+        "frame": "published-home-hero-desktop-cover-1200x1800",
+        "cssWidth": 1200,
+        "cssHeight": 1800,
+        "dpr": 2,
+        "stable": true,
+        "decoded": { "format": "webp", "width": 3840, "height": 2160, "bytes": 14818 }
+      },
+      "editor": {
+        "mobilePressed": true,
+        "desktopPressed": true,
+        "zoomLabel": "画布尺寸 1440 × 900，缩放 64%",
+        "exact67Control": false,
+        "unsavedObserved": true
+      }
+    },
+    "byUrl": {
+      "staff": 200,
+      "editor": 200,
+      "anonymous": 401,
+      "customerLogin": 201,
+      "customerRead": 401,
+      "customerUpload": 401,
+      "blank": 400,
+      "external": 400,
+      "missing": 404,
+      "archived": "ARCHIVED",
+      "fileMissing": "unknown",
+      "fileRestored": "measured"
+    },
+    "cacheRevocation": {
+      "etag": "w480-v2-2ea5f87a5eaec471",
+      "decodedWidth": 64,
+      "revoke": 201,
+      "databaseStatus": "REVOKED",
+      "afterStatus": 404,
+      "persistedToDatabase": true
+    },
+    "screenshots": [
+      "docs/research/image-quality-2026-11-04/r5-screenshots/public-desktop.png",
+      "docs/research/image-quality-2026-11-04/r5-screenshots/public-phone.png",
+      "docs/research/image-quality-2026-11-04/r5-screenshots/public-cover.png",
+      "docs/research/image-quality-2026-11-04/r5-screenshots/editor-mobile.png",
+      "docs/research/image-quality-2026-11-04/r5-screenshots/editor-desktop.png",
+      "docs/research/image-quality-2026-11-04/r5-screenshots/editor-unsaved.png"
+    ]
+  },
+  "productSourceChanged": [
+    "client/src/components/blocks/HeroSection.tsx"
+  ],
+  "notProven": [
+    "数据库瞬时读失败后的自动恢复只由既有直接测试覆盖。"
+  ]
+}

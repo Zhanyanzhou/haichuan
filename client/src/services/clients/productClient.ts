@@ -89,12 +89,23 @@ export type ProductWriteInput = Record<string, unknown> & {
   expectedSalesMode?: SalesMode;
   materialType?: string;
   price?: number | null;
+  editorSkuUpdates?: EditorSkuUpdate[];
+  editorDefaultSku?: { skuCode: string; material: string; size?: string; goldWeight: number; price: number };
   status?: ProductStatus;
   isHot?: boolean;
   isNew?: boolean;
   isRecommended?: boolean;
   isLimited?: boolean;
   isCustom?: boolean;
+};
+
+export type EditorSkuUpdate = {
+  id: number;
+  material?: string;
+  size?: string;
+  goldWeight?: number;
+  price?: number;
+  expectedPrice?: number;
 };
 
 export type ProductImportCodeConflict = {
@@ -280,6 +291,40 @@ function persistMockProducts() {
   }
 }
 
+const MOCK_CODE_REDIRECT_KEY = "haichuan.mock-product-code-redirects";
+
+function readMockCodeRedirects(): Record<string, { productId: number; code: string }> {
+  if (typeof window === "undefined") return {};
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(MOCK_CODE_REDIRECT_KEY) || "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return parsed as Record<string, { productId: number; code: string }>;
+  } catch {
+    return {};
+  }
+}
+
+function writeMockCodeRedirects(map: Record<string, { productId: number; code: string }>) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(MOCK_CODE_REDIRECT_KEY, JSON.stringify(map));
+}
+
+function retargetMockCodeRedirects(
+  map: Record<string, { productId: number; code: string }>,
+  productId: number,
+  from: string,
+  to: string,
+) {
+  const next: Record<string, { productId: number; code: string }> = {};
+  for (const [former, target] of Object.entries(map)) {
+    if (former === to) continue;
+    next[former] = target.productId === productId ? { productId, code: to } : target;
+  }
+  if (from && from !== to) next[from] = { productId, code: to };
+  delete next[to];
+  return next;
+}
+
 export interface ProductAdminQuery {
   page?: number;
   pageSize?: number;
@@ -325,15 +370,27 @@ export const productApi = {
   checkImportCodes: async (codes: string[]) => {
     if (USE_MOCK) {
       const products = getMockProducts();
+      const redirects = readMockCodeRedirects();
       return mockRes(codes.flatMap((requestedCode) => {
         const product = products.find((item) => item.code.toLowerCase() === requestedCode.toLowerCase());
-        return product ? [{
+        if (product) {
+          return [{
+            requestedCode,
+            code: product.code,
+            id: product.id,
+            name: product.name,
+            status: product.deletedAt ? "ARCHIVED" : product.status,
+            ...(product.deletedAt ? { removed: true } : {}),
+          }];
+        }
+        const reserved = Object.entries(redirects).find(([former]) => former.toLowerCase() === requestedCode.toLowerCase())?.[1];
+        const owner = reserved ? products.find((item) => item.id === reserved.productId && !item.deletedAt) : undefined;
+        return owner ? [{
           requestedCode,
-          code: product.code,
-          id: product.id,
-          name: product.name,
-          status: product.deletedAt ? "ARCHIVED" : product.status,
-          ...(product.deletedAt ? { removed: true } : {}),
+          code: owner.code,
+          id: owner.id,
+          name: owner.name,
+          status: owner.status,
         }] : [];
       }));
     }
@@ -544,9 +601,20 @@ export const productApi = {
     if (USE_MOCK) {
       await mockDelay();
       if (locale === "en") throw new Error("Requested locale is not published");
-      const product = getMockProducts().find(
-        (item) => (item.code === String(id) || item.id === Number(id)) && item.status === "PUBLISHED",
-      );
+      const reference = String(id);
+      const published = getMockProducts().filter((item) => item.status === "PUBLISHED");
+      let product = published.find((item) => item.code === reference);
+      if (!product) {
+        const reserved = readMockCodeRedirects()[reference];
+        if (reserved) {
+          product = published.find((item) => item.id === reserved.productId);
+          if (!product) throw mockRequestError("商品当前不可浏览", 404);
+        }
+      }
+      if (!product && /^\d+$/.test(reference)) {
+        const numericId = Number(reference);
+        if (numericId > 0) product = published.find((item) => item.id === numericId);
+      }
       if (!product) throw mockRequestError("商品当前不可浏览", 404);
       return mockRes(product);
     }
@@ -603,18 +671,65 @@ export const productApi = {
       await mockDelay(200);
       const product = getMockProducts().find((item) => item.id === id);
       if (!product) throw new Error("商品不存在");
-      const { expectedCategoryId, expectedSalesMode, ...changes } = data;
+      const { expectedCategoryId, expectedSalesMode, editorSkuUpdates, editorDefaultSku, ...changes } = data;
       if (expectedCategoryId !== undefined && product.categoryId !== expectedCategoryId) {
         throw mockRequestError("商品分类已变更，请刷新后重试", 409);
       }
       if (expectedSalesMode !== undefined && product.salesMode !== expectedSalesMode) {
         throw mockRequestError("商品销售方式已变更，请刷新后重试", 409);
       }
+      const nextSkus = product.skus.map((sku) => ({ ...sku }));
+      for (const { id: skuId, expectedPrice, ...fields } of editorSkuUpdates || []) {
+        const sku = nextSkus.find((item) => item.id === skuId && item.isActive !== false);
+        if (!sku || (expectedPrice !== undefined && Number(sku.price) !== expectedPrice)) {
+          throw mockRequestError("商品规格已变更，请刷新后重试", 409);
+        }
+        Object.assign(sku, fields);
+      }
+      if (editorDefaultSku) {
+        if (nextSkus.some((sku) => sku.isActive !== false)
+          || getMockProducts().some((item) => item.skus.some((sku) => sku.skuCode === editorDefaultSku.skuCode))) {
+          throw mockRequestError("商品规格已变更，请刷新后重试", 409);
+        }
+        nextSkus.push({ id: Date.now(), productId: id, isActive: true, ...editorDefaultSku });
+      }
       Object.assign(product, changes);
+      if (editorSkuUpdates?.length || editorDefaultSku) {
+        product.skus = nextSkus;
+        const prices = nextSkus.filter((sku) => sku.isActive !== false && Number(sku.price) > 0).map((sku) => Number(sku.price));
+        product.price = prices.length ? Math.min(...prices) : 0;
+      }
       persistMockProducts();
       return mockRes(product);
     }
     return api.put(`/products/${id}`, data, options);
+  },
+  correctCode: async (productId: number, code: string) => {
+    if (USE_MOCK) {
+      await mockDelay(200);
+      const next = code.trim();
+      if (!next) throw mockRequestError("请填写商品款号", 400);
+      if (next.length > 50) throw mockRequestError("款号不能超过50个字符", 400);
+      const products = getMockProducts();
+      const product = products.find((item) => item.id === productId && !item.deletedAt);
+      if (!product) throw mockRequestError("商品不存在或已删除", 404);
+      if (product.status === "ARCHIVED") throw mockRequestError("归档作品不能更正款号", 409);
+      if (product.code === next) throw mockRequestError("款号没有变化", 400);
+      if (products.some((item) => item.id !== productId && item.code.toLowerCase() === next.toLowerCase())) {
+        throw mockRequestError("这个款号已经有商品使用，请换一个", 409);
+      }
+      const map = readMockCodeRedirects();
+      const reserved = Object.entries(map).find(([former]) => former.toLowerCase() === next.toLowerCase())?.[1];
+      if (reserved && reserved.productId !== productId) {
+        throw mockRequestError("这个款号仍是另一件商品的旧地址，请换一个", 409);
+      }
+      const previousCode = product.code;
+      product.code = next;
+      persistMockProducts();
+      writeMockCodeRedirects(retargetMockCodeRedirects(map, productId, previousCode, next));
+      return mockRes({ id: productId, previousCode, code: next });
+    }
+    return api.post(`/products/${productId}/correct-code`, { code }, { suppressGlobalError: true });
   },
   archive: async (id: number) => {
     if (USE_MOCK) {

@@ -72,6 +72,28 @@ function expectSafeProduct(product: Record<string, any>) {
   }
 }
 
+async function mockOpenPurchasePreparation(page: Page) {
+  await page.route("**/api/settings/flags", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      code: 200,
+      data: { commerceEnabled: false, cartEnabled: true, paymentEnabled: false },
+      message: "success",
+    }),
+  }));
+  await page.route("**/api/customers/sms-requirements", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ code: 200, data: { registerRequired: true }, message: "success" }),
+  }));
+  await page.route("**/api/customers/wechat/config**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ code: 200, data: { enabled: false }, message: "success" }),
+  }));
+}
+
 async function expectNoHorizontalOverflow(page: Page) {
   await expect
     .poll(() =>
@@ -199,7 +221,7 @@ test.describe("游客公开浏览", () => {
       "登录状态暂时无法确认，当前页面没有加载任何账户数据。",
     );
     await expect(page.getByRole("button", { name: "重新验证" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "会员登录 / 注册" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "登录我的账户" })).toHaveCount(0);
 
     profileUnavailable = false;
     await page.getByRole("button", { name: "重新验证" }).click();
@@ -228,14 +250,20 @@ test.describe("游客公开浏览", () => {
 
       await page.goto("/customer");
 
-      await expect(page.getByRole("heading", { level: 1, name: /您的珠宝档案/ }))
+      await expect(page.getByRole("heading", { level: 1, name: /欢迎回来/ }))
         .toBeVisible();
-      await expect(page.getByText("会员账户", { exact: true })).toBeVisible();
+      await expect(page.getByText("Private Membership", { exact: true })).toBeVisible();
       await expect(page.getByText("会员服务", { exact: true })).toBeVisible();
       await expect(page.getByText("HAICHUAN PRIVATE CLIENT")).toHaveCount(0);
       await expect(page.locator("#member-access-form")).toBeVisible();
       await expect(page.getByRole("button", { name: "会员登录", exact: true }))
         .toBeVisible();
+      await expect(page.getByRole("tab", { name: "用户名", exact: true }))
+        .toHaveAttribute("aria-selected", "true");
+      await expect(page.getByLabel("用户名")).toBeVisible();
+      await expect(page.getByText("使用用户名与密码登录。")).toBeVisible();
+      await expect(page.getByRole("tab", { name: "手机号", exact: true })).toBeVisible();
+      await expect(page.getByRole("tab", { name: "微信扫码", exact: true })).toBeVisible();
       await expect(page.getByText("账户首页", { exact: true })).toHaveCount(0);
       await expect(page.getByText("我的订单", { exact: true })).toHaveCount(0);
 
@@ -244,7 +272,7 @@ test.describe("游客公开浏览", () => {
       await expect(page.getByLabel("称呼")).toBeVisible();
       await expect(page.getByLabel("邮箱（选填）")).toBeVisible();
       await expect(page.getByLabel("短信验证码")).toBeVisible();
-      const registerPassword = page.getByLabel("密码");
+      const registerPassword = page.getByLabel("密码", { exact: true });
       await expect(registerPassword).toHaveAttribute("minlength", "6");
       await expect(registerPassword).toHaveAttribute("maxlength", "18");
       await expect(page.getByText("密码需为 6–18 位，并同时包含字母和数字", { exact: true })).toBeVisible();
@@ -308,6 +336,7 @@ test.describe("游客公开浏览", () => {
     });
 
     await page.goto("/customer");
+    await page.getByRole("tab", { name: "手机号", exact: true }).click();
     await page.getByLabel("手机号").fill("13800138000");
     await page.getByLabel("密码").fill("wrong-password");
     const loginButton = page.getByRole("button", { name: "登录我的账户" });
@@ -398,6 +427,7 @@ test.describe("游客公开浏览", () => {
     );
 
     await page.goto("/customer");
+    await page.getByRole("tab", { name: "微信扫码", exact: true }).click();
     const iframe = page.locator('iframe[title="微信扫码登录"]');
     await expect(iframe).toBeVisible();
     await expect.poll(() => page.frames().length).toBeGreaterThan(1);
@@ -699,6 +729,7 @@ test.describe("游客公开浏览", () => {
     });
 
     await page.goto("/customer");
+    await page.getByRole("tab", { name: "手机号", exact: true }).click();
     await page.getByLabel("手机号").fill("13800000007");
     await page.getByLabel("密码").fill("old-login-pass");
     await page.locator("#member-access-form").evaluate((form) => {
@@ -751,6 +782,7 @@ test.describe("游客公开浏览", () => {
     });
 
     await page.goto("/customer");
+    await page.getByRole("tab", { name: "手机号", exact: true }).click();
     await page.getByLabel("手机号").fill("13800000007");
     await page.getByLabel("密码").fill("challenge-read-failure");
     await page.getByRole("button", { name: "登录我的账户" }).click();
@@ -820,6 +852,7 @@ test.describe("游客公开浏览", () => {
     });
 
     await page.goto("/customer");
+    await page.getByRole("tab", { name: "手机号", exact: true }).click();
     await page.getByLabel("手机号").fill(customer.phone);
     await page.getByLabel("密码").fill("late-login-pass");
     await page.getByRole("button", { name: "登录我的账户" }).click();
@@ -1235,8 +1268,9 @@ test.describe("游客公开浏览", () => {
       return respond([]);
     });
 
-    await page.goto("/customer");
+    await page.goto("/customer?section=orders");
     await expect(page.getByText("甲账户私有订单作品")).toBeVisible();
+    await page.getByRole("navigation", { name: "会员服务" }).getByRole("link", { name: "个人资料" }).click();
     await expect(page.getByText("合作状态暂时无法确认，请重新加载后再继续。"))
       .toBeVisible();
 
@@ -1331,8 +1365,9 @@ test.describe("游客公开浏览", () => {
       return respond([]);
     });
 
-    await page.goto("/customer");
+    await page.goto("/customer?section=orders");
     await expect(page.getByText("旧会话私有订单作品")).toBeVisible();
+    await page.getByRole("navigation", { name: "会员服务" }).getByRole("link", { name: "个人资料" }).click();
     await page.getByRole("button", { name: "重新加载" }).click();
     await expect.poll(() => refreshStarted).toBe(true);
 
@@ -1379,11 +1414,13 @@ test.describe("游客公开浏览", () => {
       return respond([]);
     });
 
-    await page.goto("/customer");
+    await page.goto("/customer?section=profile");
     await expect(page.getByText("合作状态暂时无法确认，请重新加载后再继续。"))
       .toBeVisible();
     await expect(page.getByText("尚未申请合作商家身份")).toHaveCount(0);
 
+    const services = page.getByRole("navigation", { name: "会员服务" });
+    await services.getByRole("link", { name: "我的心愿单" }).click();
     const favorites = page.getByRole("region", { name: "我的心愿单" });
     await expect(favorites.getByText("心愿单暂时无法加载。"))
       .toBeVisible();
@@ -1394,6 +1431,7 @@ test.describe("游客公开浏览", () => {
     await expect(favorites.getByText("心愿单还是空的。"))
       .toBeVisible();
 
+    await services.getByRole("link", { name: "服务通知" }).click();
     const notifications = page.getByRole("region", { name: "服务通知" });
     await expect(notifications.getByText("服务通知暂时无法加载，订单和账户功能不受影响。"))
       .toBeVisible();
@@ -1405,6 +1443,7 @@ test.describe("游客公开浏览", () => {
       .toBeVisible();
 
     partnerFail = false;
+    await services.getByRole("link", { name: "个人资料" }).click();
     await page.getByRole("button", { name: "重新加载" }).click();
     await expect(page.getByText("合作申请审核中")).toBeVisible();
 
@@ -1441,28 +1480,35 @@ test.describe("游客公开浏览", () => {
     await expect(page.getByRole("button", { name: "提交申请" })).toHaveCount(0);
   });
 
-  test("/cart 在交易关闭时仍打开购物车并说明购买尚未开放", async ({ page }) => {
+  test("/cart 在成交关闭时要求登录后查看购物车", async ({ page }) => {
+    await mockOpenPurchasePreparation(page);
     await page.goto("/cart");
-    await expect(page).toHaveURL(/\/cart$/);
-    await expect(page.getByRole("heading", { level: 1, name: "购物袋" })).toBeVisible();
-    await expect(page.getByText("线上购买尚未开放")).toBeVisible();
-    await expect(page.getByRole("link", { name: "去选款" })).toHaveAttribute("href", "/catalog");
+    await expect(page).toHaveURL(/\/customer\?returnTo=%2Fcart$/);
+    await expect(page.getByRole("status").getByText("登录后将继续查看购物车。")).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: /欢迎回来/ })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "购物袋" })).toHaveCount(0);
+    await expect(page.getByText("线上购买尚未开放")).toHaveCount(0);
     await expect(page.getByRole("banner")).toBeVisible();
     await expectNoHorizontalOverflow(page);
   });
 
-  test("/checkout 在交易关闭时降级至咨询页", async ({ page }) => {
+  test("/checkout 在成交关闭时要求登录后核对结算", async ({ page }) => {
+    await mockOpenPurchasePreparation(page);
     await page.goto("/checkout");
-    await expect(page).toHaveURL(/\/contact/);
+    await expect(page).toHaveURL(/\/customer\?returnTo=%2Fcheckout$/);
+    await expect(page.getByRole("status").getByText("登录后将继续核对所选规格、数量和收货信息。暂时不能提交订单或付款。")).toBeVisible();
+    await expect(page).not.toHaveURL(/\/contact/);
+    await expect(page.getByRole("heading", { level: 1, name: /欢迎回来/ })).toBeVisible();
     await expect(page.getByRole("banner")).toBeVisible();
     await expectNoHorizontalOverflow(page);
   });
 
-  test("移动端交易关闭时购物车没有横向溢出", async ({ page }) => {
+  test("移动端成交关闭时购物车登录页没有横向溢出", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
+    await mockOpenPurchasePreparation(page);
     await page.goto("/cart");
-    await expect(page).toHaveURL(/\/cart$/);
-    await expect(page.getByRole("heading", { level: 1, name: "购物袋" })).toBeVisible();
+    await expect(page).toHaveURL(/\/customer\?returnTo=%2Fcart$/);
+    await expect(page.getByRole("heading", { level: 1, name: /欢迎回来/ })).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
     await page.keyboard.press("Tab");

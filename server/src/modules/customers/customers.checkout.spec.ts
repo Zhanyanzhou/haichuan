@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ConflictException, HttpException, UnauthorizedException, ValidationPipe } from "@nestjs/common";
+import { BadRequestException, ConflictException, HttpException, UnauthorizedException, ValidationPipe } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { OrdersService } from "../orders/orders.service";
@@ -17,6 +17,7 @@ function createCheckoutService(
   let storedOrder: Record<string, any> | null = null;
   let createCount = 0;
   let customerLookupCount = 0;
+  let cartLookupCount = 0;
   let activePrincipal = options.activePrincipal !== false;
   const customerRecord = {
     id: 5,
@@ -36,7 +37,12 @@ function createCheckoutService(
         return activePrincipal ? customerRecord : null;
       },
     },
-    cart: { findMany: async () => cartRows },
+    cart: {
+      findMany: async () => {
+        cartLookupCount += 1;
+        return cartRows;
+      },
+    },
     order: {
       findUnique: async ({ where }: any) =>
         storedOrder?.checkoutIdempotencyKeyHash === where.checkoutIdempotencyKeyHash
@@ -80,6 +86,7 @@ function createCheckoutService(
     captured: () => capturedOrder,
     createCount: () => createCount,
     customerLookupCount: () => customerLookupCount,
+    cartLookupCount: () => cartLookupCount,
     setActivePrincipal: (active: boolean) => { activePrincipal = active; },
   };
 }
@@ -118,6 +125,39 @@ test("浏览器提交内容与服务端购物车不一致时拒绝创建订单",
     ConflictException,
   );
   assert.equal(captured(), undefined);
+});
+
+test("立即购买只提交所选规格，重复提交回放，跨来源复用同键冲突", async () => {
+  const { service, captured, createCount, cartLookupCount } = createCheckoutService([
+    { skuId: 99, quantity: 1 },
+  ]);
+  const input = { address: "合成测试地址", items: [{ skuId: 10, quantity: 2 }] };
+  const direct = { ...input, purchaseSource: "DIRECT" as const };
+  const key = "checkout-key-direct-0001";
+
+  const first = await service.checkout(CUSTOMER, direct, key);
+  const replay = await service.checkout(CUSTOMER, direct, key);
+  await assert.rejects(() => service.checkout(CUSTOMER, input, key), ConflictException);
+
+  assert.equal(first.order.id, replay.order.id);
+  assert.equal(createCount(), 1);
+  assert.equal(cartLookupCount(), 0);
+  assert.deepEqual(captured()?.items, input.items);
+  assert.equal(captured()?.checkoutCustomer.purchaseSource, "DIRECT");
+});
+
+test("立即购买拒绝多行请求，包括重复的同一规格", async () => {
+  const { service, createCount, cartLookupCount } = createCheckoutService([]);
+  await assert.rejects(
+    () => service.checkout(CUSTOMER, {
+      address: "合成测试地址",
+      purchaseSource: "DIRECT",
+      items: [{ skuId: 10, quantity: 1 }, { skuId: 10, quantity: 1 }],
+    }, "checkout-key-direct-multiple"),
+    BadRequestException,
+  );
+  assert.equal(createCount(), 0);
+  assert.equal(cartLookupCount(), 0);
 });
 
 test("同一结算键和同一语义请求回放已提交订单且不再次读取购物车", async () => {
@@ -208,6 +248,24 @@ test("客户结算 DTO 向后兼容可选优惠券 ID 并拒绝非正整数", as
       { type: "body", metatype: CheckoutDto },
     ),
   );
+});
+
+test("客户结算 DTO 接受显式立即购买来源并拒绝未知来源", async () => {
+  const pipe = new ValidationPipe({
+    whitelist: true,
+    transform: true,
+    transformOptions: { enableImplicitConversion: true },
+  });
+  const input = { address: "合成测试地址", items: [{ skuId: 10, quantity: 1 }] };
+  const metadata = { type: "body" as const, metatype: CheckoutDto };
+  const valid = await pipe.transform({ ...input, purchaseSource: "DIRECT" }, metadata);
+  assert.equal(valid.purchaseSource, "DIRECT");
+  for (const purchaseSource of ["CART", "OTHER", "", null]) {
+    await assert.rejects(
+      pipe.transform({ ...input, purchaseSource }, metadata),
+      BadRequestException,
+    );
+  }
 });
 
 test("客户结算缺少幂等键在读取客户与创建订单前返回 428", async () => {

@@ -377,6 +377,7 @@ export function collectContentReadiness(projectRoot = defaultProjectRoot) {
     "@fontsource/cormorant-garamond",
     "@fontsource/inter",
     "@fontsource/noto-serif-sc",
+    "@fontsource-variable/bodoni-moda",
   ]);
   const iconPackages = collectPackageLicenseEvidence(projectRoot, [
     "@ant-design/icons",
@@ -565,7 +566,7 @@ export function collectContentReadiness(projectRoot = defaultProjectRoot) {
     existingCheck(
       "font-package-license-evidence",
       "fonts",
-      "当前安装的三项 Fontsource 字体包均附带 OFL-1.1 许可文件。",
+      "已登记的 Fontsource 字体包均附带 OFL-1.1 许可文件。",
       {
         packages: fontPackages,
         allLicenseFilesPresent: fontPackages.every((item) => item.licenseFilePresent),

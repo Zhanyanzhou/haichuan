@@ -1,0 +1,328 @@
+{
+  "generatedAt": "2026-11-04T16:44:42.800Z",
+  "acceptanceId": "r5",
+  "node": "v22.23.2",
+  "isolation": {
+    "databaseName": "haichuan_image_r5",
+    "databaseHost": "127.0.0.1",
+    "mysqlPort": 33173,
+    "apiPort": 3019,
+    "webPort": 5177,
+    "tempRoot": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\haichuan-image-r5-78048",
+    "businessDatabaseUsed": false
+  },
+  "userPorts": {
+    "before": {
+      "3000": [
+        65740
+      ],
+      "5173": [
+        16412
+      ]
+    },
+    "after": {
+      "3000": [
+        65740
+      ],
+      "5173": [
+        16412
+      ]
+    }
+  },
+  "checks": {
+    "staffLogin": true,
+    "uploadBoth": true,
+    "libraryReread": true,
+    "save": true,
+    "reopen": true,
+    "publish": true,
+    "publicApi": true,
+    "desktop3840": true,
+    "phone941": true,
+    "coverStable": true,
+    "editorDevice": true,
+    "zoomObserved": true,
+    "unsavedObserved": true,
+    "byUrlStaff": true,
+    "byUrlAnonymous": true,
+    "byUrlCustomer": true,
+    "byUrlIllegal": true,
+    "byUrlMissing": true,
+    "byUrlArchived": true,
+    "byUrlFileMissingRecovery": true,
+    "cacheRevokeDb": true
+  },
+  "passed": true,
+  "steps": [
+    {
+      "name": "database",
+      "at": "2026-11-04T16:44:28.744Z",
+      "databaseName": "haichuan_image_r5",
+      "host": "127.0.0.1",
+      "port": 33173,
+      "collation": "utf8mb4_unicode_ci",
+      "migrationCount": 71,
+      "dockerServer": "29.8.0"
+    },
+    {
+      "name": "processes",
+      "at": "2026-11-04T16:44:32.220Z",
+      "health": 200,
+      "webStatus": 200,
+      "apiPort": 3019,
+      "webPort": 5177
+    },
+    {
+      "name": "login",
+      "at": "2026-11-04T16:44:32.406Z",
+      "staff": 201,
+      "reviewer": 201,
+      "editor": 201,
+      "staffRole": "SUPER_ADMIN",
+      "editorRole": "EDITOR",
+      "tokensPresent": {
+        "staff": true,
+        "reviewer": true,
+        "editor": true
+      }
+    },
+    {
+      "name": "upload",
+      "at": "2026-11-04T16:44:32.734Z",
+      "anonymousList": 401,
+      "statuses": {
+        "desktop": 201,
+        "phone": 201,
+        "probe": 201,
+        "archive": 201
+      },
+      "library": [
+        {
+          "id": 4,
+          "url": "/uploads/page-assets/30cd6a02e3e342a67ccfda5dca614b4a8ba45a5a5bd214c3a3cf8635f9e9b9bf.png",
+          "status": "READY",
+          "metadataStatus": "measured",
+          "width": 48,
+          "height": 48,
+          "displayWidth": 48,
+          "displayHeight": 48,
+          "revision": 1
+        },
+        {
+          "id": 3,
+          "url": "/uploads/page-assets/513a15ec8690045581178f32ddeb3e89678c5726af2475cdaf1aecfe50146be0.png",
+          "status": "READY",
+          "metadataStatus": "measured",
+          "width": 64,
+          "height": 64,
+          "displayWidth": 64,
+          "displayHeight": 64,
+          "revision": 1
+        },
+        {
+          "id": 2,
+          "url": "/uploads/page-assets/0b620071988601e8bbea6ba00e5ffd29b7b8d0f7db547d14ebc6d875e2b449e0.png",
+          "status": "READY",
+          "metadataStatus": "measured",
+          "width": 941,
+          "height": 1672,
+          "displayWidth": 941,
+          "displayHeight": 1672,
+          "revision": 1
+        },
+        {
+          "id": 1,
+          "url": "/uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png",
+          "status": "READY",
+          "metadataStatus": "measured",
+          "width": 3840,
+          "height": 2160,
+          "displayWidth": 3840,
+          "displayHeight": 2160,
+          "revision": 1
+        }
+      ],
+      "ok": true
+    },
+    {
+      "name": "authorization",
+      "at": "2026-11-04T16:44:33.130Z",
+      "desktop": {
+        "drafted": 200,
+        "submitted": 201,
+        "approved": 201,
+        "revision": 4,
+        "message": "success"
+      },
+      "phone": {
+        "drafted": 200,
+        "submitted": 201,
+        "approved": 201,
+        "revision": 4,
+        "message": "success"
+      },
+      "probe": {
+        "drafted": 200,
+        "submitted": 201,
+        "approved": 201,
+        "revision": 4,
+        "message": "success"
+      }
+    },
+    {
+      "name": "page",
+      "at": "2026-11-04T16:44:33.303Z",
+      "save": 200,
+      "saveMessage": "success",
+      "reopen": 200,
+      "reopenImages": {
+        "desktop": "/uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png",
+        "mobile": "/uploads/page-assets/0b620071988601e8bbea6ba00e5ffd29b7b8d0f7db547d14ebc6d875e2b449e0.png"
+      },
+      "publish": 200,
+      "publishMessage": "success",
+      "publicStatus": 200,
+      "documentStatus": "PUBLISHED",
+      "factWidths": {
+        "/uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png": 3840,
+        "/uploads/page-assets/0b620071988601e8bbea6ba00e5ffd29b7b8d0f7db547d14ebc6d875e2b449e0.png": 941
+      }
+    },
+    {
+      "name": "public-desktop",
+      "at": "2026-11-04T16:44:35.316Z",
+      "ok": true,
+      "sizes": "calc(max(100vw, calc(max(620px, 100svh) * 1.7778)))",
+      "cssWidth": 1920,
+      "dpr": 2,
+      "srcset": "/uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=480&rv=2 480w, /uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=800&rv=2 800w, /uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=1200&rv=2 1200w, /uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=1680&rv=2 1680w, /uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=2400&rv=2 2400w, /uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=2880&rv=2 2880w, /uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=3840&rv=2 3840w",
+      "decoded": {
+        "status": 200,
+        "bytes": 14818,
+        "format": "webp",
+        "width": 3840,
+        "height": 2160,
+        "etag": "\"w3840-v2-b728d02ebbdb705f\"",
+        "message": ""
+      }
+    },
+    {
+      "name": "public-phone",
+      "at": "2026-11-04T16:44:36.168Z",
+      "ok": true,
+      "sizes": "calc(max(100vw, calc(max(620px, 100svh) * 0.5628)))",
+      "cssWidth": 390,
+      "dpr": 3,
+      "srcset": "/uploads/page-assets/0b620071988601e8bbea6ba00e5ffd29b7b8d0f7db547d14ebc6d875e2b449e0.png?width=480&rv=2 480w, /uploads/page-assets/0b620071988601e8bbea6ba00e5ffd29b7b8d0f7db547d14ebc6d875e2b449e0.png?width=800&rv=2 800w, /uploads/page-assets/0b620071988601e8bbea6ba00e5ffd29b7b8d0f7db547d14ebc6d875e2b449e0.png?width=1200&rv=2 941w",
+      "imgSrcset": "/uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=480&rv=2 480w, /uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=800&rv=2 800w, /uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=1200&rv=2 1200w, /uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=1680&rv=2 1680w, /uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=2400&rv=2 2400w, /uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=2880&rv=2 2880w, /uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=3840&rv=2 3840w",
+      "expectedSrcSet": "/uploads/page-assets/0b620071988601e8bbea6ba00e5ffd29b7b8d0f7db547d14ebc6d875e2b449e0.png?width=480&rv=2 480w, /uploads/page-assets/0b620071988601e8bbea6ba00e5ffd29b7b8d0f7db547d14ebc6d875e2b449e0.png?width=800&rv=2 800w, /uploads/page-assets/0b620071988601e8bbea6ba00e5ffd29b7b8d0f7db547d14ebc6d875e2b449e0.png?width=1200&rv=2 941w",
+      "decoded": {
+        "status": 200,
+        "bytes": 2892,
+        "format": "webp",
+        "width": 941,
+        "height": 1672,
+        "etag": "\"w1200-v2-f4b8a9104e1d33d9\"",
+        "message": ""
+      }
+    },
+    {
+      "name": "public-cover",
+      "at": "2026-11-04T16:44:39.619Z",
+      "ok": true,
+      "sizes": "calc(max(100vw, calc(max(620px, 100svh) * 1.7778)))",
+      "cssWidth": 1200,
+      "cssHeight": 1800,
+      "dpr": 2,
+      "currentSrc": "http://127.0.0.1:5177/uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=3840&rv=2",
+      "immediateCurrentSrc": "http://127.0.0.1:5177/uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=3840&rv=2",
+      "immediateSrcset": "/uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=480&rv=2 480w, /uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=800&rv=2 800w, /uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=1200&rv=2 1200w, /uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=1680&rv=2 1680w, /uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=2400&rv=2 2400w, /uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=2880&rv=2 2880w, /uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=3840&rv=2 3840w",
+      "afterCurrentSrc": "http://127.0.0.1:5177/uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=3840&rv=2",
+      "afterCss": {
+        "cssWidth": 1200,
+        "cssHeight": 1800
+      },
+      "afterSrcs": [
+        "http://127.0.0.1:5177/uploads/page-assets/a32463da7932b48070c550e8675a831d7fb5334716e680227fb0b78c2aaccd14.png?width=3840&rv=2"
+      ],
+      "decoded": {
+        "status": 200,
+        "bytes": 14818,
+        "format": "webp",
+        "width": 3840,
+        "height": 2160,
+        "etag": "\"w3840-v2-b728d02ebbdb705f\"",
+        "message": ""
+      },
+      "stable": true,
+      "frame": "published-home-hero-desktop-cover-1200x1800"
+    },
+    {
+      "name": "editor",
+      "at": "2026-11-04T16:44:42.032Z",
+      "mobilePressed": "true",
+      "desktopPressed": "true",
+      "zoomLabel": "画布尺寸 1440 × 900，缩放 64%",
+      "exact67Control": false,
+      "nearestZoomPercent": 64,
+      "unsaved": false,
+      "staffTokenUsed": true
+    },
+    {
+      "name": "editor-unsaved",
+      "at": "2026-11-04T16:44:42.255Z",
+      "unsaved": true,
+      "titleCount": 1
+    },
+    {
+      "name": "cache-revocation",
+      "at": "2026-11-04T16:44:42.435Z",
+      "first": {
+        "status": 200,
+        "etag": "\"w480-v2-2ea5f87a5eaec471\"",
+        "width": 64
+      },
+      "secondEtag": "\"w480-v2-2ea5f87a5eaec471\"",
+      "revoke": 201,
+      "databaseStatus": "REVOKED",
+      "after": {
+        "status": 404,
+        "message": "{\"code\":404,\"data\":null,\"message\":\"素材当前不可公开访问\",\"timestamp\":\"2026-11-04T16:44:42.434Z\",\"path\":\"/uploads/page-assets/513a1",
+        "etag": "W/\"e4-nXa4aM+hLDs141b9pDOWVr/bSaY\""
+      },
+      "ok": true
+    },
+    {
+      "name": "by-url",
+      "at": "2026-11-04T16:44:42.645Z",
+      "staff": 200,
+      "editor": 200,
+      "anonymous": 401,
+      "customerLogin": 201,
+      "customerRead": 401,
+      "customerUpload": 401,
+      "blank": {
+        "status": 400,
+        "message": "素材地址无效"
+      },
+      "external": {
+        "status": 400,
+        "message": "请使用本站页面素材路径"
+      },
+      "missing": {
+        "status": 404,
+        "message": "素材不存在"
+      },
+      "archived": {
+        "status": 200,
+        "read": 200,
+        "assetStatus": "ARCHIVED"
+      },
+      "fileMissing": "unknown",
+      "fileRestored": "measured"
+    }
+  ],
+  "notProven": [
+    "数据库瞬时读失败后的自动恢复只由既有直接测试覆盖；完整 Nest 没有安全的故障注入点。"
+  ]
+}

@@ -15,6 +15,7 @@ import { isCustomerAccessTokenPayload } from '../../common/security/access-sessi
 import { anonymizeCustomerConsultations } from '../leads/lead-privacy-disposition';
 import { customerFacingProductWhere } from '../products/product-eligibility';
 import { assertAccountPassword } from '../users/staff-password-policy';
+import { CUSTOMER_USERNAME_REGEX } from './dto/customer-auth.dto';
 import { consumeCustomerSmsCode, type CustomerSmsPurpose } from '../../common/sms/consume-customer-sms-code';
 import {
   CUSTOMER_INQUIRY_EXPORT_SELECT,
@@ -92,6 +93,7 @@ type CheckoutRequest = {
   items: { skuId: number; quantity: number }[];
   customerEmail?: string;
   couponId?: number;
+  purchaseSource?: 'DIRECT';
 };
 
 type CheckoutIdempotency = {
@@ -186,6 +188,18 @@ export class CustomersService {
     return value;
   }
 
+  private normalizeUsername(username: string) {
+    const value = username?.trim().toLowerCase();
+    if (!CUSTOMER_USERNAME_REGEX.test(value)) {
+      throw new BadRequestException('请填写有效的用户名');
+    }
+    return value;
+  }
+
+  private usernameFailureKey(username: string) {
+    return `username:${username}`;
+  }
+
   private issueAccessToken(customerId: number, authVersion: number, sessionFamilyId?: string) {
     return this.jwtService.sign(
       {
@@ -238,6 +252,17 @@ export class CustomersService {
         : count >= LOGIN_CHALLENGE_CAPTCHA_THRESHOLD
           ? ('captcha' as const)
           : ('none' as const),
+    };
+  }
+
+  /** 用户名登录只升级到图形验证码。用户名没有可投递的手机号，不能借短信挑战确认账户是否存在。 */
+  usernameLoginChallenge(usernameInput: string) {
+    const username = this.normalizeUsername(usernameInput);
+    const count = this.currentLoginFailureCount(this.usernameFailureKey(username));
+    return {
+      level: count >= LOGIN_CHALLENGE_CAPTCHA_THRESHOLD
+        ? ('captcha' as const)
+        : ('none' as const),
     };
   }
 
@@ -500,13 +525,29 @@ export class CustomersService {
   }
 
   async login(data: {
-    phone: string;
+    phone?: string;
+    username?: string;
     password: string;
     captchaId?: string;
     captchaCode?: string;
     smsCode?: string;
   }, sessionMetadata?: SessionMetadata) {
-    const phone = this.normalizePhone(data.phone);
+    const phone = data.phone?.trim() ?? '';
+    const username = data.username?.trim() ?? '';
+    if (Boolean(phone) === Boolean(username)) {
+      throw new BadRequestException('请使用用户名或手机号其中一种方式登录');
+    }
+    if (username) return this.loginWithUsername(username, data, sessionMetadata);
+    return this.loginWithPhone(phone, data, sessionMetadata);
+  }
+
+  private async loginWithPhone(phoneInput: string, data: {
+    password: string;
+    captchaId?: string;
+    captchaCode?: string;
+    smsCode?: string;
+  }, sessionMetadata?: SessionMetadata) {
+    const phone = this.normalizePhone(phoneInput);
     // 分级挑战：先校验当前等级要求的验证，再做密码比较；成功后清零计数。
     const failureCount = this.currentLoginFailureCount(phone);
     if (failureCount >= LOGIN_CHALLENGE_SMS_THRESHOLD) {
@@ -521,10 +562,7 @@ export class CustomersService {
       this.verifyLoginCaptcha(data.captchaId, data.captchaCode);
     }
     const customer = await this.prisma.customer.findUnique({ where: { phone } });
-    const passwordOk = customer?.passwordHash
-      ? await bcrypt.compare(data.password || '', customer.passwordHash)
-      // 用户不存在时执行等耗时比较，消除时序侧信道
-      : await bcrypt.compare(data.password || '', DUMMY_BCRYPT_HASH).then(() => false);
+    const passwordOk = await this.passwordMatches(customer?.passwordHash, data.password);
     if (!customer || !customer.passwordHash || !passwordOk) {
       const count = this.recordLoginFailure(phone);
       if (count >= LOGIN_CHALLENGE_SMS_THRESHOLD) {
@@ -535,8 +573,53 @@ export class CustomersService {
       }
       throw new UnauthorizedException('手机号或密码不正确');
     }
+    return this.finishLogin(customer, phone, sessionMetadata);
+  }
+
+  private async loginWithUsername(usernameInput: string, data: {
+    password: string;
+    captchaId?: string;
+    captchaCode?: string;
+  }, sessionMetadata?: SessionMetadata) {
+    const username = this.normalizeUsername(usernameInput);
+    const failureKey = this.usernameFailureKey(username);
+    const failureCount = this.currentLoginFailureCount(failureKey);
+    if (failureCount >= LOGIN_CHALLENGE_CAPTCHA_THRESHOLD) {
+      if (!data.captchaId || !data.captchaCode) {
+        throw new BadRequestException('该用户名登录尝试较多，请输入图形验证码后重试');
+      }
+      this.verifyLoginCaptcha(data.captchaId, data.captchaCode);
+    }
+    const customer = await this.prisma.customer.findUnique({ where: { username } });
+    const passwordOk = await this.passwordMatches(customer?.passwordHash, data.password);
+    if (!customer || !customer.passwordHash || !passwordOk) {
+      const count = this.recordLoginFailure(failureKey);
+      if (count >= LOGIN_CHALLENGE_CAPTCHA_THRESHOLD) {
+        throw new UnauthorizedException('用户名或密码不正确；请完成图形验证后重试');
+      }
+      throw new UnauthorizedException('用户名或密码不正确');
+    }
+    return this.finishLogin(customer, failureKey, sessionMetadata);
+  }
+
+  private passwordMatches(passwordHash: string | null | undefined, password: string) {
+    if (!passwordHash) {
+      return bcrypt.compare(password || '', DUMMY_BCRYPT_HASH).then(() => false);
+    }
+    return bcrypt.compare(password || '', passwordHash);
+  }
+
+  private async finishLogin(customer: {
+    id: number;
+    phone: string;
+    name: string | null;
+    email: string | null;
+    authVersion: number;
+    status: string;
+    avatarStorageKey?: string | null;
+  }, failureKey: string, sessionMetadata?: SessionMetadata) {
     if (customer.status === 'DISABLED') throw new UnauthorizedException('该账户已被停用');
-    this.loginFailures.delete(phone);
+    this.loginFailures.delete(failureKey);
     const refreshSession = sessionMetadata
       ? await this.refreshSessions.issueCustomer(
           customer.id,
@@ -756,6 +839,10 @@ export class CustomersService {
     rawIdempotencyKey: string,
   ) {
     const customerId = principal.id;
+    const isDirectPurchase = data.purchaseSource === 'DIRECT';
+    if (isDirectPurchase && data.items.length !== 1) {
+      throw new BadRequestException('立即购买只能选择一个商品规格');
+    }
     const idempotency = this.buildCheckoutIdempotency(
       customerId,
       data,
@@ -770,35 +857,9 @@ export class CustomersService {
     const address = data.address?.trim();
     if (!address || address.length > 500) throw new BadRequestException('请提供有效的收货地址');
 
-    const cartRows = await this.prisma.cart.findMany({
-      where: { userId: customer.id },
-      select: { skuId: true, quantity: true },
-    });
-    const cartItemsBySku = new Map<number, number>();
-    for (const item of cartRows) {
-      cartItemsBySku.set(
-        item.skuId,
-        (cartItemsBySku.get(item.skuId) ?? 0) + item.quantity,
-      );
-    }
-    if (cartItemsBySku.size === 0) {
-      throw new ConflictException('购物车为空或已完成结算，请刷新后确认');
-    }
-    const submittedItemsBySku = new Map<number, number>();
-    for (const item of data.items) {
-      submittedItemsBySku.set(
-        item.skuId,
-        (submittedItemsBySku.get(item.skuId) ?? 0) + item.quantity,
-      );
-    }
-    if (
-      submittedItemsBySku.size !== cartItemsBySku.size ||
-      [...cartItemsBySku].some(
-        ([skuId, quantity]) => submittedItemsBySku.get(skuId) !== quantity,
-      )
-    ) {
-      throw new ConflictException('购物车已发生变化，请刷新后重新确认');
-    }
+    const items = isDirectPurchase
+      ? data.items
+      : await this.loadMatchingCheckoutCart(customer.id, data.items);
 
     try {
       const order = await this.ordersService.create({
@@ -807,9 +868,11 @@ export class CustomersService {
         customerPhone: customer.phone,
         customerEmail: data.customerEmail?.trim() || customer.email || undefined,
         address,
-        items: [...cartItemsBySku].map(([skuId, quantity]) => ({ skuId, quantity })),
+        items,
         couponId: data.couponId,
-        checkoutCustomer: customer,
+        checkoutCustomer: isDirectPurchase
+          ? { ...customer, purchaseSource: 'DIRECT' }
+          : customer,
         checkoutIdempotency: idempotency,
         operator: { type: 'CUSTOMER', id: customer.id, name: customer.name || customer.phone },
       });
@@ -836,6 +899,38 @@ export class CustomersService {
     }
   }
 
+  private async loadMatchingCheckoutCart(
+    customerId: number,
+    submittedItems: CheckoutRequest['items'],
+  ) {
+    const cartRows = await this.prisma.cart.findMany({
+      where: { userId: customerId },
+      select: { skuId: true, quantity: true },
+    });
+    const cartItemsBySku = this.checkoutQuantitiesBySku(cartRows);
+    if (cartItemsBySku.size === 0) {
+      throw new ConflictException('购物车为空或已完成结算，请刷新后确认');
+    }
+    const submittedItemsBySku = this.checkoutQuantitiesBySku(submittedItems);
+    if (
+      submittedItemsBySku.size !== cartItemsBySku.size ||
+      [...cartItemsBySku].some(
+        ([skuId, quantity]) => submittedItemsBySku.get(skuId) !== quantity,
+      )
+    ) {
+      throw new ConflictException('购物车已发生变化，请刷新后重新确认');
+    }
+    return [...cartItemsBySku].map(([skuId, quantity]) => ({ skuId, quantity }));
+  }
+
+  private checkoutQuantitiesBySku(items: CheckoutRequest['items']) {
+    const quantities = new Map<number, number>();
+    for (const item of items) {
+      quantities.set(item.skuId, (quantities.get(item.skuId) ?? 0) + item.quantity);
+    }
+    return quantities;
+  }
+
   private buildCheckoutIdempotency(
     customerId: number,
     data: CheckoutRequest,
@@ -843,10 +938,7 @@ export class CustomersService {
   ): CheckoutIdempotency {
     const key = parseIdempotencyKey(rawIdempotencyKey, true)!;
 
-    const quantities = new Map<number, number>();
-    for (const item of data.items) {
-      quantities.set(item.skuId, (quantities.get(item.skuId) ?? 0) + item.quantity);
-    }
+    const quantities = this.checkoutQuantitiesBySku(data.items);
     const canonicalRequest = {
       version: 1,
       customerId,
@@ -856,6 +948,8 @@ export class CustomersService {
       items: [...quantities]
         .sort(([left], [right]) => left - right)
         .map(([skuId, quantity]) => ({ skuId, quantity })),
+      // 省略字段的购物车请求保留原摘要，既有订单仍可幂等回放。
+      purchaseSource: data.purchaseSource,
     };
     return {
       keyHash: createHash('sha256')
@@ -1126,6 +1220,7 @@ export class CustomersService {
               code: true,
               shortDescription: true,
               price: true,
+              salesMode: true,
               status: true,
               visibility: true,
               deletedAt: true,
@@ -1143,6 +1238,7 @@ export class CustomersService {
         code: f.product.code,
         shortDescription: f.product.shortDescription,
         price: f.product.price,
+        salesMode: f.product.salesMode,
         image: f.product.primaryImage?.url || null,
         favoritedAt: f.createdAt,
       }));

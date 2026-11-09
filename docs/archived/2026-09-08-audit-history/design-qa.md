@@ -5,20 +5,20 @@
 ## Evidence
 
 - Source visual truth:
-  - `G:\网站搭建2\design-qa-assets\reference-vca-proportion-home.png`
-  - `G:\网站搭建2\design-qa-assets\reference-vca-proportion-drawer.png`
-  - `G:\网站搭建2\design-qa-assets\reference-vca-proportion-mobile.png`
+  - `G:\海川珠宝官方网站开发\design-qa-assets\reference-vca-proportion-home.png`
+  - `G:\海川珠宝官方网站开发\design-qa-assets\reference-vca-proportion-drawer.png`
+  - `G:\海川珠宝官方网站开发\design-qa-assets\reference-vca-proportion-mobile.png`
 - Browser-rendered implementation:
-  - `G:\网站搭建2\design-qa-assets\vca-inspired-home-final-1920x1080.jpg`
-  - `G:\网站搭建2\design-qa-assets\vca-inspired-drawer-final-1920x1080.jpg`
-  - `G:\网站搭建2\design-qa-assets\vca-inspired-drawer-mobile-final-390x844.jpg`
+  - `G:\海川珠宝官方网站开发\design-qa-assets\vca-inspired-home-final-1920x1080.jpg`
+  - `G:\海川珠宝官方网站开发\design-qa-assets\vca-inspired-drawer-final-1920x1080.jpg`
+  - `G:\海川珠宝官方网站开发\design-qa-assets\vca-inspired-drawer-mobile-final-390x844.jpg`
 - Full-view comparison evidence:
-  - `G:\网站搭建2\design-qa-assets\comparison-vca-home-final.jpg`
-  - `G:\网站搭建2\design-qa-assets\comparison-vca-drawer-final.jpg`
-  - `G:\网站搭建2\design-qa-assets\comparison-vca-mobile-final.jpg`
+  - `G:\海川珠宝官方网站开发\design-qa-assets\comparison-vca-home-final.jpg`
+  - `G:\海川珠宝官方网站开发\design-qa-assets\comparison-vca-drawer-final.jpg`
+  - `G:\海川珠宝官方网站开发\design-qa-assets\comparison-vca-mobile-final.jpg`
 - Focused comparison evidence:
-  - `G:\网站搭建2\design-qa-assets\comparison-vca-header-focus.jpg`
-  - `G:\网站搭建2\design-qa-assets\comparison-vca-drawer-focus.jpg`
+  - `G:\海川珠宝官方网站开发\design-qa-assets\comparison-vca-header-focus.jpg`
+  - `G:\海川珠宝官方网站开发\design-qa-assets\comparison-vca-drawer-focus.jpg`
 - Viewports: desktop `1920×1080`; mobile `390×844`.
 - Source pixels: desktop references `1672×941`; mobile reference `853×1844`.
 - Density normalization: all references were proportionally normalized to the CSS viewport dimensions. Browser implementation used `deviceScaleFactor: 1`. The in-app browser's 1920 viewport was captured as adjacent non-overlapping segments and stitched without rescaling; mobile was captured directly at `390×844`.
@@ -107,7 +107,7 @@ final result: passed
 **证据**
 
 - 源视觉：用户本会话提供的红框商品管理参考图；未复制工作区外附件。
-- 实现截图：`G:\网站搭建2\design-qa-product-manage-implementation.png`。
+- 实现截图：`G:\海川珠宝官方网站开发\design-qa-product-manage-implementation.png`。
 - 视口：`1806 × 943` CSS 像素，密度 1；比较范围为商品管理工作区，保留项目既有后台侧栏。
 
 **对照结果**
@@ -229,7 +229,7 @@ final result: passed
 
 **对照目标**
 
-- 视觉基准：`G:\网站搭建2\design-qa-assets\admin-nav-audit-current.png` 的真实后台基线，以及已确认的响应式比例规则；不再将生成效果图用作像素标尺。
+- 视觉基准：`G:\海川珠宝官方网站开发\design-qa-assets\admin-nav-audit-current.png` 的真实后台基线，以及已确认的响应式比例规则；不再将生成效果图用作像素标尺。
 - 实现截图：应用内浏览器在 `http://localhost:5173/admin/dashboard` 的 1280 × 720 实际渲染截图（本次会话内捕获）。
 - 状态：桌面端，`数据` 处于选中状态；右侧内容区保持数据概览。
 - 对照方式：已将视觉基准与实际浏览器截图置于同一对照画布核查；聚焦区域为左侧导航。
@@ -262,7 +262,7 @@ final result: passed
 ## 2026-08-08：后台一级导航验收
 
 - 源视觉：用户在会话中提供的窄幅侧栏参考图。
-- 实现截图：`G:\网站搭建2\design-qa-navigation.png`。
+- 实现截图：`G:\海川珠宝官方网站开发\design-qa-navigation.png`。
 - 验收视口：桌面端 1298 × 910；实现截图为侧栏聚焦裁切 164 × 672。
 - 状态：一级导航收起；参考图展示“店铺”选中，实施图展示“数据”选中，用于核对同一选中样式。
 
@@ -286,8 +286,8 @@ final result: passed
   - `C:\Users\Administrator\AppData\Local\Temp\codex-clipboard-14adc727-9853-4503-ad08-eca540f44c7f.png`
   - `C:\Users\Administrator\AppData\Local\Temp\codex-clipboard-afd7473d-da9a-4d0a-9cea-6e2f63d0c780.png`
 - Implementation route: `http://localhost:5174/admin/editor/about`，选中“作品陈列”。
-- Implementation screenshot: `G:\网站搭建2\design-qa-assets\product-row-flat-inspector-5174.png`.
-- Full-view comparison: `G:\网站搭建2\design-qa-assets\comparison-product-row-flat-inspector.png`.
+- Implementation screenshot: `G:\海川珠宝官方网站开发\design-qa-assets\product-row-flat-inspector-5174.png`.
+- Full-view comparison: `G:\海川珠宝官方网站开发\design-qa-assets\comparison-product-row-flat-inspector.png`.
 - Viewport: `898 × 778` CSS px；参考图以完整装修工作台为视觉方向，重点比较右侧编辑结构。
 - State: 已登录管理员，桌面端，“关于海川”页面中的作品陈列处于选中状态；未保存、未发布。
 

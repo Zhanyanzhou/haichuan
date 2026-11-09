@@ -318,6 +318,15 @@ export default function CategoryManage() {
             "分类封面已更新",
             "分类封面保存失败，请重试。",
           )}
+          onPublicationRulesChange={async (publicationRules, expectedPublicationRules) => {
+            const saved = await mutate(
+              () => categoryApi.update(editing.id, { publicationRules, expectedPublicationRules }),
+              "商品发布规则已保存",
+              "商品发布规则保存失败，请重试。",
+            );
+            if (!saved) await refresh("background");
+            return saved;
+          }}
           onMove={async (parentId) => {
             const moved = await mutate(
               () => categoryApi.update(editing.id, { parentId, sortOrder: nextSortOrder(tree, parentId) }),

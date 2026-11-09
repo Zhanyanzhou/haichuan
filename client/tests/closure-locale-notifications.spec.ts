@@ -200,7 +200,7 @@ test.describe("收敛闭环：公开语言与客户通知", () => {
     });
     await installCustomerSession(page, { id: 7, name: "测试会员" });
 
-    await page.goto("/customer");
+    await page.goto("/customer?section=notifications");
 
     const panel = page.getByRole("region", { name: "服务通知" });
     await expect(panel).toBeVisible();
@@ -351,7 +351,7 @@ test.describe("收敛闭环：公开语言与客户通知", () => {
     });
     await installCustomerSession(page, { id: 7, name: "测试会员" });
 
-    await page.goto("/customer");
+    await page.goto("/customer?section=notifications");
 
     const panel = page.getByRole("region", { name: "服务通知" });
     const preference = panel.getByRole("checkbox", { name: "订单创建邮件通知" });
@@ -438,14 +438,14 @@ test.describe("收敛闭环：公开语言与客户通知", () => {
       });
     });
     await installCustomerSession(page, { id: 7, name: "测试会员" });
-    await page.goto("/customer");
+    await page.goto("/customer?section=notifications");
 
     const preference = page.getByRole("checkbox", { name: "订单创建邮件通知" });
     await expect(preference).toBeChecked();
     sessionExpired = true;
     await preference.uncheck();
 
-    await expect(page.getByRole("heading", { level: 1, name: /您的珠宝档案/ })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: /欢迎回来/ })).toBeVisible();
     await expect(page.locator("#member-access-form")).toBeVisible();
     await expect(preference).toHaveCount(0);
     expect(sessionRequests).toContain("PATCH /api/customers/me/notification-preferences");
@@ -615,7 +615,7 @@ test.describe("收敛闭环：公开语言与客户通知", () => {
       });
       await installCustomerSession(page, { id: 7, name: "通知定位客户" });
 
-      await page.goto("/customer");
+      await page.goto("/customer?section=notifications");
       const notifications = page.getByRole("region", { name: "服务通知" });
       await expect(notifications.getByRole("link", { name: "查看对应订单 →" }).first())
         .toHaveAttribute("href", "/customer?section=orders&orderId=11");

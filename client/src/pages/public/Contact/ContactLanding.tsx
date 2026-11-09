@@ -8,6 +8,45 @@ import { useCustomerAuthStore } from "@/store/customerAuthStore";
 import { lookupPublicWork, type PublicWorkResolution } from "@/data/publicWorkLookup";
 import { normalizePublicProductReference } from "@/utils/publicProductPath";
 import { consultationDraftOwner, hasContactConsultationRecovery } from "@/utils/consultationJourneyState";
+
+const CONSULTATION_SUBJECTS = [
+  {
+    title: "珠宝甄选",
+    body: "说明佩戴场景与偏好，顾问据此了解您想看的作品。具体建议以实际沟通为准。",
+    type: "product",
+    action: "咨询选款",
+  },
+  {
+    title: "材质与品质",
+    body: "可询问贵金属、宝石与证书。本页不替代实物鉴定，具体说明以沟通为准。",
+    type: "product",
+    action: "咨询材质",
+  },
+  {
+    title: "专属定制",
+    body: "可提交设计、材质、宝石与尺寸意向。是否可制作，以实际评估为准。",
+    type: "custom",
+    action: "咨询定制",
+  },
+  {
+    title: "订单与配送",
+    body: "订单进度可在我的账户查看。配送问题也可写在下方咨询中，以对应订单为准。",
+    type: "order",
+    action: "咨询订单",
+  },
+  {
+    title: "保养与维修",
+    body: "可说明保养或维修需求。是否承接、费用与时间，以实际评估为准。",
+    type: "care",
+    action: "咨询保养",
+  },
+  {
+    title: "一对一沟通",
+    body: "微信和电话可直接联系。不方便时，留下需求并选择方便的回复方式。",
+    type: "",
+    action: "填写咨询",
+  },
+] as const;
 import { trackPageView } from "@/hooks/useAnalytics";
 import { clampProductTitle } from "@/utils/productTitleLength";
 import "./contact.css";
@@ -37,7 +76,7 @@ export default function ContactLanding({
 
   useEffect(() => {
     if (preview) return;
-    setPageMeta({ title: "联系海川 | 海川珠宝", description: "添加微信或致电联系海川，也可在本页提交选款、定制与到店咨询。" });
+    setPageMeta({ title: "联系海川 | 海川珠宝", description: "添加顾问微信或致电联系海川，也可提交选款、定制、订单与售后咨询。" });
     trackPageView();
     return () => clearPageMeta();
   }, [preview, setPageMeta, clearPageMeta]);
@@ -51,6 +90,13 @@ export default function ContactLanding({
   }, [reference, workRevision]);
 
   const product = work?.kind === "published" || work?.kind === "virtual" ? work.product : null;
+  const consultationHref = (type: string) => {
+    const next = new URLSearchParams(params);
+    next.delete("view");
+    if (type) next.set("type", type);
+    const search = next.toString();
+    return { pathname: "/contact", search: search ? `?${search}` : "", hash: "consultation" };
+  };
   const copyProduct = async (ownerDocument: Document) => {
     if (!product) return;
     try {
@@ -67,6 +113,15 @@ export default function ContactLanding({
     <div className="contact-direct">
       {!preview && !ownsPrimaryHeading ? <h1 className="sr-only">联系海川</h1> : null}
       <div className={`contact-direct__content${decorated ? " contact-direct__content--decorated" : ""}`}>
+        {decorated ? null : <header className="contact-masthead">
+          <h2 className="contact-masthead__title">客户服务</h2>
+          <p className="contact-masthead__lede">选款、定制、到店与售后，都可以直接联系海川顾问。微信与电话无需填写表单；书面需求留在本页咨询中。具体安排以实际沟通为准。</p>
+          <nav className="contact-masthead__paths" aria-label="本页联系路径">
+            <a href="#wechat-consult">微信咨询</a>
+            <a href="#phone-consult">电话咨询</a>
+            <a href="#consultation">填写咨询</a>
+          </nav>
+        </header>}
         {rawReference ? <section className="contact-direct__context" aria-label="咨询作品">
           <h2>关于这件作品</h2>
           {!reference ? <p role="alert">作品引用无效，请从作品详情重新进入。</p> : null}
@@ -82,6 +137,25 @@ export default function ContactLanding({
           {copyStatus ? <p role="status">{copyStatus}</p> : null}
         </section> : null}
         <PublicContactDetails resource={resource} presentation="direct" preview={preview} />
+        <section className="contact-services" aria-labelledby="contact-services-title">
+          <h2 id="contact-services-title">咨询事项</h2>
+          <p>选择一项后，对应的咨询类型会带到下方表单。是否能够安排，以实际沟通为准。</p>
+          <ul className="contact-services__list">
+            {CONSULTATION_SUBJECTS.map((subject) => (
+              <li key={subject.title}>
+                <h3>{subject.title}</h3>
+                <p>{subject.body}</p>
+                <Link
+                  to={subject.type ? consultationHref(subject.type) : { hash: "consultation" }}
+                  className="contact-direct__text-action"
+                  onClick={preview ? (event) => event.preventDefault() : undefined}
+                >
+                  {subject.action}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
         {recovery ? <aside className="contact-direct__recovery">
           <p>您有一份尚未完成或待确认的咨询。</p>
           <a href="#consultation" className="contact-direct__text-action">继续填写下方咨询</a>

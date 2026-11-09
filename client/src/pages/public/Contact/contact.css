@@ -1,7 +1,7 @@
 .contact-direct {
   background: var(--hc-canvas);
   color: var(--hc-ink);
-  font-family: "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: clamp(15px, 1.2vw, 16px);
   line-height: 1.75;
 }
@@ -37,6 +37,7 @@
   border-radius: 0 !important;
   padding-left: 0 !important;
   padding-right: 0 !important;
+  font-size: 16px !important;
 }
 
 .contact-form--quiet select {
@@ -90,9 +91,9 @@
 
 .contact-methods__grid {
   display: grid;
-  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
-  column-gap: clamp(40px, 5vw, 80px);
-  row-gap: 0;
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 0.85fr);
+  column-gap: clamp(32px, 4vw, 64px);
+  row-gap: 48px;
   align-items: start;
 }
 
@@ -118,13 +119,17 @@
 .contact-methods__qr {
   position: relative;
   display: grid;
-  place-items: start;
-  width: min(220px, 100%);
-  aspect-ratio: auto;
-  margin-block: 24px 16px;
-  padding: 0;
-  border: 0;
-  background: transparent;
+  place-items: center;
+  width: min(240px, 100%);
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--hc-line);
+  background: var(--hc-canvas);
+  justify-self: start;
+}
+
+.contact-methods__qr[aria-busy="true"] {
+  min-height: 240px;
 }
 
 .contact-methods__qr--empty {
@@ -145,7 +150,7 @@
 
 .contact-methods__qr img {
   display: block;
-  width: min(220px, 100%);
+  width: 100%;
   height: auto;
   object-fit: contain;
 }
@@ -223,6 +228,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 8px 24px;
+  margin-top: 20px;
 }
 
 .contact-direct__primary-action,
@@ -256,9 +262,12 @@
   text-underline-offset: 5px;
 }
 
-.contact-direct__primary-action:hover,
+.contact-direct__primary-action:hover {
+  background: #000000;
+}
+
 .contact-direct__text-action:hover {
-  opacity: 0.8;
+  opacity: 0.72;
 }
 
 .contact-direct a:focus-visible,
@@ -304,18 +313,458 @@
   color: var(--hc-text-secondary);
 }
 
+.contact-masthead {
+  max-width: 38em;
+  margin-bottom: clamp(56px, 8vw, 104px);
+  padding-bottom: clamp(28px, 4vw, 40px);
+  border-bottom: 1px solid var(--hc-line);
+}
+
+.contact-masthead__title {
+  margin: 0 0 20px;
+  font-family: "Noto Serif SC", "Songti SC", SimSun, serif;
+  font-size: clamp(28px, 4vw, 40px);
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+
+.contact-masthead__paths {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 32px;
+  margin-top: 28px;
+}
+
+.contact-masthead__paths a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--hc-ink);
+  text-decoration: underline;
+  text-underline-offset: 6px;
+}
+
+.contact-masthead__lede,
+.contact-services > p,
+.contact-wechat__hint,
+.contact-methods__note {
+  margin: 0;
+  color: var(--hc-text-secondary);
+}
+
+.contact-wechat {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+
+.contact-wechat__hint,
+.contact-methods__note {
+  margin-top: 12px;
+}
+
+.contact-methods__aside {
+  display: grid;
+  gap: 48px;
+}
+
+.contact-methods__letter {
+  max-width: 36em;
+  margin-top: clamp(48px, 6vw, 72px);
+  padding-top: 28px;
+  border-top: 1px solid var(--hc-line);
+}
+
+.contact-methods__letter h2 {
+  margin: 0 0 12px;
+  font-family: "Noto Serif SC", "Songti SC", SimSun, serif;
+  font-size: clamp(24px, 2.5vw, 32px);
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+.contact-methods__letter > p:not(.contact-methods__identity) {
+  margin: 0;
+  color: var(--hc-text-secondary);
+}
+
+.contact-services {
+  margin-top: clamp(64px, 8vw, 96px);
+}
+
+.contact-services h2,
+.contact-faq h2 {
+  margin: 0 0 12px;
+  font-family: "Noto Serif SC", "Songti SC", SimSun, serif;
+  font-size: clamp(24px, 2.5vw, 32px);
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+.contact-services > p {
+  max-width: 40em;
+}
+
+.contact-services__list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.contact-services__list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px 32px;
+  align-items: start;
+  padding: 28px 0;
+  border-top: 1px solid var(--hc-line);
+}
+
+.contact-services__list h3 {
+  margin: 0;
+  font-family: "Noto Serif SC", "Songti SC", SimSun, serif;
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.contact-services__list p {
+  margin: 0;
+  max-width: 42em;
+}
+
+.contact-services__list .contact-direct__text-action {
+  justify-self: start;
+}
+
+.contact-faq__list {
+  max-width: 40em;
+}
+
+.contact-faq__item {
+  border-top: 1px solid var(--hc-line);
+}
+
+.contact-faq__item:last-child {
+  border-bottom: 1px solid var(--hc-line);
+}
+
+.contact-faq__item summary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 56px;
+  padding: 12px 0;
+  font-size: 16px;
+  line-height: 1.75;
+  cursor: pointer;
+  list-style: none;
+}
+
+.contact-faq__item summary::-webkit-details-marker {
+  display: none;
+}
+
+.contact-faq__item summary::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  margin-left: auto;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+  flex: none;
+}
+
+.contact-faq__item[open] summary::after {
+  transform: translateY(2px) rotate(225deg);
+}
+
+.contact-faq__item summary:focus-visible {
+  outline: 2px solid var(--hc-ink);
+  outline-offset: 4px;
+}
+
+.contact-faq__item p {
+  margin: 0 0 20px;
+  max-width: 40em;
+  color: var(--hc-text-secondary);
+}
+
+.contact-assurances {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px 32px;
+  margin: 48px 0 0;
+  padding: 24px 0 0;
+  border-top: 1px solid var(--hc-line);
+  list-style: none;
+}
+
+.contact-assurances li {
+  margin: 0;
+  color: var(--hc-text-secondary);
+}
+
+.contact-direct,
+.contact-page {
+  caret-color: var(--hc-ink);
+}
+
+.contact-direct ::selection,
+.contact-page ::selection {
+  background: var(--hc-ink);
+  color: var(--hc-inverse-text);
+}
+
+.contact-form input::placeholder,
+.contact-form textarea::placeholder {
+  color: var(--hc-text-secondary);
+  opacity: 1;
+}
+
+.contact-form button[type="submit"]:focus-visible {
+  outline: 2px solid var(--hc-ink);
+  outline-offset: 3px;
+}
+
+.contact-page .contact-form input[type="checkbox"] {
+  width: 16px !important;
+  height: 16px !important;
+  min-height: 16px;
+  margin-top: 4px;
+  flex: none;
+  accent-color: var(--hc-ink);
+}
+
+#wechat-consult,
+#phone-consult,
+#consultation {
+  scroll-margin-top: calc(var(--site-header-height) + 16px);
+}
+
+.contact-request-masthead {
+  padding: calc(clamp(40px, 6vh, 72px) + var(--site-header-height, 88px)) 0 clamp(32px, 4vh, 48px);
+  border-bottom: 1px solid var(--hc-line);
+}
+
+.contact-request-masthead__inner {
+  width: min(1120px, calc(100% - 2 * clamp(24px, 5vw, 64px)));
+  margin-inline: auto;
+}
+
+.contact-request-masthead h1 {
+  margin: 0;
+  max-width: 12em;
+  font-family: "Noto Serif SC", "Songti SC", SimSun, serif;
+  font-size: clamp(28px, 4vw, 40px);
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: 0;
+  color: var(--hc-ink);
+}
+
+.contact-request-masthead__name {
+  margin: 16px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--hc-text-secondary);
+}
+
+.contact-request-masthead__inner > p:last-child {
+  max-width: 36em;
+  margin: 12px 0 0;
+  color: var(--hc-text-secondary);
+  line-height: 1.75;
+}
+
+.contact-privacy-note,
+.contact-product-context {
+  margin: 0 0 36px;
+  padding: 0 0 28px;
+  border-bottom: 1px solid var(--hc-line);
+  background: transparent;
+}
+
+.contact-form.contact-form--quiet {
+  max-width: 720px;
+  background: transparent;
+}
+
+.contact-form--quiet .contact-row,
+.contact-form--quiet fieldset > div {
+  margin-bottom: 28px !important;
+}
+
+.contact-form--quiet .contact-row {
+  gap: 28px 48px !important;
+}
+
+.contact-form p[id$="-error"] {
+  font-size: 13px !important;
+  line-height: 1.5;
+}
+
+.contact-page:not(.contact-page--embedded) .contact-form label {
+  margin-bottom: 8px !important;
+  font-size: 13px !important;
+  line-height: 1.5;
+}
+
+.contact-page .contact-form button[type="submit"] {
+  width: auto !important;
+  min-width: 168px;
+  min-height: 48px;
+  padding-inline: 28px;
+  letter-spacing: 0;
+}
+
+.contact-success {
+  background: var(--hc-canvas);
+  color: var(--hc-ink);
+  padding: calc(var(--site-header-height, 88px) + clamp(56px, 8vh, 96px)) clamp(24px, 5vw, 64px) clamp(72px, 10vh, 120px);
+}
+
+.contact-success--embedded {
+  padding: clamp(56px, 7vw, 88px) 0 clamp(48px, 6vw, 72px);
+}
+
+.contact-success__sheet {
+  width: min(640px, 100%);
+  margin-inline: auto;
+}
+
+.contact-success__title {
+  margin: 0;
+  font-family: "Noto Serif SC", "Songti SC", SimSun, serif;
+  font-size: clamp(28px, 4vw, 40px);
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: 0;
+  outline: none;
+}
+
+.contact-success__sheet > p {
+  max-width: 36em;
+  margin: 16px 0 0;
+  color: var(--hc-text-secondary);
+  line-height: 1.75;
+}
+
+.contact-success dl {
+  display: grid;
+  grid-template-columns: 6.5em minmax(0, 1fr);
+  gap: 14px 24px;
+  margin: 32px 0 0;
+  padding-top: 24px;
+  border-top: 1px solid var(--hc-line);
+}
+
+.contact-success dt {
+  color: var(--hc-text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.contact-success dd {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.contact-success__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 28px;
+  margin-top: 40px;
+}
+
+.contact-success__primary,
+.contact-success__secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  font-size: 16px;
+  line-height: 1.5;
+  text-decoration: none;
+}
+
+.contact-success__primary {
+  min-width: 168px;
+  padding: 12px 28px;
+  background: var(--hc-ink);
+  color: var(--hc-inverse-text);
+}
+
+.contact-success__primary:hover {
+  background: #000;
+}
+
+.contact-success__secondary {
+  color: var(--hc-ink);
+  text-decoration: underline;
+  text-underline-offset: 6px;
+}
+
+.contact-success a:focus-visible {
+  outline: 2px solid var(--hc-ink);
+  outline-offset: 4px;
+}
+
+@media (min-width: 768px) {
+  .contact-services__list li {
+    grid-template-columns: minmax(8.5em, 12em) minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .contact-services__list .contact-direct__text-action {
+    justify-self: end;
+  }
+
+  .contact-assurances {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 767px) {
+  .contact-page .contact-form button[type="submit"],
+  .contact-success__primary {
+    width: 100% !important;
+  }
+}
+
+@media (min-width: 1100px) {
+  .contact-wechat {
+    grid-template-columns: minmax(0, 1fr) 240px;
+    gap: 40px;
+  }
+}
+
 @media (max-width: 767px) {
   .contact-direct__content {
     padding-bottom: 40px;
   }
   .contact-methods__grid {
     grid-template-columns: minmax(0, 1fr);
-    gap: 32px;
+    gap: 48px;
   }
   .contact-methods__channel:first-child {
     padding-right: 0;
-    padding-bottom: 32px;
+    padding-bottom: 0;
     border-right: 0;
-    border-bottom: 1px solid var(--hc-line);
+    border-bottom: 0;
+  }
+  .contact-methods__qr {
+    justify-self: center;
+    margin-inline: auto;
+  }
+  .contact-direct__primary-action {
+    width: 100%;
   }
 }

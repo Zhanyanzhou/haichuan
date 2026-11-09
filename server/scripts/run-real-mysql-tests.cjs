@@ -127,6 +127,19 @@ const isolatedTestSuites = [
     }),
   },
   {
+    name: "customer-direct-checkout",
+    file: "src/modules/customers/customers.direct-checkout.real-http.mysql.spec.ts",
+    environment: ({ runId }) => ({
+      DIRECT_CHECKOUT_REAL_MYSQL_TEST: "1",
+      JWT_SECRET: `direct-checkout-${runId}-local-isolated-secret`,
+      RELEASE_PROFILE: "commerce",
+      CUSTOMER_COMMERCE_ENABLED: "true",
+      PAYMENT_GATEWAY_TRANSACTIONS_ENABLED: "false",
+      PAYMENT_GATEWAY_REFUNDS_ENABLED: "false",
+      NOTIFICATION_DELIVERY_ENABLED: "false",
+    }),
+  },
+  {
     name: "media-http",
     file: "src/modules/upload/upload.real-http.mysql.spec.ts",
     environment: ({ databaseUrl, port, runId }) => ({

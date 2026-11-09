@@ -10,8 +10,11 @@ import App from './App';
 // 品牌字体本地自托管（Fontsource，OFL 许可）：woff2 随构建产出为内容哈希资产，
 // 中文按 unicode-range 分片、浏览器只下载实际用到的分片；不再依赖境外字体域。
 // 拉丁字体（Cormorant/Inter）@font-face 体积极小（gzip ~1KB），静态进入口 CSS。
+// 页头字标另取 Bodoni Moda 的光学尺寸轴，才能在大写锁字上保持高对比衬线。
 import '@fontsource/cormorant-garamond/400.css';
 import '@fontsource/cormorant-garamond/500.css';
+import '@fontsource-variable/bodoni-moda/opsz.css';
+import '@fontsource-variable/bodoni-moda/opsz-italic.css';
 import '@fontsource/inter/300.css';
 import '@fontsource/inter/400.css';
 import '@fontsource/inter/500.css';

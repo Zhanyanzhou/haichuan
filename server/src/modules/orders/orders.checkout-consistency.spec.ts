@@ -45,10 +45,11 @@ test("客户结算缺少幂等上下文时在任何商品或事务访问前失�
   assert.equal(transactionCount, 0);
 });
 
-test("客户订单在 Serializable 事务内复核并清空同一购物车", async () => {
+async function checkCustomerOrderTransaction(purchaseSource?: "DIRECT") {
   let productWhere: Record<string, any> | undefined;
   let transactionProductWhere: Record<string, any> | undefined;
   let customerUpdated = false;
+  let cartRead = false;
   let cartCleared = false;
   let isolationLevel: unknown;
   let notificationOrderId: number | null = null;
@@ -59,7 +60,10 @@ test("客户订单在 Serializable 事务内复核并清空同一购物车", asy
         ? [{ id: 5, accountType: 'MEMBER', partnerStatus: 'NONE' }]
         : [{ max_sequence: 0n }],
     cart: {
-      findMany: async () => [{ skuId: 10, quantity: 1 }],
+      findMany: async () => {
+        cartRead = true;
+        return [{ skuId: 10, quantity: 1 }];
+      },
       deleteMany: async () => {
         cartCleared = true;
         return { count: 1 };
@@ -153,6 +157,7 @@ test("客户订单在 Serializable 事务内复核并清空同一购物车", asy
       authVersion: 1,
       accountType: "MEMBER",
       partnerStatus: "NONE",
+      purchaseSource,
     },
     checkoutIdempotency: {
       keyHash: "a".repeat(64),
@@ -165,10 +170,19 @@ test("客户订单在 Serializable 事务内复核并清空同一购物车", asy
   assert.deepEqual(transactionProductWhere?.visibility, { in: ["PUBLIC", "MEMBER"] });
   assert.equal(isolationLevel, Prisma.TransactionIsolationLevel.Serializable);
   assert.equal(customerUpdated, true);
-  assert.equal(cartCleared, true);
+  assert.equal(cartRead, purchaseSource !== "DIRECT");
+  assert.equal(cartCleared, purchaseSource !== "DIRECT");
   assert.equal(notificationOrderId, 1);
   assert.equal(createdOrderData?.checkoutIdempotencyKeyHash, "a".repeat(64));
   assert.equal(createdOrderData?.checkoutRequestHash, "b".repeat(64));
+}
+
+test("客户订单在 Serializable 事务内复核并清空同一购物车", async () => {
+  await checkCustomerOrderTransaction();
+});
+
+test("立即购买复用 Serializable 客户订单事务且不读取或清空购物车", async () => {
+  await checkCustomerOrderTransaction("DIRECT");
 });
 
 test('合作资格在 Guard 后暂停时结账事务使用锁内最新资格且零订单写入', async () => {

@@ -63,8 +63,8 @@ const antdTheme: ThemeConfig = {
 
     // 文字色 — 深炭灰体系
     colorText: ADMIN_COLORS.ink,
-    colorTextSecondary: ADMIN_COLORS.textStrong,
-    colorTextTertiary: ADMIN_COLORS.text,
+    colorTextSecondary: ADMIN_COLORS.text,
+    colorTextTertiary: ADMIN_COLORS.muted,
     colorTextQuaternary: ADMIN_COLORS.muted,
 
     // 背景色

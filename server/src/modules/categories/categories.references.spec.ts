@@ -1,4 +1,5 @@
 import { CategoriesService } from './categories.service';
+import { Prisma } from '@prisma/client';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -40,7 +41,7 @@ test('CategoriesService resolveReferences preserves order and reasons', async ()
 
 // 旧停用入口仍关联未软删除商品/子分类时拒绝，
 // 避免前台分类树隐藏该类目但商品在目录/搜索中仍可见可购的口径分裂。
-function createUpdatePrisma(counts: { children: number; products: number }) {
+function createUpdatePrisma(counts: { children: number; products: number }, publicationRules: string[] | null = null) {
   const calls: Array<Record<string, unknown>> = [];
   const prisma = {
       $transaction: async (callback: (tx: any) => unknown) => callback(prisma),
@@ -49,7 +50,7 @@ function createUpdatePrisma(counts: { children: number; products: number }) {
         findUnique: async (args: { include?: unknown }) => {
           if (!args?.include) {
             // update() 读取分类本体
-            return { id: 2, parentId: 1, slug: 'child', name: '子分类', level: 2, isActive: true, deletedAt: null };
+            return { id: 2, parentId: 1, slug: 'child', name: '子分类', level: 2, isActive: true, deletedAt: null, publicationRules };
           }
           // assertDeactivatable 的引用计数查询
           return { id: 2, _count: counts };
@@ -83,14 +84,65 @@ test('update 停用无关联时放行并写入停用状态', async () => {
   assert.equal((calls[0].data as { isActive?: boolean }).isActive, false);
 });
 
+test('保存商品发布规则支持组合和清空，不接受旧版本覆盖', async () => {
+  const { prisma, calls } = createUpdatePrisma({ children: 0, products: 3 }, ['RING_SIZE']);
+  const service = new CategoriesService(prisma);
+  const actor = { id: 7 };
+  await assert.rejects(
+    service.update(2, { publicationRules: ['PRECIOUS_METAL'], expectedPublicationRules: null }, actor),
+    /商品发布规则已被其他操作更新/,
+  );
+  assert.equal(calls.length, 0);
+  await service.update(2, {
+    publicationRules: ['CERTIFICATE', 'RING_SIZE'],
+    expectedPublicationRules: ['RING_SIZE'],
+  }, actor);
+  await service.update(2, { publicationRules: [], expectedPublicationRules: ['RING_SIZE'] }, actor);
+  assert.deepEqual(calls.map(({ data }) => (data as { publicationRules: unknown }).publicationRules), [
+    ['RING_SIZE', 'CERTIFICATE'],
+    Prisma.DbNull,
+  ]);
+});
+
+test('仅组织类目不能叠加资料规则，尺寸要求只能选一种', async () => {
+  const { prisma, calls } = createUpdatePrisma({ children: 0, products: 0 });
+  const service = new CategoriesService(prisma);
+  await assert.rejects(service.update(2, {
+    publicationRules: ['GROUP_ONLY', 'RING_SIZE'], expectedPublicationRules: null,
+  }, { id: 7 }), /仅用于组织的分类不能同时设置商品资料要求/);
+  await assert.rejects(service.update(2, {
+    publicationRules: ['RING_SIZE', 'CHAIN_LENGTH'], expectedPublicationRules: null,
+  }, { id: 7 }), /请选择一种适用的尺寸要求/);
+  assert.equal(calls.length, 0);
+});
+
 function createDeletePrisma(
-  categories: Array<{ id: number; parentId: number | null; slug?: string }>,
+  categories: Array<{
+    id: number; parentId: number | null; slug?: string;
+    isActive?: boolean; deletedAt?: Date; publicationRules?: string[];
+  }>,
   productCounts: Record<number, number> = {},
+  publishedCountsAtWrite: Record<number, number> = {},
 ) {
   const calls: string[] = [];
+  const requestedMoves: Array<Prisma.ProductWhereInput> = [];
   const prisma = {
-    $transaction: async (callback: (tx: any) => unknown) => callback(prisma),
-    $queryRaw: async () => [{ id: 7 }],
+    $transaction: async (callback: (tx: any) => unknown) => {
+      try {
+        return await callback(prisma);
+      } catch (error) {
+        calls.length = 0;
+        throw error;
+      }
+    },
+    $queryRaw: async (query: Prisma.Sql) => {
+      if (!query.sql.includes('FROM categories')) return [{ id: 7 }];
+      assert.match(query.sql, /FOR SHARE/);
+      const target = categories.find((category) => category.id === query.values[0]);
+      return target && target.isActive !== false && !target.deletedAt && target.slug !== query.values[1]
+        ? [{ publicationRules: target.publicationRules ?? null }]
+        : [];
+    },
     category: {
       findMany: async () => categories,
       upsert: async (args: { where: { slug: string }; create: { name: string; slug: string; isActive: boolean } }) => {
@@ -109,17 +161,17 @@ function createDeletePrisma(
       count: async (args: { where: { categoryId: { in: number[] } } }) =>
         args.where.categoryId.in.reduce((sum, id) => sum + (productCounts[id] ?? 0), 0),
       updateMany: async (args: {
-        where: { categoryId: { in: number[] } };
+        where: { categoryId: { in: number[] }; status?: { not: 'PUBLISHED' } };
         data: { categoryId: number };
       }) => {
-        // 没有状态或删除时间条件，回收站与已软删除记录使用同一归属更新。
-        assert.deepEqual(Object.keys(args.where), ['categoryId']);
+        requestedMoves.push(args.where);
         calls.push(`move:${args.where.categoryId.in.join(',')}->${args.data.categoryId}`);
-        return { count: args.where.categoryId.in.reduce((sum, id) => sum + (productCounts[id] ?? 0), 0) };
+        return { count: args.where.categoryId.in.reduce((sum, id) => sum + (productCounts[id] ?? 0)
+          - (args.where.status?.not === 'PUBLISHED' ? publishedCountsAtWrite[id] ?? 0 : 0), 0) };
       },
     },
   } as never;
-  return { calls, prisma };
+  return { calls, prisma, requestedMoves };
 }
 
 test('delete 空分类时物理删除并释放记录', async () => {
@@ -132,9 +184,10 @@ test('delete 空分类时物理删除并释放记录', async () => {
 });
 
 test('delete 无需指定去向，先把整棵子树的商品移到未分类，再删除分类', async () => {
-  const { prisma, calls } = createDeletePrisma(
+  const { prisma, calls, requestedMoves } = createDeletePrisma(
     [{ id: 4, parentId: null }, { id: 8, parentId: 4 }],
     { 4: 2, 8: 1 },
+    { 8: 1 },
   );
   const service = new CategoriesService(prisma);
 
@@ -142,6 +195,7 @@ test('delete 无需指定去向，先把整棵子树的商品移到未分类，�
     success: true, movedProductCount: 3, uncategorizedCategoryId: 99,
   });
   assert.deepEqual(calls, ['uncategorized', 'move:4,8->99', 'delete:8', 'delete:4']);
+  assert.deepEqual(requestedMoves, [{ categoryId: { in: [4, 8] } }]);
 });
 
 test('delete 不允许删除空的系统未分类', async () => {
@@ -182,6 +236,47 @@ test('delete 有商品时先改到范围外分类，再删除分类和下级款�
   await service.delete(4, { id: 7 } as never, 1);
 
   assert.deepEqual(calls, ['move:4,8->1', 'delete:8', 'delete:4']);
+});
+
+test('delete 拒绝把商品移入仅组织、停用或系统未分类', async () => {
+  const { prisma, calls, requestedMoves } = createDeletePrisma([
+    { id: 4, parentId: null },
+    { id: 1, parentId: null, publicationRules: ['GROUP_ONLY'] },
+    { id: 2, parentId: null, isActive: false },
+    { id: 99, parentId: null, slug: 'system-uncategorized' },
+  ], { 4: 1 });
+  const service = new CategoriesService(prisma);
+
+  await assert.rejects(service.delete(4, { id: 7 }, 1), /仅用于组织的分类不能接收商品/);
+  await assert.rejects(service.delete(4, { id: 7 }, 2), /请选择已启用且不在删除范围内的目标分类/);
+  await assert.rejects(service.delete(4, { id: 7 }, 99), /请选择已启用且不在删除范围内的目标分类/);
+  assert.deepEqual(requestedMoves, []);
+  assert.deepEqual(calls, []);
+});
+
+test('delete 可将未上架商品归入有发布规则的类目', async () => {
+  const { prisma, calls, requestedMoves } = createDeletePrisma([
+    { id: 4, parentId: null },
+    { id: 1, parentId: null, publicationRules: ['CERTIFICATE'] },
+  ], { 4: 2 });
+  const service = new CategoriesService(prisma);
+
+  assert.deepEqual(await service.delete(4, { id: 7 }, 1), { success: true, movedProductCount: 2 });
+  assert.deepEqual(requestedMoves, [{ categoryId: { in: [4] }, status: { not: 'PUBLISHED' } }]);
+  assert.deepEqual(calls, ['move:4->1', 'delete:4']);
+});
+
+test('delete 向有规则的类目归并时，写入阶段出现已上架商品则整体回滚', async () => {
+  const { prisma, calls, requestedMoves } = createDeletePrisma([
+    { id: 4, parentId: null },
+    { id: 8, parentId: 4 },
+    { id: 1, parentId: null, publicationRules: ['CERTIFICATE'] },
+  ], { 4: 1, 8: 2 }, { 8: 1 });
+  const service = new CategoriesService(prisma);
+
+  await assert.rejects(service.delete(4, { id: 7 }, 1), /仍有已上架商品/);
+  assert.deepEqual(requestedMoves, [{ categoryId: { in: [4, 8] }, status: { not: 'PUBLISHED' } }]);
+  assert.deepEqual(calls, []);
 });
 
 test('findTree 保留没有公开商品的启用分类', async () => {

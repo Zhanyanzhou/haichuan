@@ -1,0 +1,365 @@
+# 模板设计页面深度体验审查
+
+2026-11-04 · Asia/Shanghai
+
+**结论：当前模板设计尚不适合让普通运营人员独立、放心地精调双端。优先修复设备作用域、设定与渲染的一致性，再优化属性组织和视觉细节。**
+
+共15项：P1优先修复4项、P2影响效率与可靠性9项、P3信息组织2项。严重级别是本次体验审查的排序，不等同于生产事故等级。
+
+## 范围与方法
+
+用户电脑 Edge 的本地页面 http://127.0.0.1:5173/admin/editor/home。当前目录全部 3 个已发布模板：作品网格（首页精选作品，v13）、页面首屏（首页首屏，v18）、左右图文（首页高级定制，v12）。版本号为目录线上版本标签，本轮编辑器打开的是服务端已保存草稿，未验证草稿与该版本定义完全相同。
+
+主任务在现有 Edge 标签中操作、截图及读取呈现 DOM；独立子代理只读核对代码和规则。默认双端画布宽度为 1440 与 390，另外对左右图文检查了 320、767、768。观察宽度不是浏览器外窗或真实手机实机尺寸。本轮没有输入、拖动或提交模板设计值，只切换选择、预览、压力场景、折叠和观察宽度。
+
+未执行模板或页面保存、发布、上传、删除、版本恢复、数据库写入及 Git 写操作；未验证保存后的重开持久化、真实上传、前台已发布页面一致性、完整验收视口矩阵、键盘全流程或无障碍合规。截图来自本轮，不使用旧截图作证。工作区存在大量既有未提交修改；报告描述本次本地开发页面状态，不代表生产缺陷清单。
+
+## 实际检查路径
+
+1. **进入现有页面并核对保存状态**：可继续只读检查：原页面草稿已保存；未刷新现有标签。
+
+2. **检查目录全部三个模板及名称**：基本可用，但角色标题、实际模板名、版本状态需要更清楚区分。
+
+3. **检查桌面 1440 与手机 390 的编辑画布**：发现首屏和局部图片的设定比例与实测不一致；手机空文字缺少稳定选中反馈。
+
+4. **进入文字、图片、整体和页面开放范围属性**：控件较完整，但图片入口折叠不明显，作用域及全局开关混杂，面板过长。
+
+5. **切换短文、长文、媒体比例和必填缺失场景**：短场景保留显式空值，命名容易误导；网格长文第四段越出固定根画幅；无必填时有明确不适用反馈。
+
+6. **检查左右图文 320、767、768 宽度**：767/768切换内容端点有效；768的文字栏仍过窄，违反R-1的几何适配要求（F15）。320工具条明显拥挤；767下内容限宽约560符合几何适配方向。
+
+7. **检查目录放大预览与退出预览**：目录有真实内容/中性结构切换；跨设备退出压力预览会导致编辑设备与断点冲突，已重复复现。
+
+8. **退出预览并核对收尾状态**：已恢复首屏桌面 1440×810；草稿仍显示服务端已保存，保存按钮禁用。未保存或发布。
+
+## 逐项问题
+
+### F01 · P1 · 退出跨设备预览后，手机画布会使用桌面编辑规则
+
+证据级别：浏览器复现 + 静态原因
+
+**现场表现与复现：** 左右图文：手机390进入预览 → 在预览中切桌面1440 → 退出。稳定后画布恢复390×195，面包屑显示桌面端，属性头写当前查看手机端，内部又写当前设备桌面、正在修改桌面基础。桌面两列被塞进390宽，标题换行、按钮越出边界。作品网格也出现同类状态。
+
+**对操作人员的影响：** 操作者不能判断自己究竟在改哪一端。静态调用链表明属性写入目标会跟随残留桌面断点；这是误改桌面规则的真实风险，不只是标签不一致。本轮没有继续改值，未验证实际写入。
+
+**建议：** 把进入预览前的设备、编辑断点、观察宽度和选择一起保存并原子恢复；返回后所有标签、Renderer和写入目标必须一致。状态冲突时暂停设计写入并给恢复入口。
+
+**修复后的验收：** 分别从两端进入预览，切另一端后退出，反复三次；画布宽度、顶部设备、面包屑、属性标题、内部作用域一致。用独立测试模板验证修改和撤销只作用于预期端。
+
+![F01现场截图](G:/海川珠宝官方网站开发/docs/research/template-design-audit-2026-11-04/29-preview-exit-scope-conflict.png)
+
+代码与规则定位：
+
+- [client/src/page-builder/template-editor/TemplateWorkspace.tsx:118](G:/海川珠宝官方网站开发/client/src/page-builder/template-editor/TemplateWorkspace.tsx:118)
+- [client/src/page-builder/template-editor/TemplateWorkspace.tsx:559](G:/海川珠宝官方网站开发/client/src/page-builder/template-editor/TemplateWorkspace.tsx:559)
+- [client/src/page-builder/template-editor/templateEditorSession.ts:922](G:/海川珠宝官方网站开发/client/src/page-builder/template-editor/templateEditorSession.ts:922)
+- [client/src/page-builder/template-editor/DynamicTemplateCanvas.tsx:288](G:/海川珠宝官方网站开发/client/src/page-builder/template-editor/DynamicTemplateCanvas.tsx:288)
+- [client/src/page-builder/template-editor/TemplateNativeDesignControls.tsx:303](G:/海川珠宝官方网站开发/client/src/page-builder/template-editor/TemplateNativeDesignControls.tsx:303)
+
+### F02 · P1 · 首屏手机标9:16，实际却被渲染成横幅
+
+证据级别：浏览器复现 + 静态原因
+
+**现场表现与复现：** 页面首屏手机编辑态约390×235，稳定预览390×219；两处仍标标准比例9:16，整体属性写跟随桌面比例自动对换。390宽的9:16画幅应约693高。目录预览iframe保留约693高的竖框，编辑/压力预览呈现横图。
+
+**对操作人员的影响：** 运营会误以为手机竖版已经配置成功。现有横版图片含较多画面文字，缩到390×219后文字很小；本轮没有独立竖图，不能判断换竖图后的最终可读性。
+
+**建议：** 缺手机素材时明确提示沿用横图，而不是静默取消作者选定的整体画幅。统一目录、画布、预览的有效几何规则；区分设定比例、实测比例和素材比例，矛盾时就近说明原因。
+
+**修复后的验收：** 同一草稿分别在有/无手机独立图下检查390、767、768、1440；设定固定9:16时根高度应与有效规则吻合，例外必须显式可见，三处预览一致。
+
+![F02现场截图](G:/海川珠宝官方网站开发/docs/research/template-design-audit-2026-11-04/02-hero-mobile.png)
+
+![F02现场截图](G:/海川珠宝官方网站开发/docs/research/template-design-audit-2026-11-04/04-hero-mobile-preview.png)
+
+代码与规则定位：
+
+- [client/src/page-builder/template-definition/DynamicTemplateRenderer.tsx:2176](G:/海川珠宝官方网站开发/client/src/page-builder/template-definition/DynamicTemplateRenderer.tsx:2176)
+- [client/src/page-builder/template-definition/mobileWorkGrid.ts:242](G:/海川珠宝官方网站开发/client/src/page-builder/template-definition/mobileWorkGrid.ts:242)
+- [client/src/page-builder/template-editor/TemplateViewportFrame.tsx:457](G:/海川珠宝官方网站开发/client/src/page-builder/template-editor/TemplateViewportFrame.tsx:457)
+- [client/src/page-builder/template-editor/TemplateCatalogViewportPreview.tsx:394](G:/海川珠宝官方网站开发/client/src/page-builder/template-editor/TemplateCatalogViewportPreview.tsx:394)
+
+### F03 · P1 · 图片外框的设定比例没有成为实际外框比例
+
+证据级别：浏览器复现；局部原因待进一步定位
+
+**现场表现与复现：** 左右图文手机主图片：属性显示高度规则4:5、设定比例4:5，实测却390×260，面板自己也写实测3:2。首屏背景图片同样显示设定4:5、实测约390×219（16:9）。
+
+**对操作人员的影响：** 上传控件按4:5推荐素材，而画布实际按横框显示。操作者无法靠属性预知裁切，容易反复换图或修改比例。左右图文与首屏的覆盖原因不应未经核验就视为同一处。
+
+**建议：** 明确一个有效外框比例来源；当角色规则、素材回退或布局约束覆盖作者设置时，显示有效值、覆盖来源及可用修正入口，不让未生效的比例表现为已选成功。
+
+**修复后的验收：** 对独立测试图片槽逐一选择1:1、4:5、16:9，核对保存定义、实际边界、推荐素材比例与预览；切设备、撤销和重开后仍一致。
+
+![F03现场截图](G:/海川珠宝官方网站开发/docs/research/template-design-audit-2026-11-04/31-split-image-measured-ratio.png)
+
+代码与规则定位：
+
+- [docs/research/template-design-audit-2026-11-04/evidence-split-image.txt](G:/海川珠宝官方网站开发/docs/research/template-design-audit-2026-11-04/evidence-split-image.txt)
+- [client/src/page-builder/template-editor/TemplateNativeDesignControls.tsx:579](G:/海川珠宝官方网站开发/client/src/page-builder/template-editor/TemplateNativeDesignControls.tsx:579)
+- [client/src/page-builder/template-definition/mobileWorkGrid.ts:222](G:/海川珠宝官方网站开发/client/src/page-builder/template-definition/mobileWorkGrid.ts:222)
+
+### F04 · P1 · 编辑画布总用灰图，已有真实默认图也无法所见即所得
+
+证据级别：浏览器复现 + 静态原因
+
+**现场表现与复现：** 首屏选中背景图片时，右侧焦点面板显示已有真实摄影，中心画布仍是灰色示意。进入只读预览才看到真实图。
+
+**对操作人员的影响：** 改焦点、尺寸和图文位置时，主画布无法直接验证主体裁切和文字遮挡。属性小图、编辑灰图、预览真实图形成三套观察对象，增加来回切换成本。
+
+**建议：** 有合法默认图时在编辑画布显示该图；中性结构改成明确可切换的观察模式。选中框、焦点和预览必须使用同一有效图源及裁切规则。
+
+**修复后的验收：** 已有默认图的独立测试模板，在编辑态改焦点即可看到同一图片的裁切；进入/退出预览不得改变构图。无图时继续使用中性占位。
+
+![F04现场截图](G:/海川珠宝官方网站开发/docs/research/template-design-audit-2026-11-04/03-hero-mobile-image-properties.png)
+
+代码与规则定位：
+
+- [client/src/page-builder/template-editor/templatePreviewModel.ts:283](G:/海川珠宝官方网站开发/client/src/page-builder/template-editor/templatePreviewModel.ts:283)
+- [client/src/page-builder/template-editor/templatePreviewModel.ts:299](G:/海川珠宝官方网站开发/client/src/page-builder/template-editor/templatePreviewModel.ts:299)
+- [client/src/page-builder/template-editor/DynamicTemplateCanvas.tsx:305](G:/海川珠宝官方网站开发/client/src/page-builder/template-editor/DynamicTemplateCanvas.tsx:305)
+
+### F05 · P2 · 长文压力预览已有内容越界，界面没有指出具体越界对象
+
+证据级别：浏览器截图 + DOM实测
+
+**现场表现与复现：** 作品网格手机长文场景：根画幅390×780。四段文字各240字、实际高度210；起点y分别64、306、548、790，第四段底部到1000，整段在根780之外。画面只见前三段；界面仍只显示通用场景说明与人工确认已核对按钮。作品一默认字数计数还显示0/100000，页面最大字数未设置。
+
+**对操作人员的影响：** 运营能看出画面不对，却不知道丢了哪一段、应改字数还是高度，也可能把人工确认当成质量检查完成。此处只确认当前压力预览未就近报告；未验证独立发布门禁会否阻断。
+
+**建议：** 为可可靠测出的越界对象列出名称、所在设备和超出范围，并提供定位。给作品名称适用的文案限制或建议，让长文场景覆盖合理极值；人工核对与机器结果分列。
+
+**修复后的验收：** 本场景应明确提示第四个文字槽越界；点击提示能定位对象。调整限制或布局后四条均可见，不能靠裁掉内容制造通过。
+
+![F05现场截图](G:/海川珠宝官方网站开发/docs/research/template-design-audit-2026-11-04/32-grid-long-overflow-confirmed.png)
+
+代码与规则定位：
+
+- [docs/research/template-design-audit-2026-11-04/evidence-grid-long-text.json](G:/海川珠宝官方网站开发/docs/research/template-design-audit-2026-11-04/evidence-grid-long-text.json)
+- [docs/page-builder/template-creation-rules.md:402](G:/海川珠宝官方网站开发/docs/page-builder/template-creation-rules.md:402)
+
+### F06 · P2 · 设置默认图片按钮不会展开真正的图片编辑区
+
+证据级别：浏览器复现 + 静态原因
+
+**现场表现与复现：** 左右图文选中主图片后，属性默认图片区仅有标题和一句说明。点击浮条设置默认图片，只定位到同一折叠标题，没有出现上传、选择或链接。必须另点没有明显展开提示的标题，才显示上传区和图片链接。
+
+**对操作人员的影响：** 最常见的换图任务看起来像按钮无效；新操作人员可能认为图片功能没做完。功能实际存在，问题是入口没有完成它承诺的定位和展开。
+
+**建议：** 点击设置默认图片时展开对应编辑区并聚焦首个可操作控件；折叠标题显示明确箭头及当前素材状态。首次选择无图槽位时优先展开。
+
+**修复后的验收：** 无需寻找隐藏标题，只点一次设置默认图片，就能看到选图或链接入口；鼠标与键盘均可完成，且不改草稿。
+
+![F06现场截图](G:/海川珠宝官方网站开发/docs/research/template-design-audit-2026-11-04/19-default-image-no-control.png)
+
+![F06现场截图](G:/海川珠宝官方网站开发/docs/research/template-design-audit-2026-11-04/21-default-image-expanded.png)
+
+代码与规则定位：
+
+- [client/src/page-builder/template-editor/TemplateDefaultContentControls.tsx:94](G:/海川珠宝官方网站开发/client/src/page-builder/template-editor/TemplateDefaultContentControls.tsx:94)
+- [client/src/page-builder/template-editor/DynamicTemplateInspectorPanel.tsx:1227](G:/海川珠宝官方网站开发/client/src/page-builder/template-editor/DynamicTemplateInspectorPanel.tsx:1227)
+
+### F07 · P2 · 普通图片在手机页签换默认图，仍会写共享的桌面来源
+
+证据级别：静态确认；未进行换图写入验证
+
+**现场表现与复现：** 手机属性顶部写仅手机独立设置，但左右图文默认图区域只叫模板默认图片，没有说明图源共享。当前代码只有特定首屏9:16上传分支写mobileSrc，其余图片选择器读desktopSrc并写src。
+
+**对操作人员的影响：** 在普通图片上，用户可能以为只换手机图，实际改动共享或桌面图源。独立图源能力与顶部作用域的承诺不一致。本轮未换图，不能表述为已保存串端。
+
+**建议：** 先就近明确默认图源是两端共用还是手机独立；若现行产品允许独立图源，补齐普通图片的选择、继承与恢复链路，并与首屏保持一致。
+
+**修复后的验收：** 在独立测试模板换手机图，桌面来源保持不变；恢复继承可回到共享图。暂不支持独立图时，表单明确写两端共用且不受手机样式作用域影响。
+
+![F07现场截图](G:/海川珠宝官方网站开发/docs/research/template-design-audit-2026-11-04/21-default-image-expanded.png)
+
+代码与规则定位：
+
+- [client/src/page-builder/template-editor/TemplateDefaultContentControls.tsx:41](G:/海川珠宝官方网站开发/client/src/page-builder/template-editor/TemplateDefaultContentControls.tsx:41)
+- [client/src/page-builder/template-editor/TemplateDefaultContentControls.tsx:55](G:/海川珠宝官方网站开发/client/src/page-builder/template-editor/TemplateDefaultContentControls.tsx:55)
+- [client/src/page-builder/template-editor/TemplateDefaultContentControls.tsx:99](G:/海川珠宝官方网站开发/client/src/page-builder/template-editor/TemplateDefaultContentControls.tsx:99)
+- [client/src/page-builder/template-editor/TemplateDefaultContentControls.tsx:106](G:/海川珠宝官方网站开发/client/src/page-builder/template-editor/TemplateDefaultContentControls.tsx:106)
+
+### F08 · P2 · 仅手机作用域中混有会同时清除两端差异的总开关
+
+证据级别：浏览器确认控件及提示；未切换写入
+
+**现场表现与复现：** 手机整体属性顶部选仅手机独立设置，但标准双端画幅明确会同时设置两端并恢复手机继承；更下方标题与说明总开关说明会控制两端并清掉手机显隐差异。默认文案也两端共享，位于同一设计任务内。
+
+**对操作人员的影响：** 用户需要记住每个控件的例外。长面板滚动后顶部作用域不再可见，容易把全局操作当作仅手机操作。现有说明有帮助，但不足以形成稳定的操作边界。
+
+**建议：** 跨端操作单独放到两端共用区，并在控件旁持续标出影响；会清除覆盖时预览受影响项并可撤销。本端设计区只放本端适用控件。
+
+**修复后的验收：** 只读检查每个控件即可辨认本端/共享/重置两端；使用测试模板确认跨端批量动作有明确影响说明和完整撤销。
+
+![F08现场截图](G:/海川珠宝官方网站开发/docs/research/template-design-audit-2026-11-04/20-shared-controls-in-mobile-scope.png)
+
+![F08现场截图](G:/海川珠宝官方网站开发/docs/research/template-design-audit-2026-11-04/15-split-title-properties.png)
+
+代码与规则定位：
+
+- [docs/page-builder/template-creation-rules.md:354](G:/海川珠宝官方网站开发/docs/page-builder/template-creation-rules.md:354)
+- [client/src/page-builder/template-editor/TemplateNativeDesignControls.tsx](G:/海川珠宝官方网站开发/client/src/page-builder/template-editor/TemplateNativeDesignControls.tsx)
+
+### F09 · P2 · 短文字与中性内容的名称和实际预览规则不一致
+
+证据级别：浏览器复现 + 静态原因
+
+**现场表现与复现：** 作品网格编辑态四图都有占位；默认短场景却只剩作品四，图片和前三标题不显示。长文场景生成四段，媒体比例场景生成四图。左右图文目录真实内容预览则为空白，并提示素材未配置。
+
+**对操作人员的影响：** 用户容易把显式空值的保留误认成预览丢内容。这里不是保存数据丢失：代码刻意尊重显式清空，但场景名称和通用说明没有解释。单选场景也不足以直接完成有图加长文的联合验收。
+
+**建议：** 把当前默认内容（保留空值）与自动补全中性样例分成明确模式；说明缺失槽位及数量。保留显式清空语义，同时提供同时有图与长文的临时压力组合。
+
+**修复后的验收：** 同一空值模板在两种模式下有可解释结果；运营无需读代码就能说明为什么内容隐藏，并能在不改草稿的情况下检查完整构图。
+
+![F09现场截图](G:/海川珠宝官方网站开发/docs/research/template-design-audit-2026-11-04/07-grid-mobile-short-preview.png)
+
+![F09现场截图](G:/海川珠宝官方网站开发/docs/research/template-design-audit-2026-11-04/25-catalog-real-preview-empty.png)
+
+代码与规则定位：
+
+- [client/src/page-builder/template-editor/templateStressPreviewEngine.ts:188](G:/海川珠宝官方网站开发/client/src/page-builder/template-editor/templateStressPreviewEngine.ts:188)
+- [client/src/page-builder/template-editor/templateStressPreviewEngine.ts:197](G:/海川珠宝官方网站开发/client/src/page-builder/template-editor/templateStressPreviewEngine.ts:197)
+- [client/src/page-builder/template-editor/templateStressPreviewEngine.ts:220](G:/海川珠宝官方网站开发/client/src/page-builder/template-editor/templateStressPreviewEngine.ts:220)
+
+### F10 · P2 · 手机空文字槽不可见，图与名称的配对难以直接操作
+
+证据级别：浏览器复现 + 操作体验建议
+
+**现场表现与复现：** 作品网格手机编辑态主要看到2×2图片与较大留白，四个名称不在画布出现；从结构树选择作品一，尺寸读数为未呈现，默认文字为空、计数0/100000，部分固定尺寸操作因未呈现被禁用。结构树把4个图片和4个名称分开平铺。
+
+**对操作人员的影响：** 操作人员难以在画布上发现、选中和判断空名称应放在哪里；需要反复在树与属性之间猜测对应关系。图片两行之间约120设计像素的空段也缺少解释。空内容是合法状态，但编辑反馈不应跟着消失。
+
+**建议：** 为空文字提供仅编辑态可见的轻量槽位占位、选择框和添加文案入口。用作品卡语义或联动高亮说明图文对应关系；分别检查真实短名称下的行距，保留合理留白。
+
+**修复后的验收：** 四个空名称均能从画布直接选中，准确联动对应图片与属性；编辑提示不进入公开页。填入四个不同短名称后，手机顺序与配对明确。
+
+![F10现场截图](G:/海川珠宝官方网站开发/docs/research/template-design-audit-2026-11-04/05-grid-mobile.png)
+
+代码与规则定位：
+
+- [docs/page-builder/template-creation-rules.md:354](G:/海川珠宝官方网站开发/docs/page-builder/template-creation-rules.md:354)
+
+### F11 · P2 · 手机画布浮动工具条挤压、截字，遮住正在编辑的内容
+
+证据级别：浏览器复现
+
+**现场表现与复现：** 390宽选中主图或标题时，尺寸、默认内容、移动/排序、间距、删除挤在一行；按钮标题相互贴靠或截断。320宽更明显。标题工具条压在标签/标题附近，难以同时观察构图和操作。
+
+**对操作人员的影响：** 常用操作与删除操作难以辨认，增加误点与反复找入口成本。这是桌面后台在查看手机画布时的工具条问题，不是手机实机后台验收。
+
+**建议：** 工具条宽度独立于选中对象；只保留主要动作，其余放清晰菜单或第二行。避开内容区、保持完整操作名与可点击目标，删除与常用操作拉开。
+
+**修复后的验收：** 320、390画布在适应缩放与100%下，操作名完整、无遮挡、键盘可达；危险操作清楚且不与常用按钮粘连。
+
+![F11现场截图](G:/海川珠宝官方网站开发/docs/research/template-design-audit-2026-11-04/22-split-mobile-320.png)
+
+代码与规则定位：
+
+- [docs/UI_GUIDE.md:512](G:/海川珠宝官方网站开发/docs/UI_GUIDE.md:512)
+- [docs/UI_GUIDE.md:535](G:/海川珠宝官方网站开发/docs/UI_GUIDE.md:535)
+
+### F12 · P2 · 属性仍偏自由CSS数值，缺少符合品牌规范的常用选择
+
+证据级别：浏览器确认控件 + 静态能力；未验证保存门禁
+
+**现场表现与复现：** 界面提供字号及px/%/rem/vw/vh、十六进制颜色、四边自由数值间距和背景渐变；静态属性定义允许字重100～900。主标题实际字号24、字重400本身不构成错误，问题是控件允许的范围与现行语义字号、品牌色、间距令牌和标题字重规则未收敛。
+
+**对操作人员的影响：** 普通运营必须理解CSS并自行保证规范，容易做出两端不可控或品牌不一致的模板。控件能填不等于保存或发布会接受，本轮没有输入越界值验证。
+
+**建议：** 常用面板优先提供批准的字号角色、间距和颜色令牌；适用精确数值作为进阶项。历史非标准值保留并说明，不能静默重写；标题和正文使用不同允许范围。
+
+**修复后的验收：** 按角色提供可理解的常用选择；新建和精调无法无提示地产生违反现行不变量的值，旧值可核对、可撤销，合同和两端校验一致。
+
+![F12现场截图](G:/海川珠宝官方网站开发/docs/research/template-design-audit-2026-11-04/15-split-title-properties.png)
+
+代码与规则定位：
+
+- [client/src/page-builder/template-editor/TemplateNativeDesignControls.tsx:233](G:/海川珠宝官方网站开发/client/src/page-builder/template-editor/TemplateNativeDesignControls.tsx:233)
+- [client/src/page-builder/template-editor/TemplateDefaultContentControls.tsx:18](G:/海川珠宝官方网站开发/client/src/page-builder/template-editor/TemplateDefaultContentControls.tsx:18)
+- [docs/page-builder/section-template-standard.md:67](G:/海川珠宝官方网站开发/docs/page-builder/section-template-standard.md:67)
+- [docs/page-builder/section-template-standard.md:86](G:/海川珠宝官方网站开发/docs/page-builder/section-template-standard.md:86)
+
+### F13 · P3 · 目录显示角色名，属性显示实际模板名，身份不够连贯
+
+证据级别：浏览器确认 + 易用性建议
+
+**现场表现与复现：** 目录与顶部叫左右图文，属性名称及预览标题叫首页高级定制；作品网格对应首页精选作品，页面首屏对应首页首屏。角色和模板名称没有同时稳定呈现。
+
+**对操作人员的影响：** 同一角色以后有多个模板时，用户难以靠目录标题区分具体模板；也难确认重命名或报告中的模板究竟对应哪张卡。当前只有三个模板，尚未实际创建同角色重名样本。
+
+**建议：** 目录主标题使用模板名称，角色作为次级标签；顶部、画布、预览和属性保持同一身份，分别标清当前草稿与线上版本。
+
+**修复后的验收：** 无需进入属性即可准确说出模板名、角色与当前版本；独立测试目录加入同角色两项仍可区分。
+
+![F13现场截图](G:/海川珠宝官方网站开发/docs/research/template-design-audit-2026-11-04/15-split-title-properties.png)
+
+### F14 · P3 · 属性面板重复读数过多，常用内容与布局任务被拉成长表单
+
+证据级别：浏览器确认 + 信息层级建议
+
+**现场表现与复现：** 整体属性连续展示本节尺寸、高度规则、标准比例、设定比例、系统画幅、设计基准宽度，再到四边留白、背景、边框、排列、尺寸限制、双端显示及模板资料。多个恢复继承/来源标签重复出现；一些系统默认数值显示为空，实际有效值需另找读数。
+
+**对操作人员的影响：** 即便在约1912×901的桌面截图里，用户仍要多次滚动才能定位常见任务；很难同时核对当前设备、有效值和画布。空默认值与0也容易混淆。重复比例还会放大F02/F03中的矛盾。
+
+**建议：** 按对象和任务优先显示内容、尺寸、排列、常用样式；高级限制、背景边框与资料渐进展开。保留一处权威实测读数，并在每个可编辑值旁给有效值和来源；共享作用域持续可见。
+
+**修复后的验收：** 选中图片可立即找图源、外框、适配；选中文字可立即找文案和常用排版；根对象可立即找高度和排列。无需跨屏寻找作用域，默认空值与有效0含义不同且可辨。
+
+![F14现场截图](G:/海川珠宝官方网站开发/docs/research/template-design-audit-2026-11-04/20-shared-controls-in-mobile-scope.png)
+
+代码与规则定位：
+
+- [docs/page-builder/template-creation-rules.md:354](G:/海川珠宝官方网站开发/docs/page-builder/template-creation-rules.md:354)
+- [docs/UI_GUIDE.md:550](G:/海川珠宝官方网站开发/docs/UI_GUIDE.md:550)
+
+### F15 · P2 · 768像素平板仍强行分栏，右侧文字栏过窄
+
+证据级别：浏览器截图 + 现行规则差距
+
+**现场表现与复现：** 左右图文在767宽为上下排列，到768宽切桌面内容后立即改成左右排列：主图约399宽，右侧文字栏从100%截图估计约230～245宽。区块模板标准R-1要求文字栏不足正文24em（16px正文时384px）改上图下文。当前占位文字较短，尚能放下，不代表真实长正文可读。
+
+**对操作人员的影响：** 内容端点切换有效，但几何没有按可用文字栏宽适配。平板右栏过窄，换成真实标题和正文后会明显增加换行与纵向拥挤；本轮没有改写文案做真实长内容验证。
+
+**建议：** 保留768以上的桌面内容来源，单独按实际文字栏宽决定上下或左右排列，不用内容端点直接代替布局适配。沿用R-1，不新增第三套内容。
+
+**修复后的验收：** 在768、834、900、1024宽分别使用正文极值和长标题，文字栏不足24em时转为上图下文；图文身份与桌面内容不变，图文顺序和高度可读。
+
+![F15现场截图](G:/海川珠宝官方网站开发/docs/research/template-design-audit-2026-11-04/24-split-width-768.png)
+
+代码与规则定位：
+
+- [docs/page-builder/section-template-standard.md:759](G:/海川珠宝官方网站开发/docs/page-builder/section-template-standard.md:759)
+
+## 保留的有效设计
+
+- 现有页面装修和模板设计边界有文字说明，草稿/发布状态与保存按钮可辨。
+- 页面开放范围提供字段身份、内容规则、字数限制及设计授权；必填条件冲突时有禁用原因和组合操作入口。
+- 图片焦点提供九宫格、键盘步进说明及精确百分比，能力方向合理；主要欠缺是与中心真实画面的一致反馈。
+- 无必填槽位时，必填缺失压力场景明确说明不适用，没有假装已通过。
+- 目录放大预览明确只读，并有真实内容/中性结构切换；应沿用这套区分统一主画布。
+
+## 未当作确定缺陷的现象
+
+- 首屏文字和CTA在两端隐藏是当前模板设置，不能据此认定编辑器丢字。
+- 默认文案显式为空不等于数据丢失；公开页不自动采用模板默认素材也不能直接当作缺陷。
+- 左右图文767宽下内容收窄、768开始使用桌面内容属于现行双端端点及几何策略，单凭形状变化不判错。
+- 灰色占位本身适用于无素材状态；F04针对已有合法真实默认图仍被强制替换。
+- 目录显示已发布并不证明当前草稿通过全部视觉验收，也不证明本轮预览就是线上版本。
+- 标签页标题保留页面加载异常，日志含检查前的热更新错误；本轮没有重新触发该崩溃，未将旧日志计入新增确定缺陷。
+
+## 推荐修复顺序
+
+- 第一批：F01设备与断点恢复、F02/F03有效几何、F04真实图所见即所得。先让每一个操作结果可相信。
+- 第二批：F05质量反馈、F06换图入口、F07/F08共享和独立作用域。让日常任务可完成且不误改。
+- 第三批：F15平板分栏适配，F09/F10预览样例和空内容、F11工具条，再收敛F12令牌与F13/F14信息层级。
+- 逐批复验三个现有模板，使用独立测试副本做输入、撤销、保存重开及真实页面实例消费验证；不能只凭构建或控件存在宣布闭环。
+
+## 证据与边界
+
+完整离线图文版：[report.html](G:/海川珠宝官方网站开发/docs/research/template-design-audit-2026-11-04/report.html)。问题结构化数据：[findings.json](G:/海川珠宝官方网站开发/docs/research/template-design-audit-2026-11-04/findings.json)。正文引用15张本轮原始截图；目录另保留过程截图。
+
+本报告不宣称已穷尽所有输入组合。原有模板、草稿和未提交代码均保留。结束时回到页面首屏桌面1440×810，服务端草稿已保存，保存模板按钮禁用。没有进行任何业务持久化或发布。
+
+静态源代码定位按检查时工作区解释；开发服务器存在既有热更新历史，后续修改可能使行号移动。P1条目以本轮实际操作和截图为主要证据。

@@ -29,4 +29,4 @@ for (const template of contract.templates) {
 assert.match(runtime, /MatureContentTemplateRenderer/, "公开 Renderer 未接入首屏模板渲染器");
 assert.match(frame, /data-content-template-renderer="real"/, "统一合同根框架缺少真实 Renderer 标记");
 const activeCount = contract.templates.filter((template) => template.implementationStatus === "active").length;
-console.log(`内容模板根构图与 Renderer 一致：目录 ${activeCount} 个。`);
+console.log(`内容模板静态注册与合同字段检查通过：活动目录 ${activeCount} 个；未验证实际 DOM、布局几何或视觉一致性。`);

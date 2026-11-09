@@ -10,30 +10,43 @@ test.describe("商品编辑器关键回归", () => {
       localStorage.removeItem("haichuan.mock-products");
     });
     await page.goto("/admin/products/new");
-    await expect(page.getByRole("heading", { name: "图文描述" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "图文详情" })).toBeVisible();
   });
 
   test("新建状态、核心字段过滤、预览和物流条件一致", async ({ page }) => {
     await expect(page.getByRole("button", { name: "返回商品列表" })).toBeVisible();
     await expect(page.getByText("尚未保存", { exact: true })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "品牌" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "更正款号" })).toHaveCount(0);
     await expect(page.getByRole("radio", { name: "二手" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "批量导入" })).toHaveCount(0);
     await expect(page.locator(".ant-form-item").filter({ hasText: "可见范围" }).locator(".ant-select-selection-item")).toHaveText("全部人可见");
-    await expect(page.getByRole("button", { name: "添加 SKU" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "预约定制" })).toBeChecked();
+    await expect(page.getByRole("spinbutton", { name: "定制参考起价" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "添加 SKU" })).toHaveCount(0);
+    await page.getByRole("radio", { name: "直接销售" }).click();
     await expect(page.getByRole("radio", { name: "直接销售" })).toBeChecked();
+    await expect(page.getByRole("spinbutton", { name: "成交价" })).toBeVisible();
+    await expect(page.getByRole("spinbutton", { name: "可售数量" })).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "运费模板" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "添加 SKU" })).toBeVisible();
+    await page.getByRole("radio", { name: "预约定制" }).click();
+    await expect(page.getByRole("button", { name: "添加 SKU" })).toHaveCount(0);
     await expect(page.getByRole("radio", { name: "立刻上架" })).toBeChecked();
     await expect(page.getByText("配送方式", { exact: true })).toBeVisible();
     await expect(page.getByRole("checkbox", { name: "物流配送" })).toBeVisible();
-    await expect(page.getByText("都可以不填")).toBeVisible();
+    await expect(page.getByText("按当前类目和销售方式核对必填项")).toBeVisible();
     await expect(page.getByRole("button", { name: "把当前设置存成框架" })).toBeVisible();
 
     const primaryTextColor = await page.locator(".pro-editor__footer .ant-btn-primary > span").evaluate((element) => getComputedStyle(element).color);
     expect(primaryTextColor).toBe("rgb(255, 255, 255)");
 
     await page.getByRole("button", { name: "基础信息" }).click();
+    await expect(page.getByText("实物主图")).toBeVisible();
+    await page.getByRole("button", { name: "珠宝参数" }).click();
     await expect(page.getByRole("spinbutton", { name: "金重（g）" })).toBeVisible();
-    await expect(page.getByRole("textbox", { name: "证书编号" })).toBeVisible();
+    await expect(page.getByRole("checkbox", { name: "这件商品随附鉴定证书" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "添加证书" })).toBeDisabled();
 
     await page.getByRole("button", { name: "预览" }).click();
     await expect(page.getByRole("dialog", { name: "商品预览" })).toBeVisible();
@@ -79,8 +92,8 @@ test.describe("商品编辑器关键回归", () => {
   });
 
   test("桌面金额输入宽度和平板重排可用", async ({ page }) => {
-    await page.getByRole("button", { name: "基础信息" }).click();
-    const priceWidth = await page.locator("#basic").getByRole("spinbutton", { name: "金重（g）" }).evaluate((element) => element.closest(".ant-input-number-affix-wrapper")?.getBoundingClientRect().width || 0);
+    await page.getByRole("button", { name: "珠宝参数" }).click();
+    const priceWidth = await page.locator("#facts").getByRole("spinbutton", { name: "金重（g）" }).evaluate((element) => element.closest(".ant-input-number-affix-wrapper")?.getBoundingClientRect().width || 0);
     expect(priceWidth).toBeGreaterThanOrEqual(300);
 
     await page.setViewportSize({ width: 720, height: 720 });
@@ -127,5 +140,63 @@ test.describe("商品编辑器关键回归", () => {
 
     const storedStatus = await page.evaluate(() => JSON.parse(localStorage.getItem("haichuan.mock-products") || "[]")[0]?.status);
     expect(storedStatus).toBe("PUBLISHED");
+  });
+
+  test("已保存商品可以更正款号，旧款号仍打开这件商品", async ({ page }) => {
+    const publishedProduct = {
+      id: 1,
+      code: "PUBLISHED-001",
+      name: "已上架测试商品",
+      summary: "用于回归验证的已上架珠宝商品",
+      shortDescription: "用于回归验证的已上架珠宝商品",
+      description: "用于验证已发布商品保存时保持发布状态，并满足当前公开商品资料完整度合同。",
+      categoryId: 53,
+      materialType: "GOLD_999",
+      price: 5280,
+      status: "PUBLISHED",
+      visibility: "PUBLIC",
+      salesMode: "DISPLAY_ONLY",
+      purchaseRegion: "MAINLAND",
+      publishMode: "IMMEDIATE",
+      fulfillmentType: "IN_STOCK",
+      dispatchTime: "WITHIN_48_HOURS",
+      deliveryMethods: ["EXPRESS"],
+      shippingTemplateId: 1,
+      images: [{ id: 101, productId: 1, url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'/%3E", type: "FRONT", sortOrder: 0, isVideo: false }],
+      skus: [{ id: 201, productId: 1, skuCode: "PUBLISHED-001-DEFAULT", material: "GOLD_999", price: 5280, stock: 1, safetyStock: 0, isActive: true }],
+      detailContent: [],
+      createdAt: new Date().toISOString(),
+    };
+    await page.addInitScript((product) => {
+      localStorage.setItem("haichuan.mock-products", JSON.stringify([product]));
+    }, publishedProduct);
+    await page.goto("/admin/products/1/edit");
+    await expect(page.getByRole("textbox", { name: "款号" })).toBeDisabled();
+    await expect(page.getByRole("textbox", { name: "款号" })).toHaveValue("PUBLISHED-001");
+    await page.getByRole("button", { name: "更正款号" }).click();
+    await expect(page.getByText("原来的地址仍会打开这件商品")).toBeVisible();
+    await page.getByRole("dialog", { name: "更正款号" }).getByRole("textbox").fill("PUBLISHED-002");
+    await page.getByRole("button", { name: "确认更正" }).click();
+    await expect(page.getByText("款号已更正")).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "款号" })).toHaveValue("PUBLISHED-002");
+    const stored = await page.evaluate(() => ({
+      code: JSON.parse(localStorage.getItem("haichuan.mock-products") || "[]")[0]?.code,
+      skuCode: JSON.parse(localStorage.getItem("haichuan.mock-products") || "[]")[0]?.skus?.[0]?.skuCode,
+      redirect: JSON.parse(localStorage.getItem("haichuan.mock-product-code-redirects") || "{}"),
+    }));
+    expect(stored.code).toBe("PUBLISHED-002");
+    expect(stored.skuCode).toBe("PUBLISHED-001-DEFAULT");
+    expect(stored.redirect["PUBLISHED-001"]).toEqual({ productId: 1, code: "PUBLISHED-002" });
+
+    await page.addInitScript((snapshot) => {
+      localStorage.setItem("haichuan.mock-products", snapshot.products);
+      localStorage.setItem("haichuan.mock-product-code-redirects", snapshot.redirects);
+    }, {
+      products: JSON.stringify([{ ...publishedProduct, code: "PUBLISHED-002" }]),
+      redirects: JSON.stringify({ "PUBLISHED-001": { productId: 1, code: "PUBLISHED-002" } }),
+    });
+    await page.goto("/products/PUBLISHED-001");
+    await expect(page).toHaveURL(/\/products\/PUBLISHED-002$/);
+    await expect(page.getByRole("heading", { name: "已上架测试商品" })).toBeVisible();
   });
 });

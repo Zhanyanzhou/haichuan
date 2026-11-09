@@ -185,3 +185,29 @@ test('定制起价通过商品条件更新保存，允许归零且不改SKU价�
   await service.update(1, { priceMin: null }, adminActor);
   assert.equal(updateManyCalls[2].data.priceMin, null);
 });
+
+test('合并保存 SKU 拒绝重复标识、空列表及隐式转换的交易数值', async () => {
+  const pipe = new ValidationPipe({ whitelist: true, transform: true, transformOptions: { enableImplicitConversion: true } });
+  const metadata = { type: 'body' as const, metatype: UpdateProductDto };
+  const priceEdit = { id: 4, expectedPrice: 100, price: 120, size: '' };
+  const dto = await pipe.transform({ editorSkuUpdates: [{ ...priceEdit, isActive: false }] }, metadata);
+  assert.deepEqual({ ...dto.editorSkuUpdates[0] }, priceEdit);
+
+  for (const changes of [
+    { editorSkuUpdates: [] },
+    { editorSkuUpdates: null },
+    { editorSkuUpdates: [priceEdit, priceEdit] },
+    { editorSkuUpdates: [{ ...priceEdit, id: '4' }] },
+    { editorSkuUpdates: [{ ...priceEdit, expectedPrice: true }] },
+    { editorSkuUpdates: [{ ...priceEdit, price: '120' }] },
+    { editorSkuUpdates: [{ ...priceEdit, price: null }] },
+    { editorSkuUpdates: [{ ...priceEdit, price: 1e-8 }] },
+    { editorSkuUpdates: [{ ...priceEdit, material: null }] },
+    { editorSkuUpdates: [{ ...priceEdit, goldWeight: -1 }] },
+    { editorDefaultSku: { skuCode: 'HC-DEFAULT', price: true } },
+    { editorDefaultSku: { skuCode: 'HC-DEFAULT', price: 0 } },
+    { editorDefaultSku: { skuCode: '   ', price: 120 } },
+  ]) {
+    await assert.rejects(pipe.transform(changes, metadata), BadRequestException);
+  }
+});

@@ -6,6 +6,10 @@ import { defineConfig, devices } from "@playwright/test";
  */
 const port = Number(process.env.STORYBOOK_PORT || 6010);
 const baseURL = process.env.STORYBOOK_BASE_URL || `http://127.0.0.1:${port}`;
+const candidates = process.env.STORYBOOK_SCREENSHOT_CANDIDATES === "1";
+if (candidates && process.env.CI) {
+  throw new Error("CI 不得生成或更新待审视觉基线；请运行状态检查或已认可基线比较。");
+}
 
 const desktop = { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } };
 const mobile = { ...devices["Desktop Chrome"], viewport: { width: 390, height: 844 } };
@@ -18,7 +22,11 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   reporter: [["html", { open: "never", outputFolder: "playwright-report/storybook" }]],
-  snapshotPathTemplate: "{testDir}/__screenshots__/{testFilePath}/{arg}{ext}",
+  snapshotPathTemplate: candidates
+    ? "{testDir}/../../test-results/storybook-candidates/{platform}/{projectName}/{arg}{ext}"
+    : "{testDir}/__screenshots__/{platform}/{projectName}/{arg}{ext}",
+  // 缺失基线必须失败，不能把本次渲染自动接受为正确结果。
+  updateSnapshots: candidates ? "all" : "none",
   expect: { toHaveScreenshot: { maxDiffPixelRatio: 0.01 } },
   use: {
     baseURL,
@@ -35,7 +43,7 @@ export default defineConfig({
     : {
         command: `npm run storybook -- --host 127.0.0.1 --port ${port} --no-open`,
         url: `${baseURL}/index.json`,
-        reuseExistingServer: !process.env.CI,
+        reuseExistingServer: false,
         timeout: 180_000,
       },
 });

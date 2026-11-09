@@ -20,9 +20,14 @@ function add(parentId: string, type: Parameters<typeof addDynamicTemplateNode>[2
 }
 const grid = add(definition.rootNodeId, "Grid");
 const image = add(grid, "ImageSlot");
+// 列数只对多个可见子项有意义；三张图让双端 3 列/1 列产生可复制的布局差异。
+add(grid, "ImageSlot");
+add(grid, "ImageSlot");
 const container = add(definition.rootNodeId, "Container");
 const heading = add(container, "HeadingSlot");
 const locked = add(definition.rootNodeId, "Grid");
+// 锁定对象也必须有真实可复制属性，避免空网格让“保留锁定对象”断言平凡通过。
+for (let index = 0; index < 3; index += 1) add(locked, "ImageSlot");
 const slotId = definition.nodes[heading].slotId!;
 for (const [bp, columns, gap, font] of [["desktop", 3, 24, 32], ["mobile", 1, 6, 18]] as const) {
   setTemplateNodeRule(definition, grid, bp, "columns", Array.from({ length: columns }, () => 1));

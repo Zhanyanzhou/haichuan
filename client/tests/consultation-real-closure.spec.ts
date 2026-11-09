@@ -76,6 +76,7 @@ function isApiResponse(response: { url(): string; request(): { method(): string 
 async function loginCustomer(page: Page) {
   await page.goto("/customer");
   await page.getByRole("button", { name: "会员登录", exact: true }).click();
+  await page.getByRole("tab", { name: "手机号", exact: true }).click();
   await page.getByLabel("手机号", { exact: true }).fill(realEnvironment.customerPhone);
   await page.getByLabel("密码", { exact: true }).fill(realEnvironment.password);
   await page.getByRole("button", { name: "登录我的账户", exact: true }).click();

@@ -1,6 +1,9 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayUnique,
+  IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -10,6 +13,10 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import {
+  CATEGORY_PUBLICATION_RULES,
+  type CategoryPublicationRule,
+} from '../category-publication-rules';
 
 const trimString = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
@@ -55,6 +62,12 @@ class CategoryWritableFieldsDto {
   @IsString({ message: '分类图片必须是字符串' })
   @MaxLength(500, { message: '分类图片不能超过 500 个字符' })
   coverImage?: string;
+
+  @IsOptional()
+  @IsArray({ message: '商品发布规则必须是列表' })
+  @ArrayUnique({ message: '商品发布规则不能重复' })
+  @IsIn(CATEGORY_PUBLICATION_RULES, { each: true, message: '商品发布规则中有不支持的选项' })
+  publicationRules?: CategoryPublicationRule[] | null;
 }
 
 export class CreateCategoryDto extends CategoryWritableFieldsDto {
@@ -75,6 +88,12 @@ export class CreateCategoryDto extends CategoryWritableFieldsDto {
 }
 
 export class UpdateCategoryDto extends CategoryWritableFieldsDto {
+  @IsOptional()
+  @IsArray({ message: '原商品发布规则必须是列表' })
+  @ArrayUnique({ message: '原商品发布规则不能重复' })
+  @IsIn(CATEGORY_PUBLICATION_RULES, { each: true, message: '原商品发布规则中有不支持的选项' })
+  expectedPublicationRules?: CategoryPublicationRule[] | null;
+
   @IsOptional()
   @Transform(trimString)
   @IsString({ message: '分类名称必须是字符串' })

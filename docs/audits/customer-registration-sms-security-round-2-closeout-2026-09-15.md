@@ -14,7 +14,7 @@
 
 ## 2. 验证版本与工作区边界
 
-- 目录：`G:\网站搭建2`
+- 目录：`G:\海川珠宝官方网站开发`
 - 分支：`codex/release-curation-20260814`
 - HEAD：`cd27a5dd9f064165a0bcc029492391d7f80036d6`
 - 上游：`origin/codex/release-curation-20260814`，领先 2、落后 0

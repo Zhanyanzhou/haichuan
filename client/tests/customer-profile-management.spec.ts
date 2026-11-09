@@ -500,6 +500,7 @@ test.describe('客户个人资料管理', () => {
       item.path === '/api/customers/session/logout' && item.method === 'POST'
     )).toHaveLength(1);
 
+    await page.getByRole('tab', { name: '手机号', exact: true }).click();
     await page.getByLabel('手机号').fill('13900139000');
     await page.getByLabel('密码').fill('NewSession1');
     await page.getByRole('button', { name: '登录我的账户' }).click();
@@ -515,7 +516,7 @@ test.describe('客户个人资料管理', () => {
   test('称呼只能独立修改，头像上传使用专用受保护接口', async ({ page }) => {
     const requests: ObservedRequest[] = [];
     await installProfileRoutes(page, (request) => requests.push(request));
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     await expect(page.getByRole('heading', { name: '我的账号' })).toBeVisible();
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
 
@@ -547,7 +548,7 @@ test.describe('客户个人资料管理', () => {
     await installProfileRoutes(page, (request) => requests.push(request), {
       avatarUploadResponseLoss: 'COMMITTED',
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
 
     await page.locator('#my-profile input[type="file"]').setInputFiles({
@@ -571,7 +572,7 @@ test.describe('客户个人资料管理', () => {
     await installProfileRoutes(page, (request) => requests.push(request), {
       avatarUploadResponseLoss: 'NOT_COMMITTED',
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
     const avatarFile = {
       name: 'avatar.png',
@@ -598,7 +599,7 @@ test.describe('客户个人资料管理', () => {
     await installProfileRoutes(page, (request) => requests.push(request), {
       avatarUploadResponseLoss: 'UNKNOWN',
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
 
     await page.locator('#my-profile input[type="file"]').setInputFiles({
@@ -621,7 +622,7 @@ test.describe('客户个人资料管理', () => {
     await installProfileRoutes(page, (request) => requests.push(request), {
       profileNameResponseLoss: 'COMMITTED',
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
 
     await page.getByRole('button', { name: '修改称呼' }).click();
@@ -646,7 +647,7 @@ test.describe('客户个人资料管理', () => {
     await installProfileRoutes(page, (request) => requests.push(request), {
       profileNameResponseLoss: 'NOT_COMMITTED',
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
 
     await page.getByRole('button', { name: '修改称呼' }).click();
@@ -668,7 +669,7 @@ test.describe('客户个人资料管理', () => {
     await installProfileRoutes(page, (request) => requests.push(request), {
       profileNameResponseLoss: 'UNKNOWN',
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
 
     await page.getByRole('button', { name: '修改称呼' }).click();
@@ -691,7 +692,7 @@ test.describe('客户个人资料管理', () => {
   test('改密执行组合校验并在成功后退出当前会话', async ({ page }) => {
     const requests: ObservedRequest[] = [];
     await installProfileRoutes(page, (request) => requests.push(request));
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
     await page.getByRole('button', { name: '修改密码' }).click();
     const dialog = page.getByRole('dialog', { name: '修改登录密码' });
@@ -717,7 +718,7 @@ test.describe('客户个人资料管理', () => {
     await installProfileRoutes(page, (request) => requests.push(request), {
       passwordResponseLoss: 'COMMITTED',
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
     await page.getByRole('button', { name: '修改密码' }).click();
     const dialog = page.getByRole('dialog', { name: '修改登录密码' });
@@ -744,7 +745,7 @@ test.describe('客户个人资料管理', () => {
     await installProfileRoutes(page, (request) => requests.push(request), {
       passwordResponseLoss: 'NOT_COMMITTED',
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
     await page.getByRole('button', { name: '修改密码' }).click();
     const dialog = page.getByRole('dialog', { name: '修改登录密码' });
@@ -765,7 +766,7 @@ test.describe('客户个人资料管理', () => {
     await installProfileRoutes(page, (request) => requests.push(request), {
       passwordResponseLoss: 'UNKNOWN',
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
     await page.getByRole('button', { name: '修改密码' }).click();
     const dialog = page.getByRole('dialog', { name: '修改登录密码' });
@@ -794,7 +795,7 @@ test.describe('客户个人资料管理', () => {
       }],
       loseFirstFavoriteDeleteResponse: true,
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=favorites');
     const wishlist = page.locator('#my-favorites');
     await wishlist.scrollIntoViewIfNeeded();
     await expect(wishlist.getByText('响应丢失恢复作品')).toBeVisible();
@@ -817,7 +818,7 @@ test.describe('客户个人资料管理', () => {
     await installProfileRoutes(page, (request) => requests.push(request), {
       avatarUrl: '/api/customers/me/avatar',
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
     await expect(page.getByRole('img', { name: '海川会员的头像' })).toBeVisible();
 
@@ -840,7 +841,7 @@ test.describe('客户个人资料管理', () => {
       avatarUrl: '/api/customers/me/avatar',
       failAvatarDelete: true,
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
     await page.getByRole('button', { name: '删除头像' }).click();
     const confirm = page.getByRole('dialog', { name: '删除当前头像？' });
@@ -864,7 +865,7 @@ test.describe('客户个人资料管理', () => {
       avatarUrl: '/api/customers/me/avatar',
       loseFirstAvatarDeleteResponse: true,
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
     await page.getByRole('button', { name: '删除头像' }).click();
     const confirm = page.getByRole('dialog', { name: '删除当前头像？' });
@@ -888,7 +889,7 @@ test.describe('客户个人资料管理', () => {
       loseFirstAvatarDeleteResponse: true,
       failProfileReadAfterAvatarDelete: true,
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
     await page.getByRole('button', { name: '删除头像' }).click();
     const confirm = page.getByRole('dialog', { name: '删除当前头像？' });
@@ -907,7 +908,7 @@ test.describe('客户个人资料管理', () => {
   test('邮箱换绑必须完成旧身份和新邮箱两阶段验证', async ({ page }) => {
     const requests: ObservedRequest[] = [];
     await installProfileRoutes(page, (request) => requests.push(request));
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
     await page.getByRole('button', { name: '更换邮箱' }).click();
     const dialog = page.getByRole('dialog', { name: '更换邮箱' });
@@ -933,7 +934,7 @@ test.describe('客户个人资料管理', () => {
     await installProfileRoutes(page, (request) => requests.push(request), {
       contactConfirmResponseLoss: 'COMMITTED',
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
     await page.getByRole('button', { name: '更换邮箱' }).click();
     const dialog = page.getByRole('dialog', { name: '更换邮箱' });
@@ -955,7 +956,7 @@ test.describe('客户个人资料管理', () => {
 
   test('无密码客户默认使用手机验证码设置密码和换绑', async ({ page }) => {
     await installProfileRoutes(page, () => undefined, { hasPassword: false });
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
 
     await page.getByRole('button', { name: '设置密码' }).click();
@@ -974,7 +975,7 @@ test.describe('客户个人资料管理', () => {
   test('无密码客户可用当前手机号验证码注销账户', async ({ page }) => {
     const requests: ObservedRequest[] = [];
     await installProfileRoutes(page, (request) => requests.push(request), { hasPassword: false });
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
 
     await page.getByRole('button', { name: '注销账户' }).click();
@@ -1008,7 +1009,7 @@ test.describe('客户个人资料管理', () => {
     await installProfileRoutes(page, (request) => requests.push(request), {
       accountCloseResponseLoss: 'COMMITTED',
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
     await page.getByRole('button', { name: '注销账户' }).click();
     const dialog = page.getByRole('dialog', { name: '注销账户' });
@@ -1052,7 +1053,7 @@ test.describe('客户个人资料管理', () => {
       }],
     };
     await installProfileRoutes(page, () => undefined, { exportData });
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
 
     const downloadPromise = page.waitForEvent('download');
     await page.getByRole('button', { name: '导出我的数据' }).click();
@@ -1079,7 +1080,7 @@ test.describe('客户个人资料管理', () => {
         isDefault: true,
       }],
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
     await expect(page.getByText('默认', { exact: true })).toBeVisible();
 
@@ -1121,7 +1122,7 @@ test.describe('客户个人资料管理', () => {
       loseFirstAddressCreateResponse: true,
       onAddressLogicalWrite: () => { logicalWrites += 1; },
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
 
     await page.getByRole('button', { name: '新增地址' }).click();
@@ -1174,7 +1175,7 @@ test.describe('客户个人资料管理', () => {
       loseFirstAddressUpdateResponse: true,
       onAddressUpdateLogicalWrite: () => { logicalWrites += 1; },
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     const profile = page.locator('#my-profile');
     await profile.scrollIntoViewIfNeeded();
 
@@ -1214,7 +1215,7 @@ test.describe('客户个人资料管理', () => {
       loseFirstAddressUpdateResponse: true,
       failAddressReadsAfterUpdate: true,
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     const profile = page.locator('#my-profile');
     await profile.scrollIntoViewIfNeeded();
 
@@ -1247,7 +1248,7 @@ test.describe('客户个人资料管理', () => {
     });
     const requests: ObservedRequest[] = [];
     await installProfileRoutes(page, (request) => requests.push(request));
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
 
     await page.getByRole('button', { name: '新增地址' }).click();
@@ -1282,16 +1283,18 @@ test.describe('客户个人资料管理', () => {
       loseFirstAddressDeleteResponse: true,
       onAddressDeleteLogicalWrite: () => { logicalDeletes += 1; },
     });
-    await page.goto('/customer');
+    await page.goto('/customer?section=profile');
     const profile = page.locator('#my-profile');
     await profile.scrollIntoViewIfNeeded();
     await expect(profile.getByText(/深南东路 12 号/)).toBeVisible();
 
     await profile.getByRole('button', { name: '删除' }).click();
+    await page.getByRole('button', { name: /确\s*认\s*删\s*除/ }).click();
     await expect(page.getByText(/地址删除结果待确认/)).toBeVisible();
     await expect(profile.getByText(/深南东路 12 号/)).toBeVisible();
 
     await profile.getByRole('button', { name: '删除' }).click();
+    await page.getByRole('button', { name: /确\s*认\s*删\s*除/ }).click();
     await expect(profile.getByText('暂未保存收货地址')).toBeVisible();
     expect(requests.filter((request) =>
       request.path === '/api/customers/me/addresses/12' && request.method === 'DELETE'
@@ -1305,7 +1308,19 @@ test.describe('客户个人资料管理', () => {
       avatarUrl: '/api/customers/me/avatar',
     });
     await page.goto('/customer');
-    await page.locator('#my-profile').scrollIntoViewIfNeeded();
+    const shortcuts = page.getByRole('navigation', { name: '会员服务' });
+    await expect(page.getByRole('region', { name: '账户概览' })).toBeVisible();
+    await expect(page.locator('#my-profile, #my-favorites')).toHaveCount(0);
+    const wishlist = shortcuts.getByRole('link', { name: '我的心愿单' });
+    await expect(wishlist).toBeVisible();
+    await expect.poll(async () => (await wishlist.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await wishlist.press('Enter');
+    await expect(page.locator('#my-favorites')).toBeFocused();
+    await expect(page).toHaveURL(/\?section=favorites$/);
+    await shortcuts.getByRole('link', { name: '个人资料' }).click();
+    await expect(page.locator('#my-profile')).toBeFocused();
+    await expect(page).toHaveURL(/\?section=profile$/);
+    await expect(page.locator('#my-favorites')).toHaveCount(0);
     await expect(page.getByRole('button', { name: '修改密码' })).toBeVisible();
     await expect(page.getByRole('button', { name: '删除头像' })).toBeVisible();
     const keyActions = [

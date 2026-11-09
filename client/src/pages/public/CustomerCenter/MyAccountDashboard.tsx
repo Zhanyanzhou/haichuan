@@ -1,7 +1,9 @@
 // 客户中心登录态主面板：账户总览/心愿单/订单(可视化进度+物流轨迹+评价)/个人资料(导出与注销)/地址管理
 import { useCallback, useEffect, useRef, useState } from "react";
 import RouteLoading from "@/components/common/RouteLoading";
+import { ListingCartButton } from "@/components/common/ListingCartButton";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { ArrowRightOutlined } from "@ant-design/icons";
 import {
   App as AntdApp,
   Modal,
@@ -14,7 +16,7 @@ import {
   Radio,
   Tag,
 } from "antd";
-import { customerApi, type CustomerAddressInput } from "@/services/api";
+import { cartApi, customerApi, customerQuotationApi, type CustomerAddressInput } from "@/services/api";
 import { clampProductTitle } from "@/utils/productTitleLength";
 import {
   customerProfileApi,
@@ -34,6 +36,8 @@ import {
 import { SecureImage } from "@/components/common/SecureImage";
 import { buildResponsiveUploadsDerivedUrl } from "@/utils/responsiveUploadsImage";
 import { withPublicMediaWidth } from "@/utils/publicMediaWidth";
+import { getListingImage } from "@/utils/productImage";
+import { publicProductPath } from "@/utils/publicProductPath";
 import CustomerPaymentDialog, {
   type CustomerPaymentOrder,
 } from "@/components/commerce/CustomerPaymentDialog";
@@ -352,6 +356,122 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <p className="my-account-empty">{children}</p>;
 }
 
+const NAV_ICON_PATHS = {
+  overview: "M4 4h6.5v6.5H4zM13.5 4H20v6.5h-6.5zM4 13.5h6.5V20H4zM13.5 13.5H20V20h-6.5z",
+  selections: "M4 7h16M4 12h16M4 17h10",
+  appointments: "M7 3.5v3M17 3.5v3M4.5 8.5h15M6 5h12a1.5 1.5 0 0 1 1.5 1.5V19H4.5V6.5A1.5 1.5 0 0 1 6 5z",
+  favorites: "M12 19.2s-6.5-4.1-6.5-8.2A3.6 3.6 0 0 1 12 8.2a3.6 3.6 0 0 1 6.5 2.8c0 4.1-6.5 8.2-6.5 8.2z",
+  quotations: "M7 3.5h7.2L18.5 8v12.5H7zM14 3.5V8h4.5M9.5 12.5h6M9.5 16h6",
+  orders: "M6.5 7.5h11l-.9 12H7.4zM9 7.5V5.2h6V7.5",
+  profile: "M12 12.2a3.4 3.4 0 1 0-3.4-3.4 3.4 3.4 0 0 0 3.4 3.4zM6.2 19.2a5.8 5.8 0 0 1 11.6 0",
+  addresses: "M12 20.5s6-5.1 6-9.6a6 6 0 1 0-12 0c0 4.5 6 9.6 6 9.6zM12 11.2a1.6 1.6 0 1 0-1.6-1.6 1.6 1.6 0 0 0 1.6 1.6z",
+  notifications: "M6 16.5h12l-1.2-2V10.2a4.8 4.8 0 0 0-9.6 0v4.3zM10 16.5a2 2 0 0 0 4 0",
+} as const;
+
+function AccountNavIcon({ name }: { name: keyof typeof NAV_ICON_PATHS }) {
+  return (
+    <svg className="my-account__nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d={NAV_ICON_PATHS[name]} />
+    </svg>
+  );
+}
+
+function maskAccountPhone(phone: string | null | undefined) {
+  const value = phone?.trim() ?? "";
+  if (!value) return "—";
+  if (/^1\d{10}$/.test(value)) return `${value.slice(0, 3)}****${value.slice(7)}`;
+  if (value.length >= 7) return `${value.slice(0, 2)}****${value.slice(-2)}`;
+  return value;
+}
+
+const accountServices = [
+  { key: "selections", target: "my-selections", title: "我的选款" },
+  { key: "appointments", target: "my-appointments", title: "我的预约" },
+  { key: "favorites", target: "my-favorites", title: "我的心愿单" },
+  { key: "quotations", target: "my-quotations", title: "我的报价" },
+  { key: "orders", target: "my-orders", title: "我的订单" },
+  { key: "profile", target: "my-profile", title: "个人资料" },
+  { key: "addresses", target: "my-addresses", title: "收货地址" },
+  { key: "notifications", target: "my-notifications", title: "服务通知" },
+] as const;
+
+const accountServiceGroups: ReadonlyArray<{
+  title: string;
+  services: ReadonlyArray<typeof accountServices[number]["key"]>;
+}> = [
+  { title: "我的珍藏", services: ["selections", "favorites"] },
+  { title: "专属服务", services: ["appointments", "notifications"] },
+  { title: "交易记录", services: ["quotations", "orders"] },
+  { title: "账户设置", services: ["profile", "addresses"] },
+];
+
+const ACTIONABLE_ORDER_LABEL: Record<string, string> = {
+  NEED_CONFIRM: "需要确认",
+  QUOTE_CONFIRM: "确认报价",
+  PENDING_DEPOSIT: "待付定金",
+  DESIGN_CONFIRM: "确认设计",
+  PENDING_PAYMENT: "待付款",
+  SHIPPED: "已发货",
+};
+
+type WatchedBagItem = {
+  id: number;
+  productId: number;
+  name: string;
+  code?: string | null;
+  image: string;
+};
+
+function readBagPreview(response: unknown): WatchedBagItem[] {
+  const payload = unwrapResponse<unknown>(response);
+  const list = Array.isArray(payload) ? payload : [];
+  return list.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as {
+      id?: unknown;
+      productId?: unknown;
+      product?: { name?: unknown; code?: unknown; images?: unknown; listingImage?: unknown; primaryImage?: unknown };
+    };
+    if (typeof row.id !== "number" || typeof row.productId !== "number") return [];
+    const name = typeof row.product?.name === "string" ? row.product.name : "作品";
+    const code = typeof row.product?.code === "string" ? row.product.code : null;
+    return [{
+      id: row.id,
+      productId: row.productId,
+      name,
+      code,
+      image: getListingImage(
+        row.product && typeof row.product === "object"
+          ? row.product as Parameters<typeof getListingImage>[0]
+          : null,
+      ),
+    }];
+  });
+}
+
+function readPendingQuotes(response: unknown): Array<{ id: number; quoteNo: string }> {
+  const payload = unwrapResponse<unknown>(response);
+  const list = Array.isArray(payload)
+    ? payload
+    : payload && typeof payload === "object" && Array.isArray((payload as { list?: unknown }).list)
+      ? (payload as { list: unknown[] }).list
+      : [];
+  return list.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const quote = item as { id?: unknown; quoteNo?: unknown; status?: unknown };
+    if (quote.status !== "PENDING_CONFIRM" || typeof quote.id !== "number" || typeof quote.quoteNo !== "string") return [];
+    return [{ id: quote.id, quoteNo: quote.quoteNo }];
+  });
+}
+
+function resolveAccountService(search: string, hash: string) {
+  const sections = new URLSearchParams(search).getAll("section");
+  const section = sections.length === 1 ? sections[0] : null;
+  const legacySection = section === "quote" ? "quotations" : section === "inquiry" ? "appointments" : section;
+  return accountServices.find(({ target }) => hash === `#${target}`)
+    ?? accountServices.find(({ key }) => key === legacySection);
+}
+
 function parseCanonicalOrderTarget(search: string): {
   orderId: number | null;
   invalid: boolean;
@@ -524,6 +644,28 @@ export default function MyAccountDashboard({
   const canonicalOrderTarget = parseCanonicalOrderTarget(location.search);
   const canonicalOrderId = canonicalOrderTarget.orderId;
   const invalidCanonicalOrderTarget = canonicalOrderTarget.invalid;
+  const requestedService = resolveAccountService(location.search, location.hash);
+  const hasConsultationTarget = selectedLeadId !== null || invalidSelectedLeadTarget;
+  const hasOrderTarget = canonicalOrderId !== null || invalidCanonicalOrderTarget;
+  const sectionQuery = new URLSearchParams(location.search).get("section");
+  const activeSection = hasConsultationTarget && (sectionQuery === "consultations" || !hasOrderTarget)
+    ? "consultations"
+    : hasOrderTarget
+      ? "orders"
+      : sectionQuery === "consultations" ? "consultations" : requestedService?.key;
+  const focusTarget = activeSection === "orders" ? "my-orders" : requestedService?.target;
+  const isOverview = !activeSection;
+
+  const consultationActivity = [
+    ...selectionInquiries.map((record) => ({ ...record, section: "selections" })),
+    ...inquiries.map((record) => ({ ...record, section: "appointments" })),
+  ].sort((left, right) => Date.parse(right.reply?.createdAt || right.createdAt) - Date.parse(left.reply?.createdAt || left.createdAt));
+  const latestReply = consultationActivity.find((record) => Boolean(record.reply));
+  const latestOrder = [...orders].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))[0];
+  const currentConsultation = latestReply || (!latestOrder ? consultationActivity[0] : undefined);
+  const consultationActivityUrl = currentConsultation?.leadId
+    ? `/customer?section=consultations&leadId=${currentConsultation.leadId}`
+    : `/customer?section=${currentConsultation?.section}`;
   const selectionPageSize = 3;
   const selectionPageCount = Math.max(
     1,
@@ -654,24 +796,20 @@ export default function MyAccountDashboard({
     selectedLeadId,
   ]);
 
+  useEffect(() => {
+    if (hasConsultationTarget || canonicalOrderId !== null || !focusTarget) return;
+    const frame = requestAnimationFrame(() => {
+      const target = document.getElementById(focusTarget);
+      target?.scrollIntoView({ block: "start" });
+      target?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [canonicalOrderId, focusTarget, hasConsultationTarget, location.key]);
+
   const clearConsultationUrl = (focusTargetId: string) => {
-    if (invalidSelectedLeadTarget) {
-      navigate(location.pathname, { replace: true });
-      requestAnimationFrame(() => {
-        document.getElementById(focusTargetId)?.focus({ preventScroll: true });
-      });
-      return;
-    }
-    const params = new URLSearchParams(location.search);
-    params.delete("leadId");
-    if (params.get("section") === "consultations") params.delete("section");
-    const search = params.toString();
-    navigate(`${location.pathname}${search ? `?${search}` : ""}`, {
-      replace: true,
-    });
-    requestAnimationFrame(() => {
-      document.getElementById(focusTargetId)?.focus({ preventScroll: true });
-    });
+    if (!hasConsultationTarget) return;
+    const service = accountServices.find(({ target }) => target === focusTargetId);
+    navigate(service ? `${location.pathname}?section=${service.key}` : location.pathname, { replace: true });
   };
 
   const consultationTitle = consultationDetail?.type === "selection"
@@ -690,6 +828,7 @@ export default function MyAccountDashboard({
       code?: string;
       shortDescription?: string | null;
       price?: number | string | null;
+      salesMode?: string;
       image?: string | null;
       favoritedAt: string;
     }>
@@ -719,8 +858,119 @@ export default function MyAccountDashboard({
   };
 
   useEffect(() => {
-    void loadFavorites();
-  }, [loadFavorites]);
+    if (activeSection === "favorites" || isOverview) void loadFavorites();
+  }, [activeSection, isOverview, loadFavorites]);
+
+  const [watchedBag, setWatchedBag] = useState<WatchedBagItem[]>([]);
+  const [bagCount, setBagCount] = useState(0);
+  const [bagWatchStatus, setBagWatchStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [pendingQuotes, setPendingQuotes] = useState<Array<{ id: number; quoteNo: string }>>([]);
+
+  useEffect(() => {
+    if (!isOverview) return;
+    let cancelled = false;
+    setBagWatchStatus("loading");
+    void (async () => {
+      try {
+        const preview = readBagPreview(await cartApi.get());
+        if (cancelled) return;
+        setBagCount(preview.length);
+        setWatchedBag(preview.slice(0, 4));
+        setBagWatchStatus("ready");
+      } catch {
+        if (cancelled) return;
+        setWatchedBag([]);
+        setBagCount(0);
+        setBagWatchStatus("error");
+      }
+    })();
+    void (async () => {
+      try {
+        const pending = readPendingQuotes(await customerQuotationApi.list({ page: 1, pageSize: 20 }));
+        if (!cancelled) setPendingQuotes(pending);
+      } catch {
+        if (!cancelled) setPendingQuotes([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOverview]);
+
+  const orderAttentionLabel = latestOrder
+    ? (latestOrder.customStage ? ACTIONABLE_ORDER_LABEL[latestOrder.customStage] : undefined)
+      || ACTIONABLE_ORDER_LABEL[latestOrder.status]
+    : undefined;
+  const attentionItems = [
+    !notificationError && !notificationLoading && notifications.unreadCount > 0
+      ? { key: "notifications", href: "/customer?section=notifications", title: `${notifications.unreadCount} 条未读服务通知`, detail: "查看服务消息" }
+      : null,
+    currentConsultation?.reply
+      ? { key: "reply", href: consultationActivityUrl, title: "顾问已回复", detail: "查看最新回复" }
+      : null,
+    ...pendingQuotes.slice(0, 3).map((quote) => ({
+      key: `quote-${quote.id}`,
+      href: "/customer?section=quotations",
+      title: `报价 ${quote.quoteNo} 等待确认`,
+      detail: "查看报价",
+    })),
+    latestOrder && orderAttentionLabel
+      ? { key: `order-${latestOrder.id}`, href: `/customer?section=orders&orderId=${latestOrder.id}`, title: `订单 ${latestOrder.orderNo}`, detail: orderAttentionLabel }
+      : null,
+  ].filter((item): item is { key: string; href: string; title: string; detail: string } => item !== null);
+  const quoteOverflow = pendingQuotes.length > 3;
+  const selectionPreview = [...selectionInquiries]
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+    .slice(0, 3);
+  const latestAppointment = [...inquiries]
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))[0];
+  const latestNotification = notificationError || notificationLoading ? undefined : notifications.list[0];
+  const recentActivity = [
+    latestAppointment
+      ? {
+          key: `appointment-${latestAppointment.id}`,
+          href: latestAppointment.leadId
+            ? `/customer?section=consultations&leadId=${latestAppointment.leadId}`
+            : "/customer?section=appointments",
+          label: "最近预约",
+          title: latestAppointment.product?.name
+            ? clampProductTitle(latestAppointment.product.name)
+            : latestAppointment.consultationType || "预约咨询",
+          detail: inquiryStatus[latestAppointment.status] || latestAppointment.status,
+        }
+      : null,
+    pendingQuotes[0]
+      ? {
+          key: `quote-${pendingQuotes[0].id}`,
+          href: "/customer?section=quotations",
+          label: "最近报价",
+          title: pendingQuotes[0].quoteNo,
+          detail: "等待确认",
+        }
+      : null,
+    latestOrder
+      ? {
+          key: `order-${latestOrder.id}`,
+          href: `/customer?section=orders&orderId=${latestOrder.id}`,
+          label: "最近订单",
+          title: latestOrder.orderNo,
+          detail: orderAttentionLabel || "查看订单",
+        }
+      : null,
+    latestNotification
+      ? {
+          key: `notification-${latestNotification.id}`,
+          href: latestNotification.actionUrl?.startsWith("/")
+            ? latestNotification.actionUrl
+            : "/customer?section=notifications",
+          label: "最近服务通知",
+          title: latestNotification.title,
+          detail: latestNotification.status === "READ" ? "已读" : "未读",
+        }
+      : null,
+  ].filter((item): item is { key: string; href: string; label: string; title: string; detail: string } => item !== null);
+  const activitySettled = !inquiryLoading && !notificationLoading;
+  const favoritePreview = favorites.slice(0, 4);
 
   // 特殊线下订单凭证兜底；标准零售主链使用客户本人发起的微信支付。
   const [proofOrderId, setProofOrderId] = useState<number | null>(null);
@@ -1437,79 +1687,290 @@ export default function MyAccountDashboard({
     }
   };
 
-  const removeAddress = async (id: number) => {
-    try {
-      await customerApi.deleteAddress(id);
-      message.success("地址已删除");
-      onRefresh?.();
-    } catch (error: unknown) {
-      message.error(getAddressDeleteError(error));
-    }
+  const removeAddress = (id: number) => {
+    modal.confirm({
+      title: "删除这个收货地址？",
+      content: "删除后，结算时将不能再选用这个地址。",
+      okText: "确认删除",
+      cancelText: "保留地址",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await customerApi.deleteAddress(id);
+          message.success("地址已删除");
+          onRefresh?.();
+        } catch (error: unknown) {
+          message.error(getAddressDeleteError(error));
+        }
+      },
+    });
   };
+
+  const showsProfileEditor = activeSection === "profile" || activeSection === "addresses";
+  const avatarSrc = profile?.avatarUrl
+    ? `${profile.avatarUrl}?v=${encodeURIComponent(profile.updatedAt || "current")}`
+    : null;
 
   return (
     <>
       <div className="my-account">
+        <div className="my-account__frame">
         <section className="my-account__intro">
-          <div>
-            <p className="my-account__eyebrow">会员账户</p>
-            <h1>我的账号</h1>
-            <p className="my-account__greeting">
-              您好，{name}。您的作品、咨询与服务记录都在这里。
-            </p>
+          <div className="my-account__intro-identity">
+            {!showsProfileEditor && (
+              <div className="my-account__mark" aria-hidden="true">
+                {avatarSrc ? (
+                  <img src={avatarSrc} alt="" />
+                ) : (
+                  <span>{name.slice(0, 1).toUpperCase()}</span>
+                )}
+              </div>
+            )}
+            <div>
+              <h1>我的账号</h1>
+              <p className="my-account__greeting">您好，{name}。您的作品、咨询与服务记录都在这里。</p>
+              <p className="my-account__contact-line">
+                <span>{maskAccountPhone(profile?.phone)}</span>
+                <span>{profile?.email || "未绑定邮箱"}</span>
+              </p>
+            </div>
           </div>
-          <button
-            type="button"
-            className="my-account__sign-out"
-            onClick={onSignOut}
-          >
-            退出登录
-          </button>
+          <div className="my-account__intro-actions">
+            {!showsProfileEditor && (
+              <Link to="/customer?section=profile" className="my-account__profile-entry">
+                管理个人资料
+              </Link>
+            )}
+            <button
+              type="button"
+              className="my-account__sign-out"
+              onClick={onSignOut}
+            >
+              退出登录
+            </button>
+          </div>
         </section>
 
-        <nav className="my-account__shortcuts" aria-label="账号快捷服务">
-          <a href="#my-selections">
-            <span>01</span>我的选款
-          </a>
-          <a href="#my-appointments">
-            <span>02</span>我的预约
-          </a>
-          <a href="#my-quotations">
-            <span>03</span>我的报价
-          </a>
-          <a href="#my-orders">
-            <span>04</span>我的订单
-          </a>
-          <a href="#my-profile">
-            <span>05</span>个人资料
-          </a>
-          <a href="#my-notifications">
-            <span>06</span>服务通知
-          </a>
+        <nav className="my-account__services" aria-labelledby="account-services-title">
+          <h2 id="account-services-title" className="my-account__services-label">会员服务</h2>
+          <div className="my-account__service-track">
+            <div className={`my-account__service-group${isOverview ? " is-current" : ""}`}>
+              <h3>
+                <Link to="/customer" aria-current={isOverview ? "page" : undefined}>
+                  <AccountNavIcon name="overview" />
+                  <span>账户概览</span>
+                </Link>
+              </h3>
+            </div>
+            {accountServiceGroups.map(({ title: groupTitle, services }) => {
+              const groupCurrent = services.some((key) => key === activeSection)
+                || (activeSection === "consultations" && services.includes("appointments"));
+              return (
+                <div className={`my-account__service-group${groupCurrent ? " is-current" : ""}`} key={groupTitle}>
+                  <h3>
+                    <Link to={`/customer?section=${services[0]}`}>{groupTitle}</Link>
+                  </h3>
+                  <ul className="my-account__services-list">
+                    {services.flatMap((key) => {
+                      const service = accountServices.find((item) => item.key === key);
+                      if (!service) return [];
+                      const { target, title } = service;
+                      return [(
+                        <li key={key}>
+                          <Link
+                            to={`/customer?section=${key}`}
+                            aria-current={activeSection === key ? "page" : undefined}
+                            aria-labelledby={`${target}-shortcut-title`}
+                            aria-describedby={
+                              key === "notifications" && !notificationError && !notificationLoading && notifications.unreadCount > 0
+                                ? `${target}-shortcut-description`
+                                : undefined
+                            }
+                          >
+                            <AccountNavIcon name={key} />
+                            <span className="my-account__service-copy">
+                              <strong id={`${target}-shortcut-title`}>{title}</strong>
+                              {key === "notifications" && !notificationError && !notificationLoading && notifications.unreadCount > 0 ? (
+                                <span className="my-account__services-description" id={`${target}-shortcut-description`}>
+                                  {notifications.unreadCount} 条未读
+                                </span>
+                              ) : null}
+                            </span>
+                          </Link>
+                        </li>
+                      )];
+                    })}
+                  </ul>
+                </div>
+              );
+            })}
+          </div>
         </nav>
 
-        <section className="my-account__summary" aria-label="服务概览">
-          <div>
-            <strong>
-              {String(selectionInquiries.length).padStart(2, "0")}
-            </strong>
-            <span>选款咨询</span>
-          </div>
-          <div>
-            <strong>{String(inquiryPage.total).padStart(2, "0")}</strong>
-            <span>预约咨询</span>
-          </div>
-          <div>
-            <strong>{String(orders.length).padStart(2, "0")}</strong>
-            <span>历史订单</span>
-          </div>
-          <Link to="/catalog" className="my-account__summary-action">
-            继续选款 <b>→</b>
-          </Link>
-        </section>
+        <div className="my-account__main">
+        {isOverview && attentionItems.length > 0 && (
+          <section className="my-account__pending" aria-labelledby="account-attention-title">
+            <h2 id="account-attention-title">重要提醒</h2>
+            <ul className="my-account__attention">
+              {attentionItems.map((item) => (
+                <li key={item.key}>
+                  <Link to={item.href}>
+                    <strong>{item.title}</strong>
+                    <span>{item.detail}</span>
+                    <ArrowRightOutlined aria-hidden="true" />
+                  </Link>
+                </li>
+              ))}
+              {quoteOverflow && (
+                <li>
+                  <Link to="/customer?section=quotations">
+                    <strong>还有待确认的报价</strong>
+                    <span>查看全部报价</span>
+                    <ArrowRightOutlined aria-hidden="true" />
+                  </Link>
+                </li>
+              )}
+            </ul>
+          </section>
+        )}
 
-        <div className="my-account__grid">
-          {invalidSelectedLeadTarget ? (
+        {isOverview && (selectionInquiryError || inquiryError) && (
+          <p className="my-account__overview-notice" role="status">
+            部分服务记录暂时无法加载，可以进入对应服务重试。
+          </p>
+        )}
+
+        {isOverview && (
+          <section className="my-account__overview" aria-label="账户概览">
+            <div className="my-account__collection">
+              <h2>我的珠宝珍藏</h2>
+              <div className="my-account__collection-grid">
+                <article>
+                  <h3>我的选款</h3>
+                  {selectionInquiryLoading ? <p role="status">正在读取选款记录</p> : null}
+                  {selectionInquiryError ? <p role="alert">选款记录暂时无法读取。</p> : null}
+                  {!selectionInquiryLoading && !selectionInquiryError && selectionPreview.length === 0 ? (
+                    <p>还没有提交过选款。</p>
+                  ) : null}
+                  {selectionPreview.length > 0 ? (
+                    <ul className="my-account__collection-list">
+                      {selectionPreview.map((record) => {
+                        const title = record.items?.[0]?.productNameSnapshot
+                          ? clampProductTitle(record.items[0].productNameSnapshot)
+                          : "选款咨询";
+                        const href = record.leadId
+                          ? `/customer?section=consultations&leadId=${record.leadId}`
+                          : "/customer?section=selections";
+                        return (
+                          <li key={record.id}>
+                            <Link to={href}>
+                              <strong>{title}</strong>
+                              <span>{inquiryStatus[record.status] || record.status}</span>
+                            </Link>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : null}
+                  <Link to="/customer?section=selections" className="my-account__text-link">查看全部选款</Link>
+                  <Link to="/catalog" className="my-account__catalog-link">
+                    继续选款 <ArrowRightOutlined aria-hidden="true" />
+                  </Link>
+                </article>
+                <article>
+                  <h3>我的心愿单</h3>
+                  {favoriteStatus === "loading" ? <p role="status">正在读取心愿单</p> : null}
+                  {favoriteStatus === "error" ? <p role="alert">心愿单暂时无法读取。</p> : null}
+                  {favoriteStatus === "ready" && favoritePreview.length === 0 ? <p>心愿单里还没有作品。</p> : null}
+                  {favoritePreview.length > 0 ? (
+                    <div className="my-account__watch">
+                      <Link to="/customer?section=favorites" className="my-account__watch-count">心愿单 {favorites.length}</Link>
+                      <ul>
+                        {favoritePreview.map((item) => (
+                          <li key={item.id}>
+                            <Link to={publicProductPath({ id: item.productId, code: item.code })}>
+                              <SecureImage
+                                src={item.image ? withPublicMediaWidth(item.image, 480) : getListingImage(null)}
+                                alt=""
+                                width={72}
+                                height={90}
+                              />
+                              <span>{clampProductTitle(item.name)}</span>
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  <Link to="/customer?section=favorites" className="my-account__text-link">进入心愿单</Link>
+                </article>
+                <article>
+                  <h3>最近浏览</h3>
+                  <p>账户只保存选款与心愿单，没有另一份浏览清单，这里不会显示推测作品。</p>
+                  <Link to="/catalog" className="my-account__text-link">去选款中心看看</Link>
+                  {bagWatchStatus === "loading" ? <p role="status">正在读取购物袋</p> : null}
+                  {bagWatchStatus === "error" ? <p role="alert">购物袋暂时无法读取。</p> : null}
+                  {watchedBag.length > 0 ? (
+                    <div className="my-account__watch">
+                      <Link to="/cart" className="my-account__watch-count">购物袋 {bagCount}</Link>
+                      <ul>
+                        {watchedBag.map((item) => (
+                          <li key={item.id}>
+                            <Link to={publicProductPath({ id: item.productId, code: item.code })}>
+                              <SecureImage src={item.image} alt="" width={72} height={90} />
+                              <span>{clampProductTitle(item.name)}</span>
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </article>
+              </div>
+            </div>
+
+            <div className="my-account__activity">
+              <h2>最近账户动态</h2>
+              {!activitySettled ? <p role="status">正在读取最近的服务记录</p> : null}
+              {activitySettled && recentActivity.length === 0 ? (
+                <p>暂时没有新的预约、报价、订单或服务通知。</p>
+              ) : null}
+              {recentActivity.length > 0 ? (
+                <ul className="my-account__activity-list">
+                  {recentActivity.map((item) => (
+                    <li key={item.key}>
+                      <Link to={item.href}>
+                        <span>{item.label}</span>
+                        <strong>{item.title}</strong>
+                        <em>{item.detail}</em>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+
+            <div className="my-account__advisor">
+              <h2>专属顾问服务</h2>
+              <ul>
+                <li><Link to="/contact">联系专属顾问</Link></li>
+                <li><Link to="/catalog">珠宝咨询</Link></li>
+                <li><Link to="/customer?section=appointments">预约服务</Link></li>
+                <li><Link to="/customer?section=orders">售后咨询</Link></li>
+              </ul>
+            </div>
+          </section>
+        )}
+
+        {!isOverview && (
+          <p className="my-account__return">
+            <Link to="/customer">返回账户概览</Link>
+          </p>
+        )}
+
+        {!isOverview && (
+        <div className="my-account__grid my-account__grid--service">
+          {activeSection === "consultations" && invalidSelectedLeadTarget ? (
             <section
               id="consultation-focus"
               className="my-account__panel my-account__panel--wide"
@@ -1533,7 +1994,7 @@ export default function MyAccountDashboard({
                 </button>
               </div>
             </section>
-          ) : selectedLeadId !== null ? (
+          ) : activeSection === "consultations" && selectedLeadId !== null ? (
             <section
               id="consultation-focus"
               className="my-account__panel my-account__panel--wide"
@@ -1614,21 +2075,14 @@ export default function MyAccountDashboard({
               ) : null}
             </section>
           ) : null}
-          <CustomerNotificationsPanel
-            resource={notifications}
-            loading={notificationLoading}
-            error={notificationError}
-            onRetry={onRetryNotifications}
-            onRead={onReadNotification}
-            onReadAll={onReadAllNotifications}
-          />
+          {(activeSection === "selections" || activeSection === "consultations") && (
           <section id="my-selections" className="my-account__panel" tabIndex={-1}>
             <div className="my-account__panel-head">
               <div>
                 <p>选款记录</p>
                 <h2>我的选款</h2>
               </div>
-              <Link to="/catalog">进入选款中心 →</Link>
+              {selectionInquiries.length > 0 && <Link to="/catalog">进入选款中心 →</Link>}
             </div>
             {selectionInquiryError ? (
               <p className="my-account__records-state" role="alert">
@@ -1701,19 +2155,25 @@ export default function MyAccountDashboard({
               </>
             ) : (
               <Empty>
-                暂未提交选款咨询。<Link to="/catalog">去挑选心仪作品 →</Link>
+                <span>暂未提交选款咨询。</span>提交后，可以在这里查看进度与顾问回复。
+                <Link to="/catalog">前往选款中心 →</Link>
               </Empty>
             )}
           </section>
+          )}
 
+          {(activeSection === "appointments" || activeSection === "consultations") && (
           <section id="my-appointments" className="my-account__panel" tabIndex={-1}>
             <div className="my-account__panel-head">
               <div>
                 <p>预约记录</p>
                 <h2>我的预约</h2>
               </div>
-              <Link to="/contact">预约咨询 →</Link>
+              {inquiries.length > 0 && <Link to="/contact">预约咨询 →</Link>}
             </div>
+            {!inquiryLoading && !inquiryError && inquiryPage.total > 0 && (
+              <p className="my-account__record-total">共 {inquiryPage.total} 条预约咨询</p>
+            )}
             {inquiryError && (
               <p className="my-account__records-state" role="alert">
                 {inquiryError}
@@ -1796,16 +2256,20 @@ export default function MyAccountDashboard({
               </>
             ) : (
               <Empty>
-                还没有预约记录。<Link to="/contact">预约专属顾问 →</Link>
+                <span>还没有预约记录。</span>提交预约咨询后，可以在这里查看处理进度。
+                <Link to="/contact">联系与预约 →</Link>
               </Empty>
             )}
           </section>
+          )}
 
           {/* 心愿单：收藏的作品（商品详情页心形按钮加入） */}
+          {activeSection === "favorites" && (
           <section
             id="my-favorites"
             className="my-account__panel my-account__panel--wide"
             aria-labelledby="my-favorites-title"
+            tabIndex={-1}
           >
             <div className="my-account__panel-head">
               <div>
@@ -1834,23 +2298,10 @@ export default function MyAccountDashboard({
             ) : favorites.length ? (
               <div className="my-account__records">
                 {favorites.map((fav) => (
-                  <article
-                    key={fav.id}
-                    className="my-account__favorite"
-                    style={{ display: "flex", gap: 16, alignItems: "center" }}
-                  >
+                  <article key={fav.id} className="my-account__favorite">
                     <Link
                       to={`/products/${fav.productId}`}
-                      style={{
-                        width: 72,
-                        height: 72,
-                        flexShrink: 0,
-                        background: "#f4f5f5",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        overflow: "hidden",
-                      }}
+                      className="my-account__favorite-media"
                     >
                       {fav.image ? (
                         <SecureImage
@@ -1860,68 +2311,39 @@ export default function MyAccountDashboard({
                               : buildResponsiveUploadsDerivedUrl(fav.image, 480) || fav.image
                           }
                           alt={fav.name}
-                          style={{
-                            width: "100%",
-                            height: "100%",
-                            objectFit: "cover",
-                          }}
                         />
                       ) : (
-                        <span style={{ color: "#6e7477", fontSize: 24 }}>
-                          ◆
-                        </span>
+                        <span className="my-account__favorite-fallback" aria-hidden="true" />
                       )}
                     </Link>
-                    <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="my-account__favorite-copy">
                       <Link to={`/products/${fav.productId}`}>
-                        <h3 style={{ fontSize: 15 }} title={fav.name}>{clampProductTitle(fav.name)}</h3>
+                        <h3 title={fav.name}>{clampProductTitle(fav.name)}</h3>
                       </Link>
                       {fav.shortDescription ? (
-                        <p
-                          style={{
-                            fontSize: 12,
-                            color: "#5f6568",
-                            margin: "4px 0 0",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {fav.shortDescription}
-                        </p>
+                        <p>{fav.shortDescription}</p>
                       ) : null}
                       {fav.price != null && Number(fav.price) > 0 ? (
-                        <p
-                          style={{
-                            fontSize: 13,
-                            margin: "6px 0 0",
-                            color: "#181a1b",
-                          }}
-                        >
+                        <p className="my-account__favorite-price">
                           ¥{Number(fav.price).toLocaleString("zh-CN")}
                         </p>
                       ) : null}
                     </div>
-                    <div
-                      style={{ display: "flex", alignItems: "center", gap: 12 }}
-                    >
-                      <Link
-                        to={`/products/${fav.productId}`}
-                        style={{ fontSize: 12, color: "#181a1b" }}
-                      >
+                    <div className="my-account__favorite-actions">
+                      {commerceFlags?.cartEnabled === true
+                        && fav.salesMode === "DIRECT_PURCHASE"
+                        && Number(fav.price) > 0 ? (
+                        <ListingCartButton
+                          product={{ id: fav.productId, code: fav.code }}
+                          className="my-account__favorite-cart"
+                        />
+                      ) : null}
+                      <Link to={publicProductPath({ id: fav.productId, code: fav.code })}>
                         查看作品
                       </Link>
                       <button
                         type="button"
                         onClick={() => removeFavorite(fav.productId)}
-                        style={{
-                          fontSize: 12,
-                          color: "#6E7477",
-                          background: "none",
-                          border: "none",
-                          cursor: "pointer",
-                          padding: 0,
-                        }}
                       >
                         移出
                       </button>
@@ -1931,18 +2353,22 @@ export default function MyAccountDashboard({
               </div>
             ) : (
               <Empty>
-                心愿单还是空的。
-                <Link to="/catalog">去选款中心挑选心仪作品 →</Link>
+                <span>心愿单还是空的。</span>在作品详情页点击收藏，喜欢的作品就会保存在这里。
+                <Link to="/catalog">浏览作品 →</Link>
               </Empty>
             )}
           </section>
+          )}
 
+          {activeSection === "quotations" && (
           <CustomerQuotationsPanel
             addresses={addresses}
             onOrderCreated={onRefresh}
             onLocateOrder={locateCanonicalOrder}
           />
+          )}
 
+          {activeSection === "orders" && (
           <CustomerOrdersPanel
             orders={locatedOrders}
             commerceEnabled={commerceEnabled}
@@ -1963,10 +2389,13 @@ export default function MyAccountDashboard({
             onOrderLocated={handleOrderLocated}
             onClearOrderTarget={clearCanonicalOrderTarget}
           />
+          )}
 
+          {(activeSection === "profile" || activeSection === "addresses") && (
           <section
             id="my-profile"
             className="my-account__panel my-account__panel--profile my-account__panel--wide"
+            tabIndex={-1}
           >
             <div className="my-account__panel-head">
               <div>
@@ -2013,28 +2442,21 @@ export default function MyAccountDashboard({
                 <small>JPG、PNG 或 WebP，最大 5MB；上传后由服务端裁切压缩。</small>
               </div>
             </div>
-            {/* 申请合作：申请入口 + 当前状态（协议未落地前，入口指向说明页，不开放表单提交） */}
-            <div style={{ marginBottom: 12 }}>
-              <p style={{ fontSize: 12, color: "#5f6568", margin: "0 0 8px" }}>
-                申请合作
-              </p>
+            <div className="my-account__partner">
+              <p>申请合作</p>
               <div
-                style={{
-                  padding: "12px 14px",
-                  background:
-                    partnerStatus === "APPROVED" ? "#eff5f1" : "#f4f5f5",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 12,
-                }}
+                className={
+                  partnerStatus === "APPROVED"
+                    ? "my-account__partner-row my-account__partner-row--approved"
+                    : "my-account__partner-row"
+                }
               >
-                <div style={{ minWidth: 0 }}>
-                  <span style={{ fontSize: 13, color: "#5f6568" }}>
+                <div>
+                  <span>
                     {partnerError
                       ? partnerError
                       : partnerStatus === "APPROVED"
-                      ? "✓ 已认证合作商家"
+                      ? "已认证合作商家"
                       : PARTNER_STATUS_LABEL[partnerStatus] ||
                         "尚未申请合作商家身份"}
                     {partnerStatus === "APPROVED" && partnerApprovedAt
@@ -2043,15 +2465,7 @@ export default function MyAccountDashboard({
                   </span>
                   {!partnerError && partnerStatus !== "APPROVED" &&
                   partner?.latest?.reviewNote ? (
-                    <p
-                      style={{
-                        fontSize: 12,
-                        color: "#5f6568",
-                        margin: "6px 0 0",
-                      }}
-                    >
-                      审核说明：{partner.latest.reviewNote}
-                    </p>
+                    <p>审核说明：{partner.latest.reviewNote}</p>
                   ) : null}
                 </div>
                 {partnerError ? (
@@ -2065,9 +2479,8 @@ export default function MyAccountDashboard({
                 ) : (
                   <Link
                     to={PARTNER_ACTION[partnerStatus]?.to || "/customer?section=partner"}
-                    style={{ fontSize: 12, color: "#181a1b", flexShrink: 0 }}
                   >
-                    {PARTNER_ACTION[partnerStatus]?.label || "了解详情"} →
+                    {PARTNER_ACTION[partnerStatus]?.label || "了解详情"}
                   </Link>
                 )}
               </div>
@@ -2107,7 +2520,7 @@ export default function MyAccountDashboard({
               </div>
               <div className="my-account__security-row">
                 <div>
-                  <strong>登录密码</strong>
+                  <strong>密码与登录</strong>
                   <span>修改后所有设备都需要重新登录</span>
                 </div>
                 <Button size="small" onClick={openPasswordChange}>
@@ -2115,21 +2528,9 @@ export default function MyAccountDashboard({
                 </Button>
               </div>
             </div>
-            {/* 合规（个保法）：数据导出 + 账户注销 */}
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                padding: "10px 12px",
-                background: "#f4f5f5",
-                marginBottom: 12,
-              }}
-            >
-              <span style={{ fontSize: 12, color: "#5f6568" }}>
-                我的个人数据（资料/订单/收藏等）可随时导出或注销账户
-              </span>
-              <span style={{ display: "flex", gap: 8 }}>
+            <div className="my-account__privacy">
+              <span>我的个人数据（资料/订单/收藏等）可随时导出或注销账户</span>
+              <span className="my-account__privacy-actions">
                 <Button
                   size="small"
                   onClick={handleExportData}
@@ -2142,43 +2543,66 @@ export default function MyAccountDashboard({
                 </Button>
               </span>
             </div>
-            <div className="my-account__address">
-              <p>收货地址 <Button size="small" onClick={openAddressCreate}>新增地址</Button></p>
+            <div id="my-addresses" className="my-account__address" tabIndex={-1}>
+              <div className="my-account__address-head">
+                <p>收货地址</p>
+                <Button size="small" onClick={openAddressCreate}>新增地址</Button>
+              </div>
               {addresses.length > 0 ? (
-                addresses.map((addr) => (
-                  <div key={addr.id} style={{ marginBottom: 10 }}>
-                    <span>
-                      {addr.recipientName} · {addr.recipientPhone}
-                      {addr.isDefault ? <Tag bordered={false}>默认</Tag> : null}
-                      <br />
-                      {[addr.province, addr.city, addr.district, addr.detail]
-                        .filter(Boolean)
-                        .join("")}
-                    </span>
-                    <div>
-                      <Button
-                        size="small"
-                        type="link"
-                        onClick={() => openAddressEdit(addr)}
-                      >
-                        编辑
-                      </Button>
-                      <Button
-                        size="small"
-                        type="link"
-                        danger
-                        onClick={() => removeAddress(addr.id)}
-                      >
-                        删除
-                      </Button>
-                    </div>
-                  </div>
-                ))
+                <ul className="my-account__address-list">
+                  {addresses.map((addr) => (
+                    <li key={addr.id}>
+                      <div>
+                        <strong>
+                          {addr.recipientName}
+                          <span>{addr.recipientPhone}</span>
+                          {addr.isDefault ? <Tag bordered={false}>默认</Tag> : null}
+                        </strong>
+                        <span>
+                          {[addr.province, addr.city, addr.district, addr.detail]
+                            .filter(Boolean)
+                            .join("")}
+                        </span>
+                      </div>
+                      <div className="my-account__address-actions">
+                        <Button
+                          size="small"
+                          type="link"
+                          onClick={() => openAddressEdit(addr)}
+                        >
+                          编辑
+                        </Button>
+                        <Button
+                          size="small"
+                          type="link"
+                          danger
+                          onClick={() => removeAddress(addr.id)}
+                        >
+                          删除
+                        </Button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
               ) : (
                 <span>暂未保存收货地址</span>
               )}
             </div>
           </section>
+          )}
+          {activeSection === "notifications" && (
+          <CustomerNotificationsPanel
+            resource={notifications}
+            loading={notificationLoading}
+            error={notificationError}
+            onRetry={onRetryNotifications}
+            onRead={onReadNotification}
+            onReadAll={onReadAllNotifications}
+          />
+          )}
+        </div>
+        )}
+        </div>
         </div>
       </div>
       <CustomerPaymentDialog

@@ -161,3 +161,36 @@ test('图形验证码一次性消费：同一 captchaId 第二次校验直接过
   });
   assert.notEqual(first.captchaId, second.captchaId);
 });
+
+test('用户名登录忽略大小写，错误密码不说明账户是否存在', async () => {
+  const service = buildService({
+    id: 3,
+    phone: '13800009001',
+    name: '海川',
+    email: null,
+    status: 'ACTIVE',
+    authVersion: 1,
+    passwordHash: await bcrypt.hash('haichuan', 4),
+  });
+
+  const signedIn = await service.login({ username: 'HaiChuan', password: 'haichuan' });
+  assert.equal(signedIn.customer.id, 3);
+  assert.equal((await service.usernameLoginChallenge('haichuan')).level, 'none');
+
+  await assert.rejects(
+    () => service.login({ username: 'haichuan', password: 'wrong-password' }),
+    (error: unknown) => {
+      assert.ok(error instanceof UnauthorizedException);
+      assert.match(error.message, /用户名或密码不正确/);
+      return true;
+    },
+  );
+  await assert.rejects(
+    () => service.login({ username: 'ab', password: 'haichuan' }),
+    BadRequestException,
+  );
+  await assert.rejects(
+    () => service.login({ phone: PHONE, username: 'haichuan', password: 'haichuan' }),
+    BadRequestException,
+  );
+});

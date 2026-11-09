@@ -1,0 +1,23 @@
+﻿# 本地检出里的指令副本。主工作区已有根目录 AGENTS.md / CLAUDE.md。
+# 这些文件留在工作区内会被 Cursor 重复注入每次对话。
+.worktrees/**/AGENTS.md
+.worktrees/**/CLAUDE.md
+.tmp/**/AGENTS.md
+.tmp/**/CLAUDE.md
+.agents/worktrees/**/AGENTS.md
+.agents/worktrees/**/CLAUDE.md
+
+# 默认检索当前源码；历史工作副本、运行证据和恢复资产按明确路径读取。
+.worktrees/
+.agents/worktrees/
+.tmp/
+.tmp-ci/
+.codex-tmp/
+.codex-artifacts/
+.codex-release-artifacts/
+.playwright-mcp/
+.kimi-temp/
+acceptance-artifacts/
+backups/
+_local_backups/
+docs/archived/

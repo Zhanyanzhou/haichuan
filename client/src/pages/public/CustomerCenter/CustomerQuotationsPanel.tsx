@@ -542,6 +542,7 @@ export default function CustomerQuotationsPanel({
     <section
       id="my-quotations"
       className="my-account__panel my-account__panel--wide my-account__quotations"
+      tabIndex={-1}
     >
       <div className="my-account__panel-head">
         <div>

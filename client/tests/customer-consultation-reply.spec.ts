@@ -343,7 +343,7 @@ test.describe("客户咨询回复闭环", () => {
     });
     await installCustomerSession(page, { id: 7, name: "咨询状态会员" });
 
-    await page.goto("/customer");
+    await page.goto("/customer?section=consultations");
     const appointments = page.locator("#my-appointments");
     await expect(appointments.getByText("当前责任：顾问团队正在接收")).toBeVisible();
     await expect(appointments.getByText("当前责任：海川顾问已接手")).toBeVisible();
@@ -418,12 +418,13 @@ test.describe("客户咨询回复闭环", () => {
     await page.goto("/customer");
     await expect(page.getByRole("heading", { name: "我的账号" })).toBeVisible();
     await page.getByRole("button", { name: "退出登录" }).click();
-    await expect(page.getByRole("button", { name: "会员登录 / 注册" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "登录我的账户" })).toBeVisible();
     await expect.poll(() => page.evaluate(() => {
       const raw = localStorage.getItem("hc_selection_tray");
       return raw ? JSON.parse(raw).state : null;
     })).toEqual({ ownerKey: "guest", selectedIds: [] });
 
+    await page.getByRole("tab", { name: "手机号", exact: true }).click();
     await page.getByLabel("手机号").fill(customerB.phone);
     await page.getByLabel("密码").fill("CustomerB1");
     await page.getByRole("button", { name: "登录我的账户" }).click();
@@ -510,12 +511,13 @@ test.describe("客户咨询回复闭环", () => {
       return fulfill(route, []);
     });
 
-    await page.goto("/customer");
+    await page.goto("/customer?section=notifications");
     await expect(page.getByRole("heading", { name: "我的账号" })).toBeVisible();
     await expect.poll(() => Boolean(releaseCustomerANotifications)).toBe(true);
 
     await page.getByRole("button", { name: "退出登录" }).click();
-    await expect(page.getByRole("button", { name: "会员登录 / 注册" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "登录我的账户" })).toBeVisible();
+    await page.getByRole("tab", { name: "手机号", exact: true }).click();
     await page.getByLabel("手机号").fill(customerB.phone);
     await page.getByLabel("密码").fill("CustomerB1");
     await page.getByRole("button", { name: "登录我的账户" }).click();
@@ -598,8 +600,9 @@ test.describe("客户咨询回复闭环", () => {
     await expect(page.getByRole("heading", { name: "我的账号" })).toBeVisible();
     await expect.poll(() => Boolean(releaseCustomerARequest)).toBe(true);
     await page.getByRole("button", { name: "退出登录" }).click();
-    await expect(page.getByRole("button", { name: "会员登录 / 注册" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "登录我的账户" })).toBeVisible();
     const loginForm = page.locator("#member-access-form");
+    await loginForm.getByRole("tab", { name: "手机号", exact: true }).click();
     await loginForm.getByLabel("手机号", { exact: true }).fill(customerB.phone);
     await loginForm.getByLabel("密码", { exact: true }).fill("CustomerB1");
     await loginForm.getByRole("button", { name: "登录我的账户" }).click();
@@ -611,7 +614,7 @@ test.describe("客户咨询回复闭环", () => {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     }));
     expect(refreshRequests).toBe(0);
-    await expect(page.getByRole("button", { name: "会员登录 / 注册" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "登录我的账户" })).toHaveCount(0);
     await expect(page.evaluate(async () => {
       const { useCustomerAuthStore } = await import("/src/store/customerAuthStore.ts");
       const target = window as typeof window & { __customerEpochGlobalErrors?: number };
@@ -705,7 +708,7 @@ test.describe("客户咨询回复闭环", () => {
       if (path === "/api/partner-applications/me") return fulfill(route, null);
       return fulfill(route, []);
     });
-    await page.goto("/customer");
+    await page.goto("/customer?section=notifications");
     const notifications = page.getByRole("region", { name: "服务通知" });
     await expect(notifications.getByText("顾问已回复 A 的咨询")).toBeVisible();
     await notifications.getByRole("button", { name: "标为已读", exact: true }).click();
@@ -714,6 +717,7 @@ test.describe("客户咨询回复闭环", () => {
     await page.getByRole("button", { name: "退出登录", exact: true }).click();
     const loginForm = page.locator("#member-access-form");
     await expect(loginForm.getByRole("button", { name: "登录我的账户" })).toBeVisible();
+    await loginForm.getByRole("tab", { name: "手机号", exact: true }).click();
     await loginForm.getByLabel("手机号", { exact: true }).fill(customerB.phone);
     await loginForm.getByLabel("密码", { exact: true }).fill("CustomerB1");
     await loginForm.getByRole("button", { name: "登录我的账户" }).click();
@@ -726,7 +730,7 @@ test.describe("客户咨询回复闭环", () => {
 
     expect(markReadRequests).toBe(1);
     expect(refreshRequests).toBe(0);
-    await expect(page.getByRole("button", { name: "会员登录 / 注册" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "登录我的账户" })).toHaveCount(0);
     await expect(page.getByText("通知状态更新失败，请稍后重试")).toHaveCount(0);
     await expect(page.evaluate(async () => {
       const { useCustomerAuthStore } = await import("/src/store/customerAuthStore.ts");
@@ -851,7 +855,7 @@ test.describe("客户咨询回复闭环", () => {
     });
     await installCustomerSession(page, { id: 7, name: "咨询测试会员" });
 
-    await page.goto("/customer");
+    await page.goto("/customer?section=selections");
     await expect(page.getByRole("heading", { name: "我的账号" })).toBeVisible();
 
     const selection = page.getByRole("heading", { name: "祖母绿项链" })
@@ -861,6 +865,7 @@ test.describe("客户咨询回复闭环", () => {
     await expect(selection.getByText("祖母绿项链、沙弗莱吊坠")).toBeVisible();
     await expect(selection.getByText("当前责任：海川顾问持续跟进")).toBeVisible();
 
+    await page.getByRole("navigation", { name: "会员服务" }).getByRole("link", { name: "服务通知" }).click();
     await page.getByRole("link", { name: "查看咨询详情 →" }).click();
     await expect(page).toHaveURL(/section=consultations&leadId=41/);
     const focusedDetail = page.getByRole("region", { name: "咨询详情" });
@@ -952,7 +957,7 @@ test.describe("客户咨询回复闭环", () => {
 
     const pagination = page.getByRole("navigation", { name: "选款咨询分页" });
     await pagination.getByTitle("2").click();
-    await expect(page).toHaveURL(/\/customer$/);
+    await expect(page).toHaveURL(/\/customer\?section=selections$/);
     await expect(focusedDetail).toHaveCount(0);
     await expect(page.locator("#my-selections").getByRole("heading", { name: "第四件历史作品" })).toBeVisible();
     await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe("my-selections");
@@ -1008,7 +1013,7 @@ test.describe("客户咨询回复闭环", () => {
       expect(consultationPaths, invalidUrl).toEqual([]);
 
       await invalidTarget.getByRole("button", { name: "返回咨询列表" }).click();
-      await expect(page).toHaveURL(/\/customer$/);
+      await expect(page).toHaveURL(/\/customer\?section=appointments$/);
       await expect(invalidTarget).toHaveCount(0);
       await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe("my-appointments");
     }
@@ -1069,7 +1074,7 @@ test.describe("客户咨询回复闭环", () => {
     await expect(focusedDetail.getByRole("alert")).toContainText("未找到这条咨询");
     await expect(page.getByText("不得显示")).toHaveCount(0);
     await focusedDetail.getByRole("button", { name: "返回咨询列表" }).click();
-    await expect(page).toHaveURL(/\/customer$/);
+    await expect(page).toHaveURL(/\/customer\?section=appointments$/);
   });
 
   test("选款咨询失败可重试，预约咨询权限失败不伪装空态", async ({ page }) => {
@@ -1101,7 +1106,7 @@ test.describe("客户咨询回复闭环", () => {
     });
     await installCustomerSession(page, { id: 8, name: "异常状态会员" });
 
-    await page.goto("/customer");
+    await page.goto("/customer?section=consultations");
     const selections = page.locator("#my-selections");
     const appointments = page.locator("#my-appointments");
     await expect(selections.getByRole("alert")).toContainText("选款咨询暂时无法加载");
@@ -1136,7 +1141,7 @@ test.describe("客户咨询回复闭环", () => {
     await installCustomerSession(page, { id: 9, name: "会话失效会员" });
 
     await page.goto("/customer");
-    await expect(page.getByRole("button", { name: "会员登录 / 注册" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "登录我的账户" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "我的账号" })).toHaveCount(0);
     await expect.poll(() => page.evaluate(() => {
       const raw = localStorage.getItem("hc_selection_tray");

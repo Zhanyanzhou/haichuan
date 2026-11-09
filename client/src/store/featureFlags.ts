@@ -6,10 +6,10 @@ import { unwrapResponse } from "@/utils/unwrap";
 /**
  * 海川珠宝 前台销售模式工具
  *
- * 电商开关（FeatureFlag）以服务端 /settings/flags 为单一来源，
- * 与 CustomerCommerceGuard 读取同一环境变量 CUSTOMER_COMMERCE_ENABLED。
- * 加载失败或未配置时安全默认关闭；服务端守卫是最终安全边界。
- * 当前消费者：ProductDetail、MyAccountDashboard。
+ * 功能开关以服务端 /settings/flags 为单一来源。
+ * 购物车准备在读取成功时可用；创建订单仍由 commerceEnabled 与 CustomerCommerceGuard 控制，
+ * 支付由 paymentEnabled 控制。加载失败时回退 SAFE_FLAGS，购物车准备一并关闭。
+ * 当前消费者：ProductDetail、Checkout、MyAccountDashboard。
  */
 
 /** 前台交易开关（单一来源：后端 /settings/flags）。 */
@@ -110,12 +110,20 @@ export function useCommerceCapabilities(): {
   return { flags, loading, error, reload: load };
 }
 
-/** 统一规则：全站交易开关开启且商品为“直接购买”时，才允许加购/下单。 */
+/** 创建订单：交易开关开启且商品为直接购买。购物车准备不使用这条规则。 */
 export function isCommerceAllowed(
   salesMode: string | undefined,
   commerceEnabled: boolean,
 ): boolean {
   return commerceEnabled && salesMode === "DIRECT_PURCHASE";
+}
+
+/** 购物车准备：功能开关允许购物车，且商品为直接购买。 */
+export function canPrepareDirectPurchase(
+  salesMode: string | undefined,
+  cartEnabled: boolean,
+): boolean {
+  return cartEnabled && salesMode === "DIRECT_PURCHASE";
 }
 
 /** 非直接购买场景的咨询入口路由 */

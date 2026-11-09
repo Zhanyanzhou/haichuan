@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import type { CategoryPublicationRule } from "../src/types/catalog";
 import { installAdminSession } from "./fixtures/session-auth";
 
 const categoryTree = [
@@ -75,6 +76,71 @@ async function inlineEdges(first: Locator, second: Locator) {
 }
 
 test.describe("分类管理现有交互合同", () => {
+  test("商品发布规则可保存、回显和处理并发更新（API 夹具）", async ({ page }) => {
+    await authenticateCategoryEditor(page);
+    const writes: unknown[] = [];
+    let rules: CategoryPublicationRule[] | null = null;
+    let conflictOnWrite = false;
+    await page.route("**/api/**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === "/api/auth/profile") return route.fallback();
+      let data: unknown = {};
+      if (path === "/api/categories/admin/tree") {
+        const tree = structuredClone(categoryTree);
+        Object.assign(tree[0].children[0], { publicationRules: rules });
+        data = tree;
+      }
+      if (path === "/api/products") data = { list: [], total: 0 };
+      if (path === "/api/categories/2" && route.request().method() === "PUT") {
+        const body = route.request().postDataJSON();
+        writes.push(body);
+        if (conflictOnWrite) {
+          rules = ["PRECIOUS_METAL"];
+          return route.fulfill({
+            status: 409,
+            json: { statusCode: 409, message: "商品发布规则已被其他操作更新" },
+          });
+        }
+        rules = body.publicationRules;
+      }
+      await route.fulfill({ json: { code: 200, data, message: "ok" } });
+    });
+
+    await page.goto("/admin/categories");
+    await page.getByRole("button", { name: /^查看「戒指」的商品/ }).focus();
+    const edit = page.getByRole("button", { name: "编辑「戒指」" });
+    await edit.press("Enter");
+    const section = page.getByRole("region", { name: "商品发布规则" });
+    await section.getByRole("radio", { name: "戒指圈口" }).check();
+    await section.getByRole("checkbox", { name: "对客发布须有有效鉴定证书" }).check();
+    await section.getByRole("checkbox", { name: "宝石来源与处理说明" }).check();
+    await expect(section.getByRole("status")).toHaveText("规则有未保存的修改");
+    await page.keyboard.press("Escape");
+    await page.getByRole("dialog", { name: "放弃未保存的修改？" }).getByRole("button", { name: "继续编辑" }).click();
+    await expect(section.getByRole("checkbox", { name: "宝石来源与处理说明" })).toBeChecked();
+    await section.getByRole("button", { name: "保存发布规则" }).click();
+    await expect(section.getByRole("status")).toHaveCount(0);
+    await expect(section.getByRole("radio", { name: "戒指圈口" })).toBeChecked();
+    expect(writes).toEqual([{
+      publicationRules: ["RING_SIZE", "CERTIFICATE", "GEM_DISCLOSURE"],
+      expectedPublicationRules: null,
+    }]);
+
+    conflictOnWrite = true;
+    await section.getByRole("checkbox", { name: "实际金重" }).check();
+    await section.getByRole("button", { name: "保存发布规则" }).click();
+    await expect(section.getByRole("alert")).toContainText("此分类的发布规则已更新");
+    await expect(section.getByRole("checkbox", { name: "实际金重" })).toBeChecked();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await section.getByRole("button", { name: "载入最新规则" }).click();
+    await expect(section.getByRole("checkbox", { name: "贵金属材质和纯度" })).toBeChecked();
+    await expect(section.getByRole("checkbox", { name: "实际金重" })).not.toBeChecked();
+    expect(writes[1]).toEqual({
+      publicationRules: ["RING_SIZE", "CERTIFICATE", "GEM_DISCLOSURE", "GOLD_WEIGHT"],
+      expectedPublicationRules: ["RING_SIZE", "CERTIFICATE", "GEM_DISCLOSURE"],
+    });
+  });
+
   test("加载、搜索、详情与商品列表跳转形成单一路径", async ({ page }) => {
     await authenticateCategoryEditor(page);
     const productQueries: URLSearchParams[] = [];
@@ -256,7 +322,8 @@ test.describe("分类管理现有交互合同", () => {
     await expect(directory.getByRole("button", { name: "编辑「黄金戒指」" })).toHaveCount(1);
     expect(categoryWrites).toEqual([{ name: "黄金戒指" }]);
     await expect(nameInput).toBeEnabled();
-    await page.keyboard.press("Escape");
+    await expect(nameInput).toBeFocused();
+    await nameInput.press("Escape");
     await expect(editDrawer).toBeHidden();
 
     await directory.getByRole("textbox", { name: "搜索品类或款式" }).clear();

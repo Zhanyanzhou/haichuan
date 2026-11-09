@@ -20,6 +20,34 @@ function fulfill(route: Route, data: unknown, status = 200) {
   });
 }
 
+const freeShippingTemplate = {
+  id: 7,
+  name: "标准包邮模板",
+  feeMode: "FREE",
+  baseFee: 0,
+  remoteSurcharge: 0,
+  freeShippingThreshold: null,
+  excludedRegions: [],
+  isActive: true,
+};
+
+async function chooseEditorOption(page: Page, field: string | RegExp, label: string) {
+  const combobox = page.getByRole("combobox", { name: field });
+  await expect(async () => {
+    await combobox.evaluate((element) => element.scrollIntoView({ block: "center", behavior: "instant" }));
+    if (await combobox.getAttribute("aria-expanded") !== "true") await combobox.click({ timeout: 2000 });
+    await page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option")
+      .getByText(label, { exact: true }).click({ timeout: 2000 });
+  }).toPass({ timeout: 10_000 });
+}
+
+async function confirmDirectDelivery(page: Page) {
+  await page.getByRole("checkbox", { name: "物流配送" }).check();
+  await chooseEditorOption(page, /备货状态/, "现货");
+  await chooseEditorOption(page, /发出时效/, "48 小时内发出");
+  await page.getByRole("checkbox", { name: "已核对配送方式、备货状态和发出时效" }).check();
+}
+
 test.describe("商品编辑器现有接口契约", () => {
   test.skip(useMock, "该回归通过隔离拦截真实 API 路径验证状态与错误契约");
 
@@ -70,7 +98,9 @@ test.describe("商品编辑器现有接口契约", () => {
       await page.getByRole("button", { name: "前往上传商品图片" }).click();
       const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aHsQAAAAASUVORK5CYII=", "base64");
       const gallery = page.locator(".pro-editor__uploads");
-      await gallery.locator('input[type="file"]').setInputFiles([
+      const chooserReady = page.waitForEvent("filechooser");
+      await gallery.getByRole("button", { name: /上传图片，可一次多选/ }).first().click();
+      await (await chooserReady).setFiles([
         { name: "ATP968_SIDE_戒指.png", mimeType: "image/png", buffer: Buffer.concat([png, Buffer.from([0])]) },
         { name: "ATP968戒指主图.png", mimeType: "image/png", buffer: png },
         { name: "不同文件名.png", mimeType: "image/png", buffer: png },
@@ -139,7 +169,7 @@ test.describe("商品编辑器现有接口契约", () => {
     await expect(page.locator('form[name="product-editor-main"]')).toHaveCount(0);
 
     await page.getByRole("button", { name: "重新加载" }).click();
-    await expect(page.getByRole("heading", { name: "图文描述" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "图文详情" })).toBeVisible();
     await expect(page.getByRole("radio", { name: "预约定制", exact: true })).toBeChecked();
     await expect(page.getByRole("spinbutton", { name: "定制参考起价", exact: true })).toHaveValue("1000.00");
     await expect(page.getByRole("radio", { name: "立刻上架" })).toBeChecked();
@@ -149,8 +179,7 @@ test.describe("商品编辑器现有接口契约", () => {
     await expect(page.getByText(/直接销售需要一个大于 0 的成交价/)).toBeVisible();
     await page.getByRole("button", { name: "基础信息" }).click();
     await page.getByRole("textbox", { name: "款号" }).fill("DUPLICATE-001");
-    await page.getByRole("combobox", { name: "当前类目" }).click();
-    await page.getByText("戒指", { exact: true }).click();
+    await chooseEditorOption(page, "当前类目", "戒指");
 
     const saveDraft = page.getByRole("button", { name: "保存草稿" });
     await saveDraft.dblclick();
@@ -414,11 +443,11 @@ test.describe("商品编辑器现有接口契约", () => {
       }
       if (url.pathname === "/api/products/15" && route.request().method() === "PUT") {
         updateRequests += 1;
+        writesCompleted = true;
         return fulfill(route, { id: 15 });
       }
       if (url.pathname === "/api/products/15/status" && route.request().method() === "PUT") {
         publishRequests += 1;
-        writesCompleted = true;
         return fulfill(route, { ...baseProduct, name: "权威回读确认后的商品标题" });
       }
       return fulfill(route, {});
@@ -435,7 +464,7 @@ test.describe("商品编辑器现有接口契约", () => {
     await expect(pendingVerification).toContainText("系统不会重复保存或重新执行发布动作");
     await expect(title).toHaveValue("运营提交的新标题");
     expect(updateRequests).toBe(1);
-    expect(publishRequests).toBe(1);
+    expect(publishRequests).toBe(0);
     expect(productGetRequests).toBe(2);
 
     await pendingVerification.getByRole("button", { name: "重新读取保存结果" }).click();
@@ -443,7 +472,7 @@ test.describe("商品编辑器现有接口契约", () => {
     await expect(page.getByText("商品保存结果已确认")).toBeVisible();
     await expect(page.locator(".pro-editor__footer [role='status']")).toContainText("最后保存于");
     expect(updateRequests).toBe(1);
-    expect(publishRequests).toBe(1);
+    expect(publishRequests).toBe(0);
     expect(productGetRequests).toBe(3);
 
     await expect(page.getByText("商品保存结果已确认")).toHaveCount(0, { timeout: 5000 });
@@ -466,7 +495,7 @@ test.describe("商品编辑器现有接口契约", () => {
     await expect(title).toHaveValue("另一件商品");
     await expect(page.getByText("商品保存结果已确认")).toHaveCount(0);
     expect(updateRequests).toBe(2);
-    expect(publishRequests).toBe(2);
+    expect(publishRequests).toBe(0);
     expect(productGetRequests).toBe(5);
   });
 
@@ -775,8 +804,7 @@ test.describe("商品编辑器现有接口契约", () => {
     await page.goto("/admin/products/new");
     await page.getByRole("button", { name: "基础信息" }).click();
     await page.getByRole("textbox", { name: "款号" }).fill(product.code);
-    await page.getByRole("combobox", { name: "当前类目" }).click();
-    await page.getByText("戒指", { exact: true }).click();
+    await chooseEditorOption(page, "当前类目", "戒指");
 
     const saveDraft = page.getByRole("button", { name: "保存草稿" });
     await saveDraft.click();
@@ -803,31 +831,27 @@ test.describe("商品编辑器现有接口契约", () => {
       const method = route.request().method();
       if (url.pathname === "/api/auth/profile") return route.fallback();
       if (url.pathname === "/api/categories/admin/tree") return fulfill(route, [{ id: 1, name: "吊坠", children: [] }]);
-      if (url.pathname === "/api/shipping-templates") return fulfill(route, []);
+      if (url.pathname === "/api/shipping-templates") return fulfill(route, [freeShippingTemplate]);
       if (url.pathname === "/api/settings/flags") return fulfill(route, { commerceEnabled: true, cartEnabled: true, paymentEnabled: true });
       if (url.pathname === "/api/products" && method === "POST") {
         createAttempts += 1;
-        const body = route.request().postDataJSON() as { code?: string; name?: string; categoryId?: number };
-        const id = 70 + createAttempts;
-        const product = {
-          id,
-          code: body.code,
-          name: body.name,
-          categoryId: body.categoryId,
-          materialType: "OTHER",
-          price: 1280,
-          status: "DRAFT",
-          visibility: "INTERNAL",
-          salesMode: "DIRECT_PURCHASE",
-          inventoryPolicy: "STANDARD",
-          purchaseRegion: "MAINLAND",
-          publishMode: "IMMEDIATE",
+        const body = route.request().postDataJSON() as Record<string, unknown>;
+        expect(body).toMatchObject({
+          fulfillmentConfirmed: true,
           fulfillmentType: "IN_STOCK",
           dispatchTime: "WITHIN_48_HOURS",
-          deliveryMethods: [],
+          deliveryMethods: ["EXPRESS"],
+          shippingTemplateId: freeShippingTemplate.id,
+        });
+        const id = 70 + createAttempts;
+        const product = {
+          ...body,
+          price: 1280,
           images: [],
           skus: [],
           detailContent: [],
+          id,
+          status: "DRAFT",
         };
         products.set(id, product);
         return fulfill(route, product);
@@ -849,11 +873,13 @@ test.describe("商品编辑器现有接口契约", () => {
     await page.getByRole("button", { name: "基础信息" }).click();
     await page.getByRole("textbox", { name: "商品标题" }).fill("18K金红宝石吊坠");
     await page.getByRole("textbox", { name: "款号" }).fill("ATP-310");
-    await page.getByRole("combobox", { name: "当前类目" }).click();
-    await page.getByText("吊坠", { exact: true }).click();
+    await chooseEditorOption(page, "当前类目", "吊坠");
     await page.getByRole("radio", { name: "直接销售", exact: true }).click();
     await page.getByRole("spinbutton", { name: "成交价" }).fill("1280");
     await page.getByRole("spinbutton", { name: "金重（g）" }).fill("11");
+    await chooseEditorOption(page, /主要材质/, "18K金");
+    await chooseEditorOption(page, /运费模板/, freeShippingTemplate.name);
+    await confirmDirectDelivery(page);
     const openVisibility = async () => {
       const field = page.locator("#product-editor-main_visibility");
       await field.evaluate((node) => {
@@ -879,16 +905,18 @@ test.describe("商品编辑器现有接口契约", () => {
     await expect(page.getByRole("spinbutton", { name: "金重（g）" })).toHaveValue("");
     await expect(page.getByRole("button", { name: "上架商品" })).toBeEnabled();
     await expect(page.getByText("尚未保存", { exact: true })).toBeVisible();
-    await expect(page.locator(".pro-editor__category .ant-tag")).toHaveText("草稿");
+    await expect(page.locator(".pro-editor__identity .ant-tag")).toHaveText("草稿");
     expect(createAttempts).toBe(1);
 
     await page.getByRole("radio", { name: "直接销售", exact: true }).click();
     await expect(page.getByRole("spinbutton", { name: "成交价" })).toHaveValue("");
     await page.getByRole("textbox", { name: "商品标题" }).fill("足金小鱼耳钉");
     await page.getByRole("textbox", { name: "款号" }).fill("ATP-311");
-    await page.getByRole("combobox", { name: "当前类目" }).click();
-    await page.getByText("吊坠", { exact: true }).click();
+    await chooseEditorOption(page, "当前类目", "吊坠");
     await page.getByRole("spinbutton", { name: "成交价" }).fill("860");
+    await chooseEditorOption(page, /主要材质/, "足金999");
+    await chooseEditorOption(page, /运费模板/, freeShippingTemplate.name);
+    await confirmDirectDelivery(page);
     await openVisibility();
     await page.getByText("仅内部可见", { exact: true }).click();
     await page.getByRole("button", { name: "上架商品" }).click();
@@ -896,6 +924,184 @@ test.describe("商品编辑器现有接口契约", () => {
     await expect(page).toHaveURL(/\/admin\/products\/new$/);
     await expect(page.getByRole("textbox", { name: "商品标题" })).toHaveValue("");
     expect(createAttempts).toBe(2);
+  });
+
+  test("直购戒指类目要求圈口、宝石资料和有效鉴定证书（API 夹具）", async ({ page }) => {
+    await installAdminSession(page);
+    const product = {
+      id: 52,
+      code: "RING-052",
+      name: "金镶红宝石戒指",
+      categoryId: 1,
+      status: "DRAFT",
+      visibility: "PUBLIC",
+      salesMode: "DIRECT_PURCHASE",
+      materialType: "AU750",
+      gemInfo: { type: "红宝石" },
+      price: 6800,
+      publishMode: "IMMEDIATE",
+      scheduledPublishError: "发布前请补全: 有效鉴定证书" as string | null,
+      shippingTemplateId: freeShippingTemplate.id,
+      deliveryMethods: ["EXPRESS"],
+      fulfillmentType: "IN_STOCK",
+      dispatchTime: "WITHIN_48_HOURS",
+      fulfillmentConfirmed: true,
+      inventoryPolicy: "STANDARD",
+      primaryImageId: 521,
+      images: [{ id: 521, productId: 52, url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E", type: "FRONT", sortOrder: 0, isVideo: false }],
+      skus: [{ id: 522, productId: 52, skuCode: "RING-052-DEFAULT", material: "AU750", price: 6800, isActive: true }],
+      certificates: [] as Array<Record<string, unknown>>,
+    };
+    const certificateWrites: Array<Record<string, unknown>> = [];
+    const certificateEdits: Array<Record<string, unknown>> = [];
+    const certificateRemovals: number[] = [];
+    const skuWrites: Array<Record<string, unknown>> = [];
+    const combinedSkuWrites: Array<Record<string, unknown>> = [];
+    let rejectSave = false;
+    let publishCount = 0;
+    await page.route("**/api/**", async (route) => {
+      const { pathname } = new URL(route.request().url());
+      const method = route.request().method();
+      if (pathname === "/api/auth/profile") return route.fallback();
+      if (pathname === "/api/categories/admin/tree") {
+        return fulfill(route, [{ id: 1, name: "鉴定戒指", publicationRules: ["RING_SIZE", "GEMSTONE", "GEM_DISCLOSURE", "CERTIFICATE"], children: [] }]);
+      }
+      if (pathname === "/api/shipping-templates") return fulfill(route, [freeShippingTemplate]);
+      if (pathname === "/api/products/52/certificates" && method === "POST") {
+        const data = route.request().postDataJSON();
+        certificateWrites.push(data);
+        const created = { id: 522 + certificateWrites.length, productId: 52, ...data };
+        product.certificates.push(created);
+        return fulfill(route, created);
+      }
+      const certificateMatch = pathname.match(/^\/api\/products\/52\/certificates\/(\d+)$/);
+      if (certificateMatch) {
+        const id = Number(certificateMatch[1]);
+        const index = product.certificates.findIndex((certificate) => certificate.id === id);
+        if (index < 0) return fulfill(route, { statusCode: 404, message: "证书不存在" }, 404);
+        if (method === "PUT") {
+          const data = route.request().postDataJSON();
+          certificateEdits.push(data);
+          return fulfill(route, Object.assign(product.certificates[index], data));
+        }
+        if (method === "DELETE") {
+          certificateRemovals.push(id);
+          product.certificates.splice(index, 1);
+          return fulfill(route, { id });
+        }
+      }
+      if (pathname === "/api/products/52/status" && method === "PUT") {
+        publishCount += 1;
+        product.status = "PUBLISHED";
+        product.scheduledPublishError = null;
+        return fulfill(route, product);
+      }
+      if (pathname === "/api/products/52/skus/522" && method === "PUT") {
+        const data = route.request().postDataJSON();
+        skuWrites.push(data);
+        return fulfill(route, Object.assign(product.skus[0], data));
+      }
+      if (pathname === "/api/products/52") {
+        if (method === "PUT") {
+          const { editorSkuUpdates, ...fields } = route.request().postDataJSON();
+          if (editorSkuUpdates) combinedSkuWrites.push(...editorSkuUpdates);
+          if (rejectSave) {
+            return fulfill(route, { statusCode: 409, message: "已发布商品更新后不满足发布条件：发布前请补全: 确认备货状态和发出时效" }, 409);
+          }
+          for (const { id, expectedPrice: _expectedPrice, ...change } of editorSkuUpdates || []) {
+            const sku = product.skus.find((item) => item.id === id);
+            if (sku) Object.assign(sku, change);
+          }
+          Object.assign(product, fields);
+        }
+        return fulfill(route, product);
+      }
+      return fulfill(route, {});
+    });
+
+    await page.goto("/admin/products/52/edit");
+    await expect(page.getByText("定时上架未完成")).toBeVisible();
+    await expect(page.getByText("发布前请补全: 有效鉴定证书")).toBeVisible();
+    const publish = page.getByRole("button", { name: "上架商品", exact: true });
+    const ringSize = page.getByRole("textbox", { name: /戒指圈口/ });
+    await expect(ringSize).toBeVisible();
+    await publish.click();
+    const gaps = page.locator(".pro-editor__gap-list");
+    await expect(gaps.getByRole("button", { name: "戒指圈口" })).toBeVisible();
+    await expect(gaps.getByRole("button", { name: "宝石来源" })).toBeVisible();
+    await expect(gaps.getByRole("button", { name: "宝石处理说明" })).toBeVisible();
+    await expect(gaps.getByRole("button", { name: "添加有效鉴定证书" })).toBeVisible();
+    expect(publishCount).toBe(0);
+
+    await ringSize.fill("港码 14");
+    await chooseEditorOption(page, /宝石来源/, "天然");
+    await page.getByRole("textbox", { name: /宝石处理说明/ }).fill("未经处理");
+    await page.getByRole("button", { name: "添加证书" }).click();
+    const dialog = page.getByRole("dialog", { name: "添加鉴定证书" });
+    const saveCertificate = dialog.getByRole("button", { name: "保存证书" });
+    await saveCertificate.click();
+    await expect(dialog.getByText("请输入证书上的编号")).toBeVisible();
+    expect(certificateWrites).toHaveLength(0);
+    await chooseEditorOption(page, "证书类型", "GIA 证书");
+    await dialog.getByRole("textbox", { name: "证书编号" }).fill("—");
+    await saveCertificate.click();
+    await expect(dialog.getByText("证书编号须包含数字或文字")).toBeVisible();
+    expect(certificateWrites).toHaveLength(0);
+    await dialog.getByRole("textbox", { name: "证书编号" }).fill(" GIA-RING-052 ");
+    await saveCertificate.click();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByText("GIA 证书 · GIA-RING-052")).toBeVisible();
+    expect(certificateWrites).toEqual([{ certType: "GIA", certNumber: "GIA-RING-052" }]);
+    expect(publishCount).toBe(0);
+
+    await publish.click();
+    await expect(page.locator(".pro-editor__identity .ant-tag")).toHaveText("已上架");
+    expect(publishCount).toBe(1);
+    expect(product.gemInfo).toMatchObject({ type: "红宝石", origin: "天然", treatment: "未经处理" });
+    expect(combinedSkuWrites).toEqual([{ id: 522, size: "港码 14" }]);
+    expect(skuWrites).toHaveLength(0);
+    await expect(page.getByText("定时上架未完成")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "删除 GIA 证书 · GIA-RING-052" })).toBeDisabled();
+
+    const editButton = page.getByRole("button", { name: "编辑 GIA 证书 · GIA-RING-052" });
+    await editButton.click();
+    const editDialog = page.getByRole("dialog", { name: "编辑鉴定证书" });
+    await expect(editDialog.getByText(/顾客将暂时看不到这件商品/)).toBeVisible();
+    await editDialog.getByRole("button", { name: "保存证书" }).click();
+    await expect(editDialog).toBeHidden();
+    expect(certificateEdits).toHaveLength(0);
+    await editButton.click();
+    await editDialog.getByRole("textbox", { name: "证书编号" }).fill("GIA-RING-052-A");
+    await editDialog.getByRole("button", { name: "保存证书" }).click();
+    await expect(editDialog).toBeHidden();
+    expect(certificateEdits).toEqual([{ certType: "GIA", certNumber: "GIA-RING-052-A" }]);
+
+    await page.getByRole("button", { name: "添加证书" }).click();
+    await chooseEditorOption(page, "证书类型", "国检证书");
+    await dialog.getByRole("textbox", { name: "证书编号" }).fill("NATIONAL-RING-052");
+    await saveCertificate.click();
+    await expect(dialog).toBeHidden();
+    await page.getByRole("button", { name: "删除 国检证书 · NATIONAL-RING-052" }).click();
+    const deleteDialog = page.getByRole("dialog", { name: /删除证书/ });
+    await expect(deleteDialog.getByText(/顾客将暂时看不到这件商品/)).toBeVisible();
+    await deleteDialog.getByRole("button", { name: "确认删除" }).click();
+    await expect(page.getByText("国检证书 · NATIONAL-RING-052")).toHaveCount(0);
+    expect(certificateRemovals).toEqual([524]);
+    expect(publishCount).toBe(1);
+    const price = page.getByRole("spinbutton", { name: /成交价/ });
+    await price.fill("6900");
+    rejectSave = true;
+    await page.getByRole("button", { name: "保存更改", exact: true }).click();
+    await expect(gaps.getByRole("button", { name: "确认备货状态和发出时效" })).toBeVisible();
+    expect(product.skus[0].price).toBe(6800);
+    expect(skuWrites).toHaveLength(0);
+    expect(combinedSkuWrites.at(-1)).toMatchObject({ id: 522, price: 6900, expectedPrice: 6800 });
+    await expect(price).toHaveValue("6900.00");
+    rejectSave = false;
+    await page.getByRole("button", { name: "保存更改", exact: true }).click();
+    await expect(page.getByText("已保存商品更改", { exact: true })).toBeVisible();
+    expect(product.skus[0].price).toBe(6900);
+    expect(publishCount).toBe(1);
   });
 
   test("拖拽顺序用前移后移保存，直接销售可填写可售数量", async ({ page }) => {

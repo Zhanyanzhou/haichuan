@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { PublicSiteSettingsResource } from "@/hooks/usePublicSiteSettings";
 import { isDialablePhone, preferSiteSetting, resolvePublicPhone, resolvePublicWechat, SIGNED_PUBLIC_CONTACT } from "@/config/publicContact";
 
@@ -8,12 +8,13 @@ type PublicContactDetailsProps = {
   presentation?: "details" | "direct";
 };
 
-/** 联系与预约页面统一展示公开渠道、读取状态和微信复制反馈。 */
+/** 联系页统一展示公开渠道、读取状态和微信复制反馈。 */
 export default function PublicContactDetails({ resource, preview = false, presentation = "details" }: PublicContactDetailsProps) {
   const [copyStatus, setCopyStatus] = useState("");
   const channelId = useId();
   const [qrReady, setQrReady] = useState(false);
   const [qrFailed, setQrFailed] = useState(false);
+  const qrImageRef = useRef<HTMLImageElement>(null);
   const setting = (key: string) => {
     const value = resource.settings?.[key];
     return typeof value === "string" ? value.trim() : "";
@@ -41,6 +42,10 @@ export default function PublicContactDetails({ resource, preview = false, presen
 
   useEffect(() => { setCopyStatus(""); }, [wechat, resource.status]);
   useEffect(() => { setQrReady(false); setQrFailed(false); }, [qrCode, resource.status]);
+  useEffect(() => {
+    const image = qrImageRef.current;
+    if (image?.complete && image.naturalWidth > 0) setQrReady(true);
+  }, [qrCode, resource.status]);
 
   const copyWechat = async (ownerDocument: Document) => {
     if (preview) {
@@ -68,40 +73,54 @@ export default function PublicContactDetails({ resource, preview = false, presen
       </section> : null}
       {resource.status === "loaded" ? <>
         <div className="contact-methods__grid">
-          <section className="contact-methods__channel" aria-labelledby={`${channelId}-wechat`}>
-            <h2 id={`${channelId}-wechat`}>微信咨询</h2>
-            <p>添加商家微信，交流选款与定制需求。</p>
-            <div className={`contact-methods__qr${qrCode && !qrFailed ? "" : " contact-methods__qr--empty"}`} aria-busy={Boolean(qrCode) && !qrReady && !qrFailed}>
-              {qrCode && !qrFailed ? <img src={qrCode} alt="公司微信加好友二维码" width="240" height="240" decoding="async"
-                className={qrReady ? "is-ready" : "is-loading"} onLoad={() => setQrReady(true)} onError={() => setQrFailed(true)} /> : null}
-              {qrCode && !qrReady && !qrFailed ? <p role="status">正在加载二维码…</p> : null}
-              {qrFailed ? <p role="status">二维码暂时无法显示{wechat ? "，可复制微信号添加。" : "，请稍后重试。"}</p> : null}
-              {!qrCode ? <p>{wechat ? "可复制下方微信号，在微信中搜索添加。" : "微信联系方式尚未提供。"}</p> : null}
-            </div>
-            {wechat ? <p className="contact-methods__identity"><span className="contact-methods__label">微信号</span><span className="contact-methods__value">{wechat}</span></p> : null}
-            <div className="contact-methods__actions">
-              {wechat ? <button type="button" className="contact-direct__text-action" onClick={(event) => { void copyWechat(event.currentTarget.ownerDocument); }}>复制微信号</button> : null}
-              {qrCode && qrReady && !qrFailed ? <a className="contact-direct__text-action" href={qrCode} download onClick={preview ? (event) => event.preventDefault() : undefined}>保存二维码</a> : null}
-            </div>
-            {copyStatus ? <p className="contact-methods__feedback" role="status">{copyStatus}</p> : null}
-          </section>
-          <section className="contact-methods__channel" aria-labelledby={`${channelId}-phone`}>
-            <h2 id={`${channelId}-phone`}>电话联系</h2>
-            <p>直接沟通作品、到店与服务安排。</p>
-            <dl className="contact-facts">
+          <section id="wechat-consult" className="contact-methods__channel contact-methods__channel--wechat" aria-labelledby={`${channelId}-wechat`}>
+            <div className="contact-wechat">
               <div>
-                <dt>电话</dt>
-                <dd>
-                  {phone ? <span>{phone}</span> : <span>联系电话尚未提供。</span>}
-                  {dialNumber ? <a href={`tel:${dialNumber}`} className="contact-direct__text-action" onClick={preview ? (event) => event.preventDefault() : undefined}>拨打电话</a> : null}
-                </dd>
+                <h2 id={`${channelId}-wechat`}>微信咨询</h2>
+                <p>欢迎添加海川珠宝顾问微信，沟通选款、定制与售后。回复以实际沟通为准。</p>
+                <p className="contact-wechat__hint">用另一台设备扫描二维码即可添加。若正在用手机浏览，请复制微信号，或保存二维码后在微信中识别。</p>
+                {wechat ? <p className="contact-methods__identity"><span className="contact-methods__label">微信号</span><span className="contact-methods__value">{wechat}</span></p> : null}
+                <div className="contact-methods__actions">
+                  {wechat ? <button type="button" className="contact-direct__primary-action" onClick={(event) => { void copyWechat(event.currentTarget.ownerDocument); }}>复制微信号</button> : null}
+                  {qrCode && qrReady && !qrFailed ? <a className="contact-direct__text-action" href={qrCode} download onClick={preview ? (event) => event.preventDefault() : undefined}>保存二维码</a> : null}
+                </div>
+                {copyStatus ? <p className="contact-methods__feedback" role="status">{copyStatus}</p> : null}
               </div>
-              {hours ? <div><dt>服务时间</dt><dd>{hours}</dd></div> : null}
-              {address ? <div><dt>接待地址</dt><dd>{address}</dd></div> : null}
-              {email ? <div><dt>邮箱</dt><dd><a className="contact-direct__text-action" href={`mailto:${email}`} onClick={preview ? (event) => event.preventDefault() : undefined}>{email}</a></dd></div> : null}
-            </dl>
+              <div className={`contact-methods__qr${qrCode && !qrFailed ? "" : " contact-methods__qr--empty"}`} aria-busy={Boolean(qrCode) && !qrReady && !qrFailed}>
+                {qrCode && !qrFailed ? <img ref={qrImageRef} src={qrCode} alt="公司微信加好友二维码" width="240" height="240" decoding="async"
+                  className={qrReady ? "is-ready" : "is-loading"} onLoad={() => setQrReady(true)} onError={() => setQrFailed(true)} /> : null}
+                {qrCode && !qrReady && !qrFailed ? <p role="status">正在加载二维码…</p> : null}
+                {qrFailed ? <p role="status">二维码暂时无法显示{wechat ? "，可复制微信号添加。" : "，请稍后重试。"}</p> : null}
+                {!qrCode ? <p>{wechat ? "二维码尚未配置。请复制微信号，在微信中搜索添加。" : "微信联系方式尚未提供。"}</p> : null}
+              </div>
+            </div>
           </section>
+          <div className="contact-methods__aside">
+            <section id="phone-consult" className="contact-methods__channel" aria-labelledby={`${channelId}-phone`}>
+              <h2 id={`${channelId}-phone`}>电话咨询</h2>
+              <p>可直接沟通作品、到店与服务安排。</p>
+              <dl className="contact-facts">
+                <div>
+                  <dt>电话</dt>
+                  <dd>
+                    {phone ? <span>{phone}</span> : <span>联系电话尚未提供。</span>}
+                    {dialNumber ? <a href={`tel:${dialNumber}`} className="contact-direct__text-action" onClick={preview ? (event) => event.preventDefault() : undefined}>拨打电话</a> : null}
+                  </dd>
+                </div>
+                {hours ? <div><dt>服务时间</dt><dd>{hours}</dd></div> : null}
+                {address ? <div><dt>接待地址</dt><dd>{address}</dd></div> : null}
+                <div><dt>服务范围</dt><dd>{SIGNED_PUBLIC_CONTACT.serviceArea}</dd></div>
+              </dl>
+              <p className="contact-methods__note">{SIGNED_PUBLIC_CONTACT.holidayNotice}</p>
+            </section>
+          </div>
         </div>
+        {email ? <section className="contact-methods__letter" aria-labelledby={`${channelId}-email`}>
+          <h2 id={`${channelId}-email`}>邮件咨询</h2>
+          <p>适合留下需要书面回复的问题。</p>
+          <p className="contact-methods__identity"><span className="contact-methods__label">邮箱</span><span className="contact-methods__value">{email}</span></p>
+          <a className="contact-direct__text-action" href={`mailto:${email}`} onClick={preview ? (event) => event.preventDefault() : undefined}>发送邮件</a>
+        </section> : null}
       </> : null}
     </div>
   );

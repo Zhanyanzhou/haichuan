@@ -336,7 +336,7 @@ test.describe("客户中心移动端首屏层级", () => {
 
     const heading = page.getByRole("heading", {
       level: 1,
-      name: "您的珠宝档案， 值得被悉心珍藏。",
+      name: "欢迎回来",
     });
     await expect(heading).toBeVisible();
     await expect
@@ -348,7 +348,7 @@ test.describe("客户中心移动端首屏层级", () => {
       )
       .toBeLessThanOrEqual(2.1);
 
-    const primaryEntry = page.getByRole("button", { name: "会员登录 / 注册" });
+    const primaryEntry = page.getByRole("button", { name: "登录我的账户" });
     await expect(primaryEntry).toBeVisible();
     await expect
       .poll(() => primaryEntry.evaluate((element) => element.getBoundingClientRect().bottom))
@@ -397,7 +397,11 @@ test.describe("公开页面导航一致性", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/customer");await expect(contact).toBeHidden();
     await page.getByRole("button", { name: "打开菜单", exact: true }).click();
-    await page.getByRole("dialog", { name: "品牌菜单", exact: true }).getByRole("link", { name: "联系与预约", exact: true }).click();
+    const mobileMenu = page.getByRole("dialog", { name: "品牌菜单", exact: true });
+    await expect(mobileMenu.getByRole("link", { name: "联系与预约", exact: true })).toHaveCount(0);
+    await expect(mobileMenu.getByRole("link", { name: "个人资料", exact: true })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await page.getByRole("contentinfo").getByRole("link", { name: "联系与咨询", exact: true }).click();
     await expect(page).toHaveURL(/\/contact$/);await expect(main.locator("form")).toHaveCount(1);
     await expect(main.getByRole("link", { name: "保存二维码" })).toBeVisible();
   });

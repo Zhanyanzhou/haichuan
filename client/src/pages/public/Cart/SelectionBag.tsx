@@ -124,6 +124,7 @@ function SelectionBagContent() {
       {showEmptySelection ? (
         <div className="shopping-bag__empty">
           <p>购物袋里还没有作品。</p>
+          <p>心愿单收藏还没决定的作品，选款交给顾问比较。线上购买开放后，选好规格的作品会进入这里。</p>
         </div>
       ) : null}
 

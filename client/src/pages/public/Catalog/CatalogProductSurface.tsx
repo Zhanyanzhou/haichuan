@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Link } from "react-router-dom";
+import { ListingCartButton } from "@/components/common/ListingCartButton";
 import type { CatalogProduct } from "@/data/catalogData";
 import { useSelectionStore } from "@/store/selectionStore";
 import { publicProductInquiryPath, publicProductPath } from "@/utils/publicProductPath";
@@ -108,10 +109,12 @@ function CatalogProductAction({
   product,
   selected,
   onToggle,
+  cartReady,
 }: {
   product: CatalogProduct;
   selected: boolean;
   onToggle: () => void;
+  cartReady: boolean;
 }) {
   const actionClass = "catalog-product-card__action";
 
@@ -136,6 +139,20 @@ function CatalogProductAction({
     );
   }
 
+  if (
+    cartReady
+    && product.salesMode === "DIRECT_PURCHASE"
+    && product.isAvailableForPurchase === true
+    && Number(product.price) > 0
+  ) {
+    return (
+      <ListingCartButton
+        product={{ id: product.id, code: product.code }}
+        className={actionClass}
+      />
+    );
+  }
+
   return null;
 }
 
@@ -143,10 +160,12 @@ function ProductCard({
   product,
   productIndex,
   catalogUrl,
+  cartReady,
 }: {
   product: CatalogProduct;
   productIndex: number;
   catalogUrl: string | null;
+  cartReady: boolean;
 }) {
   const { message } = AntdApp.useApp();
   const toggle = useSelectionStore((s) => s.toggle);
@@ -268,6 +287,7 @@ function ProductCard({
           product={product}
           selected={sel}
           onToggle={handleToggle}
+          cartReady={cartReady}
         />
       </div>
     </div>
@@ -302,10 +322,12 @@ export function ProductGrid({
   products,
   catalogUrl,
   startIndex = 0,
+  cartReady = false,
 }: {
   products: CatalogProduct[];
   catalogUrl: string | null;
   startIndex?: number;
+  cartReady?: boolean;
 }) {
   const resultCount = Math.min(products.length, 3);
   const columns = useCatalogColumnCount(resultCount);
@@ -330,6 +352,7 @@ export function ProductGrid({
             product={p}
             productIndex={startIndex + index}
             catalogUrl={catalogUrl}
+            cartReady={cartReady}
           />
         </div>
       ))}
