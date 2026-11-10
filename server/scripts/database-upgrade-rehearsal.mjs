@@ -19,7 +19,7 @@ const prismaCli = path.join(serverDirectory, 'node_modules', 'prisma', 'build', 
 export const MYSQL_IMAGE = 'mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b';
 export const MIGRATION_CONNECTION_COLLATION = 'utf8mb4_unicode_ci';
 export const MYSQL_INIT_CONNECT_SQL = `SET collation_connection = ${MIGRATION_CONNECTION_COLLATION}`;
-export const EXPECTED_MIGRATION_COUNT = 74;
+export const EXPECTED_MIGRATION_COUNT = 76;
 export const CHECKPOINT_MIGRATION_COUNT = 51;
 export const MIGRATION_PRIVILEGES = Object.freeze([
   'SELECT',
@@ -56,6 +56,8 @@ export const STOREFRONT_TRAFFIC_HOURLY_MIGRATION = '20261023160000_add_storefron
 export const PAGE_DECORATION_PRESETS_MIGRATION = '20261105120000_add_page_decoration_presets';
 export const PRODUCT_SKU_IMAGE_MIGRATION = '20261107110000_add_product_sku_image';
 export const PRODUCT_SKU_COLOR_MIGRATION = '20261107143000_add_product_sku_color';
+export const CUSTOMER_USERNAME_MIGRATION = '20261109123000_add_customer_username';
+export const CATEGORY_PUBLICATION_RULES_MIGRATION = '20261109130000_add_category_publication_rules';
 export const EXPECTED_MIGRATION_TAIL = Object.freeze([
   TRADE_MIGRATION,
   PROFILE_MIGRATION,
@@ -80,6 +82,8 @@ export const EXPECTED_MIGRATION_TAIL = Object.freeze([
   PAGE_DECORATION_PRESETS_MIGRATION,
   PRODUCT_SKU_IMAGE_MIGRATION,
   PRODUCT_SKU_COLOR_MIGRATION,
+  CUSTOMER_USERNAME_MIGRATION,
+  CATEGORY_PUBLICATION_RULES_MIGRATION,
 ]);
 export const EXPECTED_TRIGGER_COUNT = 15;
 
