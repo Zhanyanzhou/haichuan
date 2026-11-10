@@ -313,6 +313,18 @@ export function generateTemplateFromRecipe(recipe: TemplateRecipe, options: { te
     cardLayout.responsive.mobile = { layoutMode: "flow", height: { mode: "auto" }, gap: px(spacing) };
     cardLayout.childIds = card.childIds;
     card.childIds = [cardLayout.nodeId];
+    if (!rootGrowsWithContent) {
+      // 手机对换画布把根钉死。卡片里的图按比例各占一行会高出根框，改为共用剩余高度。
+      stage.responsive.mobile = { ...stage.responsive.mobile, height: { mode: "fill" } };
+      card.responsive.mobile = { ...card.responsive.mobile, display: "flex", direction: "column", height: { mode: "fill" } };
+      cardLayout.responsive.mobile = { ...cardLayout.responsive.mobile, display: "flex", direction: "column", height: { mode: "fill" } };
+      for (const id of cardLayout.childIds) {
+        const child = definition.nodes[id];
+        const slot = child.slotId ? definition.slots[child.slotId] : undefined;
+        if (slot?.type !== "image") continue;
+        child.responsive.mobile = { ...child.responsive.mobile, height: { mode: "fill" } };
+      }
+    }
     definition.nodes[cardLayout.nodeId] = cardLayout;
     definition.nodes[card.nodeId] = card;
     // 固定画幅的桌面坐标不能改父子关系。作品网格的手机两列由渲染器按区块角色完成；
