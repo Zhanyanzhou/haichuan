@@ -1,5 +1,5 @@
 .cart-page {
-  background: #f7f5f2;
+  background: #f4f5f5;
   color: var(--hc-ink, #181a1b);
   font-family: "Source Han Sans SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
@@ -206,7 +206,7 @@
 }
 
 .cart-page__image {
-  background: #f3f1ed;
+  background: #eceeef;
 }
 
 .cart-page__piece {
@@ -393,7 +393,7 @@
   display: block;
   aspect-ratio: 1 / 1;
   overflow: hidden;
-  background: #f3f1ed;
+  background: #eceeef;
 }
 
 .cart-page__pick-media > :is(img, div) {

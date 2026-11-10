@@ -338,7 +338,7 @@ test.describe("游客公开浏览", () => {
     await page.goto("/customer");
     await page.getByRole("tab", { name: "手机号", exact: true }).click();
     await page.getByLabel("手机号").fill("13800138000");
-    await page.getByLabel("密码").fill("wrong-password");
+    await page.getByLabel("密码", { exact: true }).fill("wrong-password");
     const loginButton = page.getByRole("button", { name: "登录我的账户" });
 
     for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -731,7 +731,7 @@ test.describe("游客公开浏览", () => {
     await page.goto("/customer");
     await page.getByRole("tab", { name: "手机号", exact: true }).click();
     await page.getByLabel("手机号").fill("13800000007");
-    await page.getByLabel("密码").fill("old-login-pass");
+    await page.getByLabel("密码", { exact: true }).fill("old-login-pass");
     await page.locator("#member-access-form").evaluate((form) => {
       form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
       form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
@@ -784,7 +784,7 @@ test.describe("游客公开浏览", () => {
     await page.goto("/customer");
     await page.getByRole("tab", { name: "手机号", exact: true }).click();
     await page.getByLabel("手机号").fill("13800000007");
-    await page.getByLabel("密码").fill("challenge-read-failure");
+    await page.getByLabel("密码", { exact: true }).fill("challenge-read-failure");
     await page.getByRole("button", { name: "登录我的账户" }).click();
 
     await expect.poll(() => challengeRequests).toBe(1);
@@ -854,7 +854,7 @@ test.describe("游客公开浏览", () => {
     await page.goto("/customer");
     await page.getByRole("tab", { name: "手机号", exact: true }).click();
     await page.getByLabel("手机号").fill(customer.phone);
-    await page.getByLabel("密码").fill("late-login-pass");
+    await page.getByLabel("密码", { exact: true }).fill("late-login-pass");
     await page.getByRole("button", { name: "登录我的账户" }).click();
     await expect.poll(() => typeof releaseLogin).toBe("function");
 
@@ -1200,13 +1200,13 @@ test.describe("游客公开浏览", () => {
     await page.goto("/customer");
     await expect(page.getByText("账户数据暂时无法加载，请稍后重试。"))
       .toBeVisible();
-    await expect(page.getByText("历史订单")).toHaveCount(0);
+    await expect(page.getByText("我的订单")).toHaveCount(0);
     await expect(page.getByText("暂未有订单记录")).toHaveCount(0);
 
     ordersFail = false;
     await page.getByRole("button", { name: "重新加载" }).click();
     await expect(page.getByRole("heading", { name: "我的账号" })).toBeVisible();
-    await expect(page.getByText("历史订单")).toBeVisible();
+    await expect(page.getByText("我的订单")).toBeVisible();
   });
 
   test("权威会话切换客户且新快照失败时不保留上一客户订单", async ({ page }) => {

@@ -997,7 +997,7 @@ const checkoutPage = await readSrc(
 );
 check("结算页：前端不再提交后端忽略的 customerName/phone/paymentMethod", () => {
   // 请求对象还参与幂等哈希，因此允许先赋给局部变量再提交，但字段边界仍需静态校验。
-  const requestMatch = checkoutPage.match(/const request = \{[\s\S]*?\n\s*\};/);
+  const requestMatch = checkoutPage.match(/const request(?::\s*[A-Za-z0-9_]+)? = \{[\s\S]*?\n\s*\};/);
   assert.ok(requestMatch, "未找到 checkout 请求对象");
   assert.ok(
     checkoutPage.includes("customerApi.checkout(request, idempotencyKey)"),

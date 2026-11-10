@@ -426,7 +426,7 @@ test.describe("客户咨询回复闭环", () => {
 
     await page.getByRole("tab", { name: "手机号", exact: true }).click();
     await page.getByLabel("手机号").fill(customerB.phone);
-    await page.getByLabel("密码").fill("CustomerB1");
+    await page.getByLabel("密码", { exact: true }).fill("CustomerB1");
     await page.getByRole("button", { name: "登录我的账户" }).click();
     await expect(page.getByRole("heading", { name: "我的账号" })).toBeVisible();
     await expect.poll(() => page.evaluate(() => {
@@ -519,7 +519,7 @@ test.describe("客户咨询回复闭环", () => {
     await expect(page.getByRole("button", { name: "登录我的账户" })).toBeVisible();
     await page.getByRole("tab", { name: "手机号", exact: true }).click();
     await page.getByLabel("手机号").fill(customerB.phone);
-    await page.getByLabel("密码").fill("CustomerB1");
+    await page.getByLabel("密码", { exact: true }).fill("CustomerB1");
     await page.getByRole("button", { name: "登录我的账户" }).click();
     await expect(page.getByText("您好，会员 B。您的作品、咨询与服务记录都在这里。")).toBeVisible();
     await expect.poll(() => notificationRequests).toBe(2);

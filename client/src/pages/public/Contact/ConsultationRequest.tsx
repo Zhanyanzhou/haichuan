@@ -719,7 +719,7 @@ export default function Contact({ mode = "public", embedded = false, contact }: 
               </Link>
             )}
             {authenticatedCustomer && receipt ? (
-              <Link to="/catalog" className="contact-success__secondary">
+              <Link to="/catalog" className="contact-success__primary">
                 浏览作品
               </Link>
             ) : null}

@@ -741,8 +741,17 @@ export default function Catalog({
     const apply = () => {
       const headerBottom = header ? Math.max(0, header.getBoundingClientRect().bottom) : 0;
       const top = Math.max(headerBottom, lead.getBoundingClientRect().bottom);
+      pin.style.position = "";
       pin.style.top = `${top}px`;
       const height = Math.ceil(pin.getBoundingClientRect().height);
+      const available = ownerWindow.innerHeight - top;
+      if (height > available) {
+        pin.style.position = "relative";
+        pin.style.top = "0px";
+        spacer.style.height = "0px";
+        root.style.setProperty("--catalog-pin-height", "0px");
+        return;
+      }
       spacer.style.height = `${height}px`;
       root.style.setProperty("--catalog-pin-height", `${height}px`);
     };
@@ -873,6 +882,9 @@ export default function Catalog({
           left: 0;
           z-index: 30;
           background: #FFFFFF;
+        }
+        .catalog-page [data-catalog-product-focus] {
+          scroll-margin-top: calc(var(--site-header-offset, var(--site-header-height, 88px)) + var(--catalog-pin-height, 0px) + 16px);
         }
         .catalog-page.is-editor-preview .catalog-pin {
           position: static;

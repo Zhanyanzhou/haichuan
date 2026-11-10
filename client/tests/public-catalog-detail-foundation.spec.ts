@@ -2645,8 +2645,10 @@ for (const viewport of [
     await waitForVisualStability(page);
 
     const commerceFacts = page.locator(".product-detail-page__commerce-facts");
-    await expect(commerceFacts.locator(":scope > dt")).toHaveCount(1);
-    await expect(commerceFacts.locator(":scope > dd")).toHaveCount(1);
+    await expect(commerceFacts.locator(":scope > dt")).toHaveCount(2);
+    await expect(commerceFacts.locator(":scope > dd")).toHaveCount(2);
+    await expect(commerceFacts.getByText("售价", { exact: true })).toBeVisible();
+    await expect(commerceFacts.getByText("金重", { exact: true })).toBeVisible();
     await expect(commerceFacts.locator(":scope > :not(dt):not(dd)")).toHaveCount(0);
     const skuSizes = await page.locator(".product-detail-page__sku-card").evaluateAll((nodes) =>
       nodes.map((node) => {

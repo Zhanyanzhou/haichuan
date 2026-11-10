@@ -841,6 +841,15 @@
   border-color: var(--ink);
 }
 
+.my-account__order-progress {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  max-width: 100%;
+  margin: 10px 0 6px;
+}
+
 .my-account__after-sales-intro {
   margin: 0 0 16px;
   color: var(--soft);
@@ -1503,6 +1512,27 @@
   .my-account__order-action,
   .my-account__service-action {
     min-height: 44px;
+  }
+
+  .my-account__records article {
+    flex-direction: column;
+    align-items: stretch;
+    min-width: 0;
+  }
+
+  .my-account__records article > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .my-account__records em {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .my-account__service-status > span {
+    width: auto;
+    overflow-wrap: anywhere;
   }
 
   .customer-account-modal .ant-input,

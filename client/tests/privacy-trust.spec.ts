@@ -309,7 +309,7 @@ test.describe("匿名行为分析", () => {
     });
 
     await page.goto("/catalog");
-    const search = page.getByPlaceholder("搜索作品名称或编号");
+    const search = page.getByPlaceholder("搜索名称、款号或款式");
     await expect(search).toBeVisible();
     await expect(
       page.getByRole("region", { name: "分析数据偏好" }),
@@ -349,7 +349,7 @@ test.describe("匿名行为分析", () => {
     });
 
     await page.goto("/catalog");
-    const search = page.getByPlaceholder("搜索作品名称或编号");
+    const search = page.getByPlaceholder("搜索名称、款号或款式");
     await expect(search).toBeVisible();
     await expect(
       page.getByRole("region", { name: "分析数据偏好" }),

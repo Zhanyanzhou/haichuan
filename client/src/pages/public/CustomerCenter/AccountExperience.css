@@ -339,7 +339,7 @@ img.member-captcha {
 }
 
 .account-button--dark:hover:not(:disabled) {
-  background: #2a2c2e;
+  background: #111315;
 }
 
 .account-button--dark:active:not(:disabled) {

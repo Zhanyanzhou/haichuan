@@ -26,8 +26,8 @@ test.describe("收敛闭环：公开语言与客户通知", () => {
     expect(new URL(page.url()).search).toBe("?from=legacy");
     expect(new URL(page.url()).hash).toBe("#story");
     await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
+    await expect.poll(() => apiRequests.some((requestUrl) => requestUrl.includes("locale=zh-CN"))).toBe(true);
     expect(apiRequests.some((requestUrl) => requestUrl.includes("locale=en"))).toBe(false);
-    expect(apiRequests.some((requestUrl) => requestUrl.includes("locale=zh-CN"))).toBe(true);
 
     apiRequests.length = 0;
     await page.goto("/EN/about");

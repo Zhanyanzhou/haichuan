@@ -649,6 +649,12 @@
   outline: none;
 }
 
+.contact-success__title:focus {
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 6px;
+}
+
 .contact-success__sheet > p {
   max-width: 36em;
   margin: 16px 0 0;
@@ -698,6 +704,7 @@
 .contact-success__primary {
   min-width: 168px;
   padding: 12px 28px;
+  border: 1px solid var(--hc-ink);
   background: var(--hc-ink);
   color: var(--hc-inverse-text);
 }

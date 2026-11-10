@@ -374,7 +374,7 @@ html:has(.site-shell)::-webkit-scrollbar {
   background: transparent;
   box-shadow: none;
   box-sizing: border-box;
-  color: #181a1b;
+  color: rgba(24, 26, 27, 0.68);
   font-family:
     "Noto Serif SC",
     "PingFang SC",

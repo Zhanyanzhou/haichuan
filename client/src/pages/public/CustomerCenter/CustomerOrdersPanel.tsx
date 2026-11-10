@@ -535,12 +535,7 @@ export default function CustomerOrdersPanel({
                   ) : null}
                 </div>
                 <div
-                  style={{
-                    display: "flex",
-                    gap: 4,
-                    alignItems: "center",
-                    margin: "10px 0 6px",
-                  }}
+                  className="my-account__order-progress"
                   aria-label="订单进度"
                 >
                   {cancelled ? (

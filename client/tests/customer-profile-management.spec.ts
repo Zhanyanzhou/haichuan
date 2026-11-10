@@ -502,7 +502,7 @@ test.describe('客户个人资料管理', () => {
 
     await page.getByRole('tab', { name: '手机号', exact: true }).click();
     await page.getByLabel('手机号').fill('13900139000');
-    await page.getByLabel('密码').fill('NewSession1');
+    await page.getByLabel('密码', { exact: true }).fill('NewSession1');
     await page.getByRole('button', { name: '登录我的账户' }).click();
     await expect(page.getByText('您好，新会话客户。您的作品、咨询与服务记录都在这里。'))
       .toBeVisible();

@@ -435,7 +435,7 @@ test.describe("公开页面导航一致性", () => {
     await main.getByRole("button", { name: "复制微信号" }).click();
     await expect(main.getByText("复制未成功，请选中微信号手动复制", { exact: true })).toBeVisible();
     qr = "";await page.reload();
-    await expect(main.getByText("可复制下方微信号，在微信中搜索添加。", { exact: true })).toBeVisible();
+    await expect(main.getByText("二维码尚未配置。请复制微信号，在微信中搜索添加。", { exact: true })).toBeVisible();
     await expect(main.getByRole("link", { name: "拨打电话", exact: true })).toBeVisible();
   });
 
@@ -483,7 +483,7 @@ test.describe("公开页面导航一致性", () => {
     const searchInput = page.getByRole("search").getByRole("combobox", { name: "关键词或款号" });
     await expect(searchInput).toBeFocused();
 
-    await page.locator(".catalog-toolbar__spacer").click();
+    await page.getByRole("region", { name: "作品结果" }).click();
     await expect(searchInput).not.toBeFocused();
     await headerSearch.click();
     await expect(searchInput).toBeFocused();
@@ -662,8 +662,8 @@ test.describe("公开页面导航一致性", () => {
   test("购物车空态的去选购入口进入选款中心", async ({ page }) => {
     await mockEmptyCommerceState(page);
     await page.goto("/cart");
-    await expect(page.getByRole("main").getByRole("heading", { level: 1, name: "购物车为空" })).toHaveCount(1);
-    await expect(page.getByRole("link", { name: "去选购" })).toHaveAttribute("href", "/catalog");
+    await expect(page.getByRole("main").getByRole("heading", { level: 1, name: "购物袋" })).toHaveCount(1);
+    await expect(page.getByRole("link", { name: "探索珠宝系列" })).toHaveAttribute("href", "/catalog");
   });
 
   test("结算空态的继续选购入口进入选款中心", async ({ page }) => {

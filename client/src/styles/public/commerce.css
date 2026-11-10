@@ -1004,7 +1004,7 @@
 .product-detail-page__meta-line .product-detail-page__series + .product-detail-page__reference::before {
   content: "·";
   margin-right: 12px;
-  color: #c5c9ca;
+  color: #b8bec1;
 }
 
 .product-detail-page__subtitle {
@@ -1907,7 +1907,7 @@
 
   .product-detail-page__main-media {
     grid-column: auto;
-    width: min(100%, calc(100svh - 600px));
+    width: 100%;
     max-width: none;
     height: auto;
     margin-inline: auto;

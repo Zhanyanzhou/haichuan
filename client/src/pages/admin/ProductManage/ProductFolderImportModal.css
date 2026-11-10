@@ -39,7 +39,7 @@
 .folder-import__stats > span {
   min-width: 72px;
   padding: 7px 10px;
-  border: 1px solid #e1e4e5;
+  border: 1px solid #dde1e2;
   background: #f7f8f8;
   color: var(--adm-muted);
   text-align: center;
@@ -51,16 +51,16 @@
 }
 
 .folder-import__stats .is-ready {
-  border-color: #b7d9ca;
-  background: #f0f8f4;
+  border-color: #acc4b4;
+  background: #eff5f1;
 }
 
 .folder-import__settings {
   display: grid;
   gap: 10px;
   padding: 12px;
-  border: 1px solid #d5d9da;
-  background: #fafbfb;
+  border: 1px solid #dde1e2;
+  background: #f7f8f8;
 }
 
 .folder-import__section-heading > span {
@@ -156,7 +156,7 @@
 .folder-import__issues {
   display: grid;
   gap: 8px;
-  border: 1px solid #d5d9da;
+  border: 1px solid #dde1e2;
   padding: 12px;
 }
 

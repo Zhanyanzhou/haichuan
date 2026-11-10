@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { publicProduct } from "./fixtures/public-catalog-detail";
+import { getPublicProductTitle } from "../src/utils/publicProductTitle";
 import { installCustomerSession } from "./fixtures/session-auth";
 
 const wrapped = (data: unknown) => ({
@@ -53,7 +54,7 @@ test("商品详情不把其他作品列在选款中心之外", async ({ page }) 
   await signInCustomer(page);
 
   await page.goto("/products/12");
-  await expect(page.getByRole("heading", { name: "构图验证作品 12", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: getPublicProductTitle(detail.name), exact: true })).toBeVisible();
   await expect(page.getByText("相关作品", { exact: true })).toHaveCount(0);
   expect(similarRequested).toBe(false);
 });
