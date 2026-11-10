@@ -382,6 +382,12 @@ async function mountCanvasMediaHook(page: Page) {
   await page.route("**/__canvas-media-hook", (route) => route.fulfill({
     contentType: "text/html; charset=utf-8",
     body: `<!doctype html><html><body><script type="module">
+      import RefreshRuntime from '/@react-refresh';
+      RefreshRuntime.injectIntoGlobalHook(window);
+      window.$RefreshReg$ = () => {};
+      window.$RefreshSig$ = () => (type) => type;
+      window.__vite_plugin_react_preamble_installed__ = true;
+    </script><script type="module">
       import React from '/node_modules/.vite/deps/react.js';
       import ReactDOM from '/node_modules/.vite/deps/react-dom_client.js';
       import { useManagedTemplateMediaDisplayUrl } from '/src/page-builder/template-definition/managedMediaPreview.ts';

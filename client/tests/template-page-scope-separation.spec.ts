@@ -346,17 +346,26 @@ test("根与兄弟容器按 DFS 展示 descriptor 可见摘要，纯导航与返
   expect(await fields.evaluateAll((elements) => elements.map((element) => element.getAttribute("data-page-field-label"))))
     .toEqual(["工艺主图", "工艺标题", "工艺轮播", "预约行动", "推荐商品"]);
 
-  await expect(list.getByRole("button", { name: /工艺标题/ })).toContainText("控件：文字输入");
-  await expect(list.getByRole("button", { name: /工艺标题/ })).toContainText("限制：最小 2 字；最大 36 字");
-  await expect(list.getByRole("button", { name: /工艺标题/ })).toContainText("允许文字样式/间距覆盖");
-  await expect(list.getByRole("button", { name: /工艺标题/ })).toContainText("字号 16–52 像素");
-  await expect(list.getByRole("button", { name: /工艺主图/ })).toContainText("控件：图片选择");
-  await expect(list.getByRole("button", { name: /工艺主图/ })).toContainText("建议 1600 × 1200 像素");
-  await expect(list.getByRole("button", { name: /工艺主图/ })).toContainText("不开放设计覆盖");
-  await expect(list.getByRole("button", { name: /预约行动/ })).toContainText("控件：行动与链接");
-  await expect(list.getByRole("button", { name: /预约行动/ })).toContainText("跳转 https/page");
-  await expect(list.getByRole("button", { name: /推荐商品/ })).toContainText("控件：业务引用");
-  await expect(list.getByRole("button", { name: /工艺轮播/ })).toContainText("控件：结构化内容");
+  await expect(list.getByRole("button", { name: /工艺标题/ })).toContainText("建议填写");
+  await expect(list.getByRole("button", { name: /工艺标题/ })).toContainText("可填写");
+  const preview = list.locator("details.template-editor__page-form-preview");
+  await preview.locator("summary").click();
+  const titlePreview = preview.locator(".template-editor__page-form-field").filter({ hasText: "工艺标题" });
+  const imagePreview = preview.locator(".template-editor__page-form-field").filter({ hasText: "工艺主图" });
+  const actionPreview = preview.locator(".template-editor__page-form-field").filter({ hasText: "预约行动" });
+  const productPreview = preview.locator(".template-editor__page-form-field").filter({ hasText: "推荐商品" });
+  const carouselPreview = preview.locator(".template-editor__page-form-field").filter({ hasText: "工艺轮播" });
+  await expect(titlePreview).toContainText("文字输入");
+  await expect(titlePreview).toContainText("最小 2 字");
+  await expect(titlePreview).toContainText("最大 36 字");
+  await expect(titlePreview).toContainText("字号");
+  await expect(imagePreview).toContainText("图片选择");
+  await expect(imagePreview).toContainText("建议 1600 × 1200 像素");
+  await expect(imagePreview).toContainText("不开放设计覆盖");
+  await expect(actionPreview).toContainText("行动与链接");
+  await expect(actionPreview).toContainText("跳转 https/page");
+  await expect(productPreview).toContainText("业务引用");
+  await expect(carouselPreview).toContainText("结构化内容");
 
   await selectTemplateObject(page, ids.primaryRegionId);
   await expect(fields).toHaveCount(3);

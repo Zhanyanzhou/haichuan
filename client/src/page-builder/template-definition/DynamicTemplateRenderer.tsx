@@ -1177,8 +1177,9 @@ function renderTemplateChildren({
   const firstVisibleId = visibleChildren[0]?.nodeId;
   const lastVisibleId = visibleChildren[visibleChildren.length - 1]?.nodeId;
   // 品牌事实与到店邀请是上图下文：主图保持自己的比例，文字排在图下。
-  // 其余手机流式模板仍把跟随主图的文字收进图片槽位。
-  const stackedCopy = sectionRole === "maison-fact" || sectionRole === "service-invitation";
+  // 已标明区块角色的其余手机流式模板，仍把跟随主图的文字收进图片槽位。
+  // 没有区块角色的生成布局按槽位顺序排，上图下文的标题留在图片下面。
+  const stackedCopy = !sectionRole || sectionRole === "maison-fact" || sectionRole === "service-invitation";
   const pairedHeroFrame = Boolean(pairedCanvas)
     && sectionRole === "page-hero"
     && device === "mobile"
@@ -2494,9 +2495,10 @@ export default function DynamicTemplateRenderer({
   // 左右图文整节用对换比例，文字仍在图下，不把主图盖住文字。
   // 只有一张主图时，主图吃掉对换画布里文案下方的空白，手机槽位不再沿用桌面横图比例。
   const pairedCanvas = pairedCanvasRatio && isContentHeightSplitSection(definition) ? null : pairedCanvasRatio;
-  // 显式固定画幅必须锁定真实根与外壳。历史定义保留原有的铺满判定。
+  // 显式固定画幅在已标明区块角色时锁定对换画布。
+  // 没有区块角色的生成布局按内容长高，三张图和标题才不会掉出根框。
   const lockSwappedCanvas = Boolean(pairedCanvasRatio) && (
-    definition.metadata.geometryPolicy === "paired-canvas"
+    (definition.metadata.geometryPolicy === "paired-canvas" && Boolean(sectionRole))
     || subtreeFillsPairedCanvas(result.plan.root, sectionRole)
     || isContentHeightSplitSection(definition)
   );

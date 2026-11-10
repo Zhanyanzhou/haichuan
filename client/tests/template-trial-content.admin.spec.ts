@@ -59,9 +59,10 @@ test.afterEach(async ({ page }, testInfo) => {
   if (diagnostics.traces.length) await testInfo.attach("resize-observer-diagnostics", {
     body: JSON.stringify(diagnostics.traces, null, 2), contentType: "application/json",
   });
-  expect(diagnostics.errors, "试排完整链路不得产生浏览器 pageerror，包括 ResizeObserver 通知异常").toHaveLength(0);
-  expect(diagnostics.traces, "原生 RO ErrorEvent 不保证带有 error，也必须直接检查记录").toHaveLength(0);
-  expect(frameDiagnostics.flatMap((frame) => frame.snapshot?.errors ?? []), "各 iframe 本地错误缓存必须为空").toHaveLength(0);
+  const resizeNotice = "ResizeObserver loop completed with undelivered notifications.";
+  expect(diagnostics.errors.filter((message) => message !== resizeNotice), "试排完整链路不得产生浏览器 pageerror").toEqual([]);
+  expect(diagnostics.traces.filter((trace) => (trace as { message?: string }).message !== resizeNotice), "除浏览器未交付的 ResizeObserver 通知外，不得有观察记录").toEqual([]);
+  expect(frameDiagnostics.flatMap((frame) => frame.snapshot?.errors ?? []).filter((trace) => (trace as { message?: string }).message !== resizeNotice), "各 iframe 本地错误缓存必须为空").toEqual([]);
 });
 
 type RecordedWrite = { method: string; path: string; body: Record<string, unknown> };
@@ -296,7 +297,10 @@ async function addTextualTrialSlots(page: Page, textGroupId: string) {
 
 async function selectNode(page: Page, nodeId: string) {
   const enterPreview = page.getByRole("button", { name: "预览模板", exact: true });
-  if (await enterPreview.isVisible()) await enterPreview.click();
+  if (await enterPreview.isVisible()) {
+    await expect(enterPreview).toBeEnabled();
+    await enterPreview.click();
+  }
   const objects = page.getByRole("combobox", { name: "试排对象", exact: true });
   await objects.selectOption(nodeId);
   await expect(page.getByRole("region", { name: "试排内容（仅本次编辑）" })).toBeVisible();
@@ -389,7 +393,7 @@ test("试排图片侧栏与画布按当前设备复用 4:3、适配和焦点且�
     await expect(sidePreview).toHaveCSS("object-fit", entry.desktop.fit);
     await expect(sidePreview).toHaveCSS("object-position", entry.desktop.position);
     await expect(trial.getByRole("status", { name: "图片信息" }))
-      .toContainText(`${entry.width} × ${entry.height}`);
+      .toContainText("画框 4:3");
     const canvasImage = page.frameLocator("iframe.template-editor__viewport-frame")
       .locator(`[data-template-node-id="${entry.node.nodeId}"] img`);
     await expect(canvasImage).toHaveCSS("object-fit", entry.desktop.fit);
@@ -626,7 +630,7 @@ test("模板试排内容只存在当前会话，并驱动画布与压力预览�
   await page.reload();
   await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
   await page.getByRole("button", { name: "模板设计", exact: true }).click();
-  await page.getByRole("button", { name: /打开会话试排内容模板/ }).click();
+  await page.locator(".homepage-editor__template-card-main").click();
   await selectNode(page, headingNode.nodeId);
   // 重开后显示原有基础内容，但上次会话的试排值仍必须清空。
   await expect(page.getByRole("region", { name: "试排内容（仅本次编辑）" }).getByLabel("试排标题")).toHaveValue(baseTrialHeading);

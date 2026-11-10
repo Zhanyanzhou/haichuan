@@ -130,6 +130,7 @@ for (const [slotType, field] of [["heading", "默认文字"], ["button", "默认
       if (!slot) throw new Error(`历史草稿缺少 ${type} 槽位`);
       const node = Object.values(definition.nodes).find((item) => item.slotId === slot.slotId);
       if (!node) throw new Error(`历史草稿缺少 ${type} 节点`);
+      definition.metadata.sectionRole = "editorial-split";
       state.selectObject(node.nodeId);
       return slot.slotId;
     }, slotType);
@@ -172,6 +173,13 @@ test("历史配方草稿的结构选择、默认内容编辑、失败保护、�
   const title = Object.values(created.slots).find((slot) => slot.semanticRole === "title")!;
   const titleNode = Object.values(created.nodes).find((node) => node.slotId === title.slotId)!;
   const tree = page.getByRole("tree", { name: "模板区域与槽位" });
+  await page.evaluate(async () => {
+    const path = "/src/page-builder/template-editor/templateEditorSession.ts";
+    const state = (await import(/* @vite-ignore */ path)).useTemplateEditorSession.getState();
+    state.executeCommand({ type: "update-definition", label: "查看完整属性", update: (next: { metadata: { sectionRole?: string } }) => {
+      next.metadata.sectionRole = "editorial-split";
+    } });
+  });
   await tree.getByRole("treeitem", { name: /^主标题 / }).click();
   await expect.poll(async () => (await readSession(page)).selectedObjectId).toBe(titleNode.nodeId);
   const defaults = page.locator(`[data-template-default-content="${title.slotId}"]`);

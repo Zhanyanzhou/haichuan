@@ -689,12 +689,6 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
         if (!focusFirstInvalidNumberField()) useTemplateEditorSession.getState().selectObject(layoutChildId);
       }}>查看图文排列</button> : null}
       {children.length >= 2 ? layoutControls?.({ disabled: layoutDisabled, presetsOnly: true }) : null}
-      {nodeIds.length === 1 && !isRootSelection ? (
-        <>
-          <TemplateDefaultContentControls key={`${firstId}:${breakpoint}`} section="content" nodeId={firstId} breakpoint={breakpoint} disabled={controlsDisabled} onOpenPageScope={onOpenPageScope} />
-          <TemplateDefaultContentControls key={`text:${firstId}:${breakpoint}`} section="text-style" nodeId={firstId} breakpoint={breakpoint} disabled={controlsDisabled} />
-        </>
-      ) : null}
       {sectionCopyState ? <div className="template-native__copy-visibility" data-template-section-copy={sectionCopyState} data-template-shared-scope="copy">
         <strong>双端标题与说明</strong>
         <div role="group" aria-label="标题与说明">
