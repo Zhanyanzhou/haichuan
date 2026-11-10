@@ -30,7 +30,7 @@ interface SecureImageProps {
 type ImageStatus = "idle" | "loading" | "error" | "ready";
 
 // Vite 会在构建和测试时注入类型化 env；未配置时安全降级到同源 /api。
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || "/api").replace(
+const API_BASE = (import.meta.env?.VITE_API_BASE_URL || "/api").replace(
   /\/$/,
   "",
 );

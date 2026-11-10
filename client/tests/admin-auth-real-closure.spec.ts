@@ -28,6 +28,7 @@ test.describe("后台员工真实 Cookie 会话", () => {
     await page.getByRole("button", { name: "登录", exact: true }).click();
 
     await expect(page).toHaveURL(/\/admin\/dashboard(?:[/?#]|$)/);
+    await page.getByRole("button", { name: "展开一级导航" }).click();
     await expect(page.getByRole("button", { name: /账户菜单，当前用户/ })).toBeVisible();
     expect(loginAuthorization).toBeUndefined();
 
