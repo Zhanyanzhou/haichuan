@@ -290,25 +290,15 @@ html:has(.site-shell)::-webkit-scrollbar {
   font-style: normal;
   font-synthesis: none;
   font-optical-sizing: none;
-  /* 光学尺寸贴近实际字号。锁在小字档再放大，衬线肩发软，竖笔会看起来弯。 */
+  /* 字重 500 保住竖笔。光学尺寸不要跟着大字号抬高，否则横线和衬线会细到发虚。 */
   font-variation-settings: "opsz" var(--brand-wordmark-opsz), "wght" 500;
   font-kerning: normal;
   text-rendering: geometricPrecision;
   -webkit-font-smoothing: antialiased;
   line-height: 1;
-  letter-spacing: -0.03em;
+  letter-spacing: 0.06em;
   white-space: nowrap;
   text-shadow: none;
-}
-
-.site-header__brand-amp {
-  display: inline-block;
-  font-style: normal;
-  font-weight: 500;
-  font-size: 0.94em;
-  letter-spacing: 0;
-  font-variation-settings: "opsz" var(--brand-wordmark-opsz), "wght" 500;
-  /* 正体 & 自身已有斜交叉，不再整字倾斜，字标中线才站得直。 */
 }
 
 .site-header.is-overlay-light .site-header__brand-text {
@@ -440,10 +430,11 @@ html:has(.site-shell)::-webkit-scrollbar {
     --site-header-action-top: 42px;
   }
   .site-header__brand-text {
-    /* 先让字高贴近宽屏对照，再用两侧工具组留下的宽度封顶，避免压到菜单和账户。 */
-    --brand-wordmark-opsz: 40;
+    /* 先让字高贴近宽屏对照，再用两侧工具组留下的宽度封顶，避免压到菜单和账户。
+       光学尺寸固定在 24。跟着字号抬到 80 以上时，H 的横线、A 的横杠和 C 的细笔会断开。 */
+    --brand-wordmark-opsz: 24;
     font-size: clamp(40px, calc((100vw - 860px) / 9.2), 88px);
-    letter-spacing: -0.03em;
+    letter-spacing: 0.08em;
   }
   .site-header__inner {
     width: calc(100% - (2 * var(--site-header-edge)));
@@ -515,7 +506,7 @@ html:has(.site-shell)::-webkit-scrollbar {
   .site-header__brand-text {
     --brand-wordmark-opsz: 30;
     font-size: 30px;
-    letter-spacing: -0.03em;
+    letter-spacing: 0.06em;
     padding-left: 0;
   }
   .site-header__brand-text::after {
@@ -591,7 +582,7 @@ html:has(.site-shell)::-webkit-scrollbar {
     /* 手机字标随宽度放大；16px 保最窄屏不压到两侧图标，28px 是上限。 */
     --brand-wordmark-opsz: 20;
     font-size: clamp(16px, calc(13vw - 26px), 28px);
-    letter-spacing: 0;
+    letter-spacing: 0.04em;
     padding-left: 0;
   }
   .site-header__brand-text::after {
@@ -859,7 +850,7 @@ html:has(.site-shell)::-webkit-scrollbar {
     /* 手机字标随宽度放大；16px 保最窄屏不压到两侧图标，28px 是上限。 */
     --brand-wordmark-opsz: 20;
     font-size: clamp(16px, calc(13vw - 26px), 28px);
-    letter-spacing: 0;
+    letter-spacing: 0.04em;
     padding-left: 0;
   }
   .site-header__brand-text::after {
@@ -970,7 +961,7 @@ html:has(.site-shell)::-webkit-scrollbar {
     /* 手机字标随宽度放大；16px 保最窄屏不压到两侧图标，28px 是上限。 */
     --brand-wordmark-opsz: 20;
     font-size: clamp(16px, calc(13vw - 26px), 28px);
-    letter-spacing: 0;
+    letter-spacing: 0.02em;
     padding-left: 0;
   }
 }

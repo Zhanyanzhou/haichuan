@@ -52,7 +52,7 @@ type StorefrontMenuDrawerProps = {
 export function BrandWordmark() {
   return (
     <span className="site-header__brand-text" lang="en" translate="no">
-      HAI <span className="site-header__brand-amp">&</span> CHUAN
+      HAICHUAN
     </span>
   );
 }
@@ -374,7 +374,7 @@ export default function StorefrontNavigation({
       >
         <div className="site-header__inner">
           <div className="site-header__left" />
-          <Link to="/" className="site-header__brand" aria-label={`HAI & CHUAN ${siteName}首页`} onClick={handlePreviewLink}>
+          <Link to="/" className="site-header__brand" aria-label={`HAICHUAN ${siteName}首页`} onClick={handlePreviewLink}>
             {logoUrl && (
               <img
                 src={logoUrl}

@@ -758,7 +758,7 @@ export default function PublicLayout() {
           <Link
             to={withPublicLocalePath("/", localizedPath.locale)}
             className="site-header__brand"
-            aria-label={english ? `HAI & CHUAN ${siteName} home` : `HAI & CHUAN ${siteName}首页`}
+            aria-label={english ? `HAICHUAN ${siteName} home` : `HAICHUAN ${siteName}首页`}
             onClick={handleBrandHomeClick}
           >
             {logoUrl && (
