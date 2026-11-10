@@ -19,7 +19,7 @@ jobs:
   export:
     name: 只读导出公开 SEO 发布事实
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     environment: public-seo-${{ inputs.source_stage }}
     env:
       PUBLIC_SEO_EXPORT_READ_ONLY_AUTHORIZED: "1"
@@ -102,6 +102,79 @@ jobs:
           set -euo pipefail
           npm ci --prefix server
           npm run build --prefix server
+
+      - name: 记录本次 GitHub Runner 临时 IPv4
+        id: runner-egress
+        shell: bash
+        run: |
+          set -euo pipefail
+          runner_ipv4="$(curl --fail --silent --show-error --max-time 10 https://api.ipify.org)"
+          [[ "$runner_ipv4" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] \
+            || { echo "PUBLIC_SEO_RUNNER_IPV4_INVALID" >&2; exit 1; }
+          IFS=. read -r octet1 octet2 octet3 octet4 <<< "$runner_ipv4"
+          for octet in "$octet1" "$octet2" "$octet3" "$octet4"; do
+            (( octet >= 0 && octet <= 255 )) \
+              || { echo "PUBLIC_SEO_RUNNER_IPV4_INVALID" >&2; exit 1; }
+          done
+          echo "runner_ipv4=$runner_ipv4" >> "$GITHUB_OUTPUT"
+          echo "::notice title=本次只读快照 Runner 临时来源::${runner_ipv4}/32"
+          {
+            echo "### 本次只读快照 Runner 临时来源"
+            echo
+            echo "\`${runner_ipv4}/32\`"
+            echo
+            echo "只允许该地址临时访问 TCP/22；快照结束后立即移除对应规则。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 生成不含凭据的临时 Runner 来源制品
+        shell: bash
+        env:
+          PUBLIC_SEO_RUNNER_IPV4: ${{ steps.runner-egress.outputs.runner_ipv4 }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "${RUNNER_TEMP}/public-seo-runner-source"
+          RUN_ID="$GITHUB_RUN_ID" RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" GIT_SHA="$GITHUB_SHA" \
+            node --input-type=commonjs - <<'NODE'
+          const { writeFileSync } = require("node:fs");
+          const payload = {
+            schemaVersion: 1,
+            runId: Number(process.env.RUN_ID),
+            runAttempt: Number(process.env.RUN_ATTEMPT),
+            gitSha: process.env.GIT_SHA,
+            sourceCidr: `${process.env.PUBLIC_SEO_RUNNER_IPV4}/32`,
+          };
+          writeFileSync(
+            `${process.env.RUNNER_TEMP}/public-seo-runner-source/runner-source.json`,
+            `${JSON.stringify(payload, null, 2)}\n`,
+            { mode: 0o600 },
+          );
+          NODE
+
+      - name: 上传本次 Runner 精确来源（1 天后过期）
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: public-seo-runner-source-${{ github.run_id }}
+          path: ${{ runner.temp }}/public-seo-runner-source/runner-source.json
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: 等待安全组精确允许本次 Runner /32
+        shell: bash
+        env:
+          PUBLIC_SEO_RUNNER_IPV4: ${{ steps.runner-egress.outputs.runner_ipv4 }}
+        run: |
+          set -euo pipefail
+          echo "等待 TCP/22 仅对本次 Runner 的精确 /32 临时开放；不会请求任意来源规则。"
+          ready=0
+          for _ in $(seq 1 150); do
+            if timeout 3 bash -c "</dev/tcp/${PUBLIC_SEO_SSH_HOST}/${PUBLIC_SEO_SSH_PORT}" 2>/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 5
+          done
+          test "$ready" = "1" \
+            || { echo "PUBLIC_SEO_SSH_EXACT_RUNNER_RULE_NOT_READY:${PUBLIC_SEO_RUNNER_IPV4}/32" >&2; exit 1; }
 
       - name: 建立固定主机指纹的只读数据库 SSH 隧道
         id: tunnel
