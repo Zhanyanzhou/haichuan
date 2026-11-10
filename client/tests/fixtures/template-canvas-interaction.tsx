@@ -108,7 +108,8 @@ for (const device of ["desktop", "mobile"] as const) {
   }
   if (new URLSearchParams(window.location.search).has("anchor-limit")) {
     definition.nodes[first].responsive[device].maxWidth = { value: 50, unit: "%" };
-    definition.nodes[first].responsive[device].anchor = { horizontal: "right", vertical: "top", offsetX: { value: -300, unit: "px" }, offsetY: { value: 0, unit: "px" } };
+    // 共用桌面画布宽 1440。右锚要离右缘足够远，50% 上限才会先于画布边缘生效。
+    definition.nodes[first].responsive[device].anchor = { horizontal: "right", vertical: "top", offsetX: { value: -760, unit: "px" }, offsetY: { value: 0, unit: "px" } };
   }
 }
 definition.nodes[locked].authoring = { structureLocked: true };

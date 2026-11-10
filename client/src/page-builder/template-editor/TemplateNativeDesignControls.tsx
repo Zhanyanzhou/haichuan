@@ -321,13 +321,12 @@ function PropertyGroup({ name, title, summary, children }: {
   </section>;
 }
 
-export default function TemplateNativeDesignControls({ nodeIds, layoutControls, onOpenPageScope, onStartCanvasEdit, showIssueControls = false, showDefaultContent = false }: {
+export default function TemplateNativeDesignControls({ nodeIds, layoutControls, onOpenPageScope, onStartCanvasEdit, showIssueControls = false }: {
   nodeIds: string[];
   layoutControls?: (context: { disabled: boolean; presetsOnly?: boolean }) => ReactNode;
   onOpenPageScope?: () => void;
   onStartCanvasEdit?: () => void;
   showIssueControls?: boolean;
-  showDefaultContent?: boolean;
 }) {
   const draft = useTemplateEditorSession((state) => state.draft);
   const baseline = useTemplateEditorSession((state) => state.baseline);
@@ -348,7 +347,21 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
   const ratioParentSizes = useRef<Record<string, { width: number; height: number }>>({});
   const cancel = () => { if (token.current) useTemplateEditorSession.getState().cancelInteraction(token.current); token.current = null; ratioParentSizes.current = {}; };
   const selectionKey = nodeIds.join(":");
-  useEffect(() => { setPendingAll(null); setPendingLayout(null); setPendingRatio(null); setOperationError(null); setLinkPadding(false); return cancel; }, [selectionKey, breakpoint, scope]);
+  const interactionResetKey = `${selectionKey}:${breakpoint}:${scope}`;
+  const [seenInteractionResetKey, setSeenInteractionResetKey] = useState(interactionResetKey);
+  if (seenInteractionResetKey !== interactionResetKey) {
+    setSeenInteractionResetKey(interactionResetKey);
+    setPendingAll(null);
+    setPendingLayout(null);
+    setPendingRatio(null);
+    setOperationError(null);
+    setLinkPadding(false);
+  }
+  useEffect(() => () => {
+    if (token.current) useTemplateEditorSession.getState().cancelInteraction(token.current);
+    token.current = null;
+    ratioParentSizes.current = {};
+  }, [selectionKey, breakpoint, scope]);
   useEffect(() => {
     if (!pendingRatio && !pendingLayout) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -676,8 +689,11 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
         if (!focusFirstInvalidNumberField()) useTemplateEditorSession.getState().selectObject(layoutChildId);
       }}>查看图文排列</button> : null}
       {children.length >= 2 ? layoutControls?.({ disabled: layoutDisabled, presetsOnly: true }) : null}
-      {nodeIds.length === 1 && !isRootSelection && showDefaultContent ? (
-        <TemplateDefaultContentControls key={`${firstId}:${breakpoint}`} section="content" nodeId={firstId} breakpoint={breakpoint} disabled={controlsDisabled} onOpenPageScope={onOpenPageScope} />
+      {nodeIds.length === 1 && !isRootSelection ? (
+        <>
+          <TemplateDefaultContentControls key={`${firstId}:${breakpoint}`} section="content" nodeId={firstId} breakpoint={breakpoint} disabled={controlsDisabled} onOpenPageScope={onOpenPageScope} />
+          <TemplateDefaultContentControls key={`text:${firstId}:${breakpoint}`} section="text-style" nodeId={firstId} breakpoint={breakpoint} disabled={controlsDisabled} />
+        </>
       ) : null}
       {sectionCopyState ? <div className="template-native__copy-visibility" data-template-section-copy={sectionCopyState} data-template-shared-scope="copy">
         <strong>双端标题与说明</strong>
@@ -894,7 +910,7 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
               ? <small>{targetBreakpoint === "mobile" ? sourceLabel : ""}{changedSinceSave(property) ? (targetBreakpoint === "mobile" ? " · 未保存" : "未保存") : ""}</small>
               : null
           ) : <div className="template-native__property-metadata">
-          <small>来源：{new Set(sources).size === 1 ? BP_LABELS[sources[0]] : "多个来源"}{sources.every((item) => item === "desktop") ? " · 对象显式值" : sources.every((item) => item === targetBreakpoint) ? " · 当前断点显式覆盖" : sources.every((item) => item !== targetBreakpoint && item !== "system") ? " · 继承值" : ""}{mixed ? " · 混合值" : ""}{changedSinceSave(property) ? " · 未保存" : ""}</small>
+          <small>来源：{new Set(sources).size === 1 ? BP_LABELS[sources[0]] : "多个来源"}{sources.every((item) => item === "desktop") ? (targetBreakpoint === "desktop" ? " · 对象显式值" : " · 继承桌面") : sources.every((item) => item === targetBreakpoint) ? " · 当前断点显式覆盖" : sources.every((item) => item !== targetBreakpoint && item !== "system") ? " · 继承值" : ""}{mixed ? " · 混合值" : ""}{changedSinceSave(property) ? " · 未保存" : ""}</small>
           <small data-template-effective-value>实际生效：{property.slot && isRenderedTypographyProperty(property.path)
             ? measuredMixed ? "多个画布计算值" : measuredValues[0] ? `${measuredValues[0]}（当前画布计算值）` : "未取得文字渲染值；隐藏或空内容时不推测数值"
             : mixed ? "多个有效值" : property.key.startsWith("focus.") ? `${values[0]}%` : property.options?.find(([key]) => key === String(values[0]))?.[1] ?? describeTemplateEffectiveValue(readPath(property.slot ? context(effective, firstId).slot : context(effective, firstId).rules, property.path), property.path, context(effective, firstId).rules, Boolean(property.slot), context(effective, firstId).slot)}</small>

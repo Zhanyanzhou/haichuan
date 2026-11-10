@@ -122,7 +122,7 @@ test.describe("历史画布尺寸与草稿维护（确定性 UI / route Mock）"
       expect(session.dirty).toBe(true);
       const card = page.locator(`[data-template-name="${session.definition!.templateId}"]`);
       await expect(card).toContainText("尚未保存");
-      await expect(card.getByRole("button", { name: /未命名模板/ }).first()).toHaveAttribute("aria-pressed", "true");
+      await expect(card.getByRole("button", { pressed: true })).toHaveAccessibleName(/^正在编辑/);
       if (!grows) {
         await expect.poll(async () => {
           const canvas = await readCanvasReadout(page);
@@ -178,7 +178,7 @@ test.describe("历史画布尺寸与草稿维护（确定性 UI / route Mock）"
     expect(server.persisted!.draft!.definition.metadata.canvasSize).toEqual(created.metadata.canvasSize);
     await openTemplateDesignWithoutDraft(page);
     const card = page.locator(`[data-template-name="${created.templateId}"]`);
-    await card.getByRole("button", { name: /^打开未命名模板/ }).click();
+    await card.getByRole("button", { name: /^打开/ }).click();
     await expect.poll(async () => (await readSession(page)).definition?.metadata.canvasSize)
       .toEqual({ width: 1440, height: 1800, aspectRatio: 1440 / 1800 });
     await expect.poll(async () => {

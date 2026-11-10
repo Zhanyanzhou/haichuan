@@ -397,6 +397,17 @@ export async function installNewTemplateServer(
       return route.fulfill(json(server.publishedPage));
     }
 
+    if (path === "/api/upload/image" && method === "POST") {
+      return route.fulfill(json({
+        url: "/uploads/page-assets/golden-placeholder.png",
+        width: 8,
+        height: 8,
+        displayWidth: 8,
+        displayHeight: 8,
+        metadataStatus: "measured",
+      }));
+    }
+
     if (path === "/api/upload/media/crop-page-asset" && method === "POST") {
       recordWrite(route, path);
       return route.fulfill(json({

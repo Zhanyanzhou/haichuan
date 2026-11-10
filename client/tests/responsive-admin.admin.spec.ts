@@ -245,6 +245,7 @@ test.describe("后台紧凑导航", () => {
   test("1025px 使用占用独立列的桌面导航", async ({ page }) => {
     await page.setViewportSize({ width: 1025, height: 900 });
     await page.goto("/admin/dashboard");
+    await page.mouse.move(700, 400);
 
     await expect(page.getByRole("button", { name: "打开后台导航" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "展开一级导航" })).toBeVisible();
@@ -556,6 +557,7 @@ test.describe("TD-3C2 模板设计紧凑覆盖层（Mock Chromium）", () => {
     )).toHaveCount(1);
     await expectNoHorizontalOverflow(page);
     await removeDeterministicTextScale200(page);
+    await addFirstRegion(page);
     await page.getByRole("complementary", { name: "模板结构", exact: true })
       .locator(".template-editor__region-select").first()
       .click();

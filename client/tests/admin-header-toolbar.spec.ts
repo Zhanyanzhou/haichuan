@@ -40,6 +40,7 @@ const siteItemName = /^查看网站.*在新标签页打开$/;
 test.describe("普通后台全局工具区", () => {
   test("桌面今日经营没有独立顶栏，账号菜单支持键盘打开网站", async ({ page }, testInfo) => {
     await openDashboard(page, 1440);
+    await page.mouse.move(720, 400);
 
     const navigationToggle = page.getByRole("button", { name: "展开一级导航" });
     await navigationToggle.press("Enter");

@@ -90,7 +90,7 @@ test.describe("站点发布资料入口（自有 API Mock）", () => {
     });
     await page.route("**/api/upload/media/preview-by-storage-key?*", (route) => route.fulfill({ contentType: "image/png", body: png }));
     await page.goto("/admin/site-content");
-    await expect(page.getByText("请上传公司微信提供的加好友码，非付款码。保存后立即出现在前台联系页，留空则不显示。素材公开授权沿用媒体库。")).toBeVisible();
+    await expect(page.getByText("请上传公司微信提供的加好友码，非付款码。上传后需要先确认可公开使用，再保存；未确认前联系页不会显示这张图。")).toBeVisible();
     const chooseImage = async (label: string) => {
       const chooser = page.waitForEvent("filechooser");
       await page.getByRole("button", { name: label, exact: true }).click();

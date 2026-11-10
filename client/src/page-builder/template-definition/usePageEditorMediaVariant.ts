@@ -12,6 +12,16 @@ type PreviewWidth = typeof RESPONSIVE_UPLOADS_IMAGE_WIDTHS[number];
 type MediaFactsResponse = NonNullable<Parameters<typeof trustedDisplaySize>[0]> & { url?: string };
 type FactsResult = PublicImageSourceFacts | null;
 
+function screenPixelRatio(owner: Window): number {
+  try {
+    const parent = owner.parent;
+    if (parent && parent !== owner && parent.devicePixelRatio > 0) return parent.devicePixelRatio;
+  } catch {
+    // 跨源 iframe 读不到父窗口，退回画布自己的像素比。
+  }
+  return owner.devicePixelRatio || 1;
+}
+
 const factsBySource = new Map<string, FactsResult>();
 const pendingFacts = new Map<string, Promise<FactsResult>>();
 
@@ -83,7 +93,9 @@ export function usePageEditorMediaVariant(
       const frameHeight = node.offsetHeight * canvasScale;
       if (!(frameWidth > 0) || !(frameHeight > 0)) return;
       measured = true;
-      const dpr = owner.devicePixelRatio || 1;
+      // 画布祖先的 CSS scale 已经乘进 frameWidth。新版 Chrome 会把这个 scale
+      // 折进 iframe 自己的 devicePixelRatio，再乘一次会少要一档。屏幕像素比只读父窗口。
+      const dpr = screenPixelRatio(owner);
       const geometry = resolveImageDeliveryGeometry({
         sourceWidth: facts.displayWidth,
         sourceHeight: facts.displayHeight,

@@ -123,7 +123,7 @@ async function expectedTier(page: Page, surface: Locator, fit: Scenario["fit"]) 
   const scale = await page.locator(frameSelector).evaluate((frame: HTMLIFrameElement) => frame.getBoundingClientRect().width / frame.offsetWidth);
   const box = await surface.evaluate((element: HTMLElement) => ({
     width: element.offsetWidth, height: element.offsetHeight,
-    dpr: element.ownerDocument.defaultView!.devicePixelRatio,
+    dpr: element.ownerDocument.defaultView!.parent.devicePixelRatio,
   }));
   expect(box.width).toBeGreaterThan(0);
   expect(box.height).toBeGreaterThan(0);

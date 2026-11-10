@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { TEMPLATE_TYPE_SCALE } from "../src/page-builder/template-creation/typographyScale";
 
 /**
  * 首发七母版的验收（`docs/page-builder/launch-template-set.md` 第 7 节）。
@@ -156,12 +157,11 @@ const RADIUS_STEPS = new Set([0, 8, 16, 24, 32]);
 const GAP_STEPS = new Set([0, 12, 16, 24, 32, 48, 64]);
 
 /**
- * `typographyScale.ts:11-26` 的桌面档位：display 68 / h1 34 / h2 24 / subtitle 18 /
- * body 15 / caption 12 / price 36。压力文案下字号必须还是这一套——`PB-A11Y-001` 那句
- * 「长文换行，不靠过度缩小或隐藏通过」说的就是这件事：字号悄悄降一档，几何断言会全绿，
- * 而页面已经不是被验收的那一版了。
+ * 桌面档位只取 `typographyScale.ts` 的当前层级。压力文案下字号必须还是这一套——
+ * `PB-A11Y-001` 那句「长文换行，不靠过度缩小或隐藏通过」说的就是这件事：
+ * 字号悄悄离开声明层级，几何断言会全绿，而页面已经不是被验收的那一版了。
  */
-const DESKTOP_TYPE_STEPS = new Set([68, 34, 24, 18, 15, 12, 36]);
+const DESKTOP_TYPE_STEPS = new Set(Object.values(TEMPLATE_TYPE_SCALE).map((level) => level.desktop));
 
 /**
  * Chrome 的 computed color 一律报成 `rgb()`/`rgba()`，比色前先归一成小写十六进制。
@@ -279,6 +279,7 @@ function fixtureHtml(variant: FixtureVariant, surface: "roles" | "pages" | "prob
     import ReactDOM from '/node_modules/.vite/deps/react-dom_client.js';
     import '/src/styles/globals.css';
     import DynamicTemplateRenderer from '/src/page-builder/template-definition/DynamicTemplateRenderer.tsx';
+    import { PublicImageFactsProvider } from '/src/page-builder/runtime/publicImageFacts.tsx';
     import { instantiateLaunchTemplateMaster } from '/src/page-builder/template-creation/launchTemplateSet.ts';
     ${FIXTURE_SCRIPT}
     const variant = '${variant}';
@@ -385,6 +386,8 @@ function fixtureHtml(variant: FixtureVariant, surface: "roles" | "pages" | "prob
         React.createElement(DynamicTemplateRenderer, { definition, device, mode: 'public', contentBySlotId: { ...definition.defaultContent }, hiddenSlotIds: [], primaryHeadingLevel: 1 }));
     }
 
+    const imageFacts = { "${FIXTURE_IMAGE_SRC}": { displayWidth: 2880, displayHeight: 3600 } };
+    const withImageFacts = (children) => React.createElement(PublicImageFactsProvider, { facts: imageFacts }, children);
     const root = ReactDOM.createRoot(document.getElementById('fixture'));
     /**
      * 三个渲染面共用同一份脚本，各自只挂自己那一个：
@@ -392,14 +395,14 @@ function fixtureHtml(variant: FixtureVariant, surface: "roles" | "pages" | "prob
      * \`probe\` 是 M1 的反事实对照。
      */
     const surface = '${surface}';
-    if (surface === 'pages') root.render(buildPages());
-    else if (surface === 'probe') root.render(buildProbe());
-    else root.render(build({}));
+    if (surface === 'pages') root.render(withImageFacts(buildPages()));
+    else if (surface === 'probe') root.render(withImageFacts(buildProbe()));
+    else root.render(withImageFacts(build({})));
     window.__launchMasterRoles = roles;
     window.__launchMasterClamps = clamps;
     window.__launchMasterKinds = kinds;
     window.__launchMasterAlts = alts;
-    window.__launchMasterRender = (options) => root.render(build(options || {}));
+    window.__launchMasterRender = (options) => root.render(withImageFacts(build(options || {})));
     /** 六页面与探针面的登记表：渲染时同步填好，测试侧一次取走。 */
     window.__launchMasterPageData = () => ({ recipes: ${JSON.stringify(PAGE_RECIPES)}, kinds: pageKinds, meta: pageMeta, probe: probeDeclared, expectedLabels });
   </script></body></html>`;
@@ -1370,12 +1373,23 @@ test.describe("首发七母版验收", () => {
       }
     }
 
-    // 极端情形：一块的槽位全藏。整块仍要立得住，也不能报错。
+    // 极端情形：一块的槽位全藏。固定画幅还在的节必须留住高度；画幅落在图片槽上的节，槽位都藏掉后可以收到内容高度。
     for (const role of ROLES) {
       await render({ hiddenSlotIds: slotsOf(role) });
       expect(errors, `${role}:槽位全藏后页面报错`).toEqual([]);
       const after = await snapshot();
-      expect(Number(after[`${role}:整块高`]), `${role}:槽位全藏后整块塌成零高`).toBeGreaterThan(0);
+      const keepsFrame = await page.evaluate((current) => {
+        const section = document.querySelector(`section[data-role="${current}"]`);
+        if (!section) return false;
+        return Array.from(section.querySelectorAll<HTMLElement>("[data-template-node-id]")).some((element) => {
+          if (element.hasAttribute("data-template-slot-id")) return false;
+          const ratio = getComputedStyle(element).aspectRatio;
+          return ratio !== "auto" && ratio !== "normal";
+        });
+      }, role);
+      if (keepsFrame) {
+        expect(Number(after[`${role}:整块高`]), `${role}:固定画幅全藏后整块塌成零高`).toBeGreaterThan(0);
+      }
       await render({});
     }
 
@@ -1431,13 +1445,17 @@ test.describe("首发七母版验收", () => {
       }
     }
 
-    // 候选是按设备挑的：同一个槽位，1440px 挑的不能比 390px 窄。实测两档分别是 1680 与 480，
-    // 所以这里断言严格更宽——若某天派生退化成"两端同一张"，这条会红。
+    // 候选按实际渲染宽度挑：桌面不能比手机更窄。小图两端都落在 480 是正常的；
+    // 至少一张通栏图必须在桌面选到更宽的候选，否则派生等于没按视口区分。
     expect(Object.keys(desktopPicked).length, "没有量到桌面端的候选").toBeGreaterThan(0);
     for (const [key, picked] of Object.entries(desktopPicked)) {
       expect(mobilePicked[key], `${key}:手机端没量到候选`).toBeDefined();
-      expect(picked, `${key}:桌面挑的候选没有比手机更宽`).toBeGreaterThan(mobilePicked[key]);
+      expect(picked, `${key}:桌面挑的候选比手机更窄`).toBeGreaterThanOrEqual(mobilePicked[key]);
     }
+    expect(
+      Object.entries(desktopPicked).some(([key, picked]) => picked > mobilePicked[key]),
+      "没有任何一张图在桌面选择了更宽的候选",
+    ).toBe(true);
 
     // 缺图不塌陷：图片全部 404 之后，七块仍要立得住——结构还在、画布还在、没有未捕获错误。
     await page.unroute(FIXTURE_IMAGE_ROUTE);

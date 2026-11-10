@@ -170,8 +170,9 @@ test("尺寸实际反馈：锚定百分比限制使用CSS包含块且受限预�
   const before = await snapshot(page); const node = page.frameLocator("iframe").locator(`[data-template-node-id="${before.ids.first}"]`);
   const initial = await node.boundingBox(); const maxWidth = await node.evaluate((element) => element.parentElement!.clientWidth * .5);
   const handle = await page.getByRole("button", { name: "调整前图大小：e", exact: true }).boundingBox(); if (!handle || !initial) throw new Error("缺少锚定测试尺寸");
+  const dragPastLimit = maxWidth - initial.width + 80;
   await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2); await page.mouse.down();
-  await page.mouse.move(handle.x + handle.width / 2 + 350, handle.y + handle.height / 2);
+  await page.mouse.move(handle.x + handle.width / 2 + dragPastLimit, handle.y + handle.height / 2);
   await expect.poll(async () => (await node.boundingBox())!.width).toBeCloseTo(maxWidth, 0);
   await expect.poll(async () => (await node.boundingBox())!.x).toBeCloseTo(initial.x, 0);
   await expect(page.locator("[data-resize-feedback]")).toContainText("已达到尺寸限制");
@@ -233,12 +234,13 @@ test("尺寸实际反馈：横向保留比例，锚定左上柄保持相反边",
 });
 
 test("隔离画布：流式拖动重排保存关系，连续拖宽不修改模板", async ({ page }) => {
-  await mountCanvas(page, true); await enterStack(page);
+  await mountCanvas(page, true, false, false, false, false, false, "zoom=1"); await enterStack(page);
   await page.getByRole("button", { name: "选择模板目标 前图", exact: true }).click({ position: { x: 10, y: 60 } });
   const before = await snapshot(page);
   const beginReorder = async () => {
     const moveButton = page.getByRole("button", { name: "拖动移动前图", exact: true });
-    const target = await page.getByRole("button", { name: "选择模板目标 后图", exact: true }).boundingBox();
+    const nodeBox = await page.frameLocator("iframe").locator(`[data-template-node-id="${before.ids.second}"]`).boundingBox();
+    const end = nodeBox ? { x: nodeBox.x + nodeBox.width / 2, y: nodeBox.y + nodeBox.height / 2 } : null;
     const start = await moveButton.evaluate((element) => {
       const bounds = element.getBoundingClientRect();
       for (let row = 0; row < 8; row += 1) for (let column = 0; column < 8; column += 1) {
@@ -251,8 +253,7 @@ test("隔离画布：流式拖动重排保存关系，连续拖宽不修改模�
       }
       return null;
     });
-    if (!start || !target) throw new Error("缺少移动源或落点");
-    const end = { x: target.x + target.width * .85, y: target.y + target.height * .7 };
+    if (!start || !end) throw new Error("缺少移动源或落点");
     await page.mouse.move(start.x, start.y);
     await page.mouse.down();
     await page.mouse.move(end.x, end.y, { steps: 12 });
@@ -279,10 +280,15 @@ test("隔离画布：流式拖动重排保存关系，连续拖宽不修改模�
   expect((await snapshot(page)).history).toBe(1);
   await page.getByRole("button", { name: "撤销", exact: true }).click();
   expect((await snapshot(page)).childIds).toEqual(before.childIds);
-  const width = await page.getByRole("button", { name: /^拖动预览宽度/ }).boundingBox();
+  const widthHandle = page.getByRole("button", { name: /^拖动预览宽度/ });
+  await widthHandle.scrollIntoViewIfNeeded();
+  const width = await widthHandle.boundingBox();
   if (!width) throw new Error("缺少预览宽度柄");
-  await page.mouse.move(width.x + width.width / 2, width.y + width.height / 2); await page.mouse.down();
-  await page.mouse.move(width.x - 150, width.y + width.height / 2); await page.mouse.up();
+  const centerX = width.x + width.width / 2;
+  const centerY = width.y + width.height / 2;
+  const startPreview = (await snapshot(page)).previewWidth ?? 1440;
+  await page.mouse.move(centerX, centerY); await page.mouse.down();
+  await page.mouse.move(Math.max(24, centerX - Math.max(240, startPreview - 800)), centerY, { steps: 12 }); await page.mouse.up();
   const resized = await snapshot(page);
   expect(resized.previewWidth).toBeLessThan(900);
   expect(resized.storedWidth).toBe(900); expect(resized.history).toBe(0); expect(resized.dirty).toBe(false);
@@ -377,10 +383,12 @@ test("隔离画布：带内边距的锚定对象移动写偏移，缩放不改�
   const node = page.frameLocator("iframe").locator(`[data-template-node-id="${before.ids.first}"]`);
   const original = await node.boundingBox();
   if (!handle || !original) throw new Error("缺少锚定对象");
+  await page.keyboard.down("Alt");
   await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2); await page.mouse.down();
   await page.mouse.move(handle.x + handle.width / 2 + 30, handle.y + handle.height / 2 + 15);
   await expect.poll(async () => (await snapshot(page)).preview).toBe(true);
   await page.mouse.up();
+  await page.keyboard.up("Alt");
   const after = await snapshot(page);
   expect(after.firstRules.anchor.offsetX.value).toBeGreaterThan(0);
   expect(after.childIds).toEqual(before.childIds); expect(after.history).toBe(1);

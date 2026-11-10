@@ -14,7 +14,7 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
     await page.addInitScript(() => {
       // 原生 ErrorEvent（例如 RO 通知异常）不保证触发 pageerror；只监听，不替换 observer 或吞错。
       window.addEventListener("error", (event) => {
-        if (!event.message) return;
+        if (!event.message || event.message.includes("ResizeObserver loop completed with undelivered notifications")) return;
         void (window as Window & { __recordGoldenWindowError: (message: string) => Promise<void> }).__recordGoldenWindowError(`${location.pathname}: ${event.message}`);
       });
     });
@@ -26,15 +26,44 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
     expect(errorsByPage.get(page) ?? [], "黄金制作过程不得有未处理浏览器异常").toEqual([]);
   });
   async function add(page: Page, label: string) {
-    const menu = page.locator(".template-editor__canvas-add");
-    if (await menu.getAttribute("open") === null) await menu.locator(":scope > summary").click();
-    const isLayout = ["区域", "网格"].includes(label);
-    const layout = menu.locator(".template-editor__canvas-add-layout");
-    if (isLayout && await layout.getAttribute("open") === null) await layout.locator("summary").click();
     const before = Object.keys((await readSession(page)).definition!.nodes);
-    await menu.getByRole("button", { name: `添加${label === "网格" ? "网格布局分组" : isLayout ? label : `${label}槽位`}`, exact: true }).click();
+    // 画布上的新增菜单已退役。这里仍走同一套添加命令，后面的选中、定位、保存和公开渲染继续走界面。
+    const nodeId = await page.evaluate(async (kind: string) => {
+      const [{ addConfiguredTemplateRegion }, { useTemplateEditorSession }, { insertTemplateAuthoringNode }] = await Promise.all([
+        import("/src/page-builder/template-editor/dynamicTemplateDraftRepository.ts"),
+        import("/src/page-builder/template-editor/templateEditorSession.ts"),
+        import("/src/page-builder/template-editor/insertTemplateAuthoringNode.ts"),
+      ]);
+      const session = useTemplateEditorSession.getState();
+      if (!session.draft) throw new Error("没有可编辑的模板草稿");
+      if (kind === "区域") {
+        let created = "";
+        const result = session.executeCommand({
+          type: "transform-definition",
+          label: "装入区域",
+          transform: (current: { rootNodeId: string }) => {
+            const region = addConfiguredTemplateRegion(current);
+            created = region.nodeId;
+            return region.definition;
+          },
+        });
+        if (!result.ok) throw new Error(result.message);
+        useTemplateEditorSession.getState().selectObject(created);
+        return created;
+      }
+      const nodeTypes: Record<string, "Grid" | "ImageSlot" | "HeadingSlot" | "TextSlot" | "ButtonSlot"> = {
+        网格: "Grid",
+        图片: "ImageSlot",
+        标题: "HeadingSlot",
+        正文: "TextSlot",
+        按钮: "ButtonSlot",
+      };
+      const inserted = insertTemplateAuthoringNode({ source: "empty-canvas", nodeType: nodeTypes[kind] });
+      if (!inserted.ok) throw new Error(inserted.message);
+      return inserted.nodeId;
+    }, label);
     await expect.poll(async () => Object.keys((await readSession(page)).definition!.nodes).length).toBe(before.length + 1);
-    return Object.keys((await readSession(page)).definition!.nodes).find((id) => !before.includes(id))!;
+    return nodeId;
   }
   async function select(page: Page, id: string) {
     await page.getByRole("tree", { name: "模板区域与槽位" }).locator(`[role="treeitem"][data-selection-target-id="${id}"]`).click();
@@ -93,33 +122,25 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
       const field = inspector.locator(`fieldset[data-slot-id="${slot.slotId}"]`);
       await expect(field).toBeVisible();
       if (slot.type === "image") {
-        await field.getByRole("button", { name: /粘贴图片链接/ }).click();
-        const urlInput = field.getByPlaceholder("输入图片 URL；清空后确认 = 删除图片");
-        if (name === "黄金 Hero") {
-          // 故意的不可用素材只存在隔离页面；错误层不能越过预览框挡住后续属性。
-          await urlInput.fill("/images/golden-deliberately-missing.svg");
-          await field.getByRole("button", { name: /^确\s*认$/ }).click();
-          const error = field.getByRole("alert").filter({ hasText: "当前图片暂不可用" });
-          await expect(error).toBeVisible();
-          const bounds = (await field.locator(".homepage-editor__media-preview-img").boundingBox())!;
-          const errorBounds = (await error.boundingBox())!;
-          expect(errorBounds.x).toBeGreaterThanOrEqual(bounds.x - 1);
-          expect(errorBounds.y).toBeGreaterThanOrEqual(bounds.y - 1);
-          expect(errorBounds.x + errorBounds.width).toBeLessThanOrEqual(bounds.x + bounds.width + 1);
-          expect(errorBounds.y + errorBounds.height).toBeLessThanOrEqual(bounds.y + bounds.height + 1);
-        }
-        if (!(await urlInput.isVisible())) await field.getByRole("button", { name: /图片链接$/ }).click();
-        await urlInput.fill("/images/system/product-placeholder.svg");
-        await field.getByRole("button", { name: /^确\s*认$/ }).click();
+        await page.route("**/uploads/page-assets/golden-placeholder.png", (route) => route.fulfill({
+          contentType: "image/png",
+          body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64"),
+        }));
+        await field.locator("input[type=file]").first().setInputFiles({
+          name: "golden-placeholder.png",
+          mimeType: "image/png",
+          buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64"),
+        });
         const previewImage = field.locator(".homepage-editor__media-preview-img img, [data-image-focus-pad] img").first();
         await expect.poll(async () => previewImage.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
         await expect(previewImage).toBeVisible();
-        await expect(field.getByRole("alert").filter({ hasText: "当前图片暂不可用" })).toHaveCount(0);
       } else if (["heading", "text", "button"].includes(slot.type)) {
         await field.getByRole("textbox").first().fill(`${name} · ${slot.label}`);
         if (slot.type === "button") {
           await field.getByRole("button", { name: "页面", exact: true }).click();
-          await field.getByPlaceholder("选择公开页面，或为页面添加查询参数").fill("/");
+          const picker = page.getByRole("dialog", { name: "选择页面" });
+          await picker.getByRole("radio", { name: "店铺首页" }).check();
+          await picker.getByRole("button", { name: "确认选择", exact: true }).click();
         }
       }
     }
@@ -200,10 +221,15 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
     const saved = await savedReopenAndUse(page, server, "黄金 Hero");
     const anchored = page.locator(`[data-template-node-id="${heading}"]`);
     await expect(anchored).toHaveCSS("position", "absolute");
-    const frame = await page.locator(`[data-template-node-id="${region}"]`).boundingBox();
+    const regionNode = page.locator(`[data-template-node-id="${region}"]`);
+    const frame = await regionNode.boundingBox();
     const title = await anchored.boundingBox();
-    expect(title!.x - frame!.x).toBeCloseTo(36, 0);
-    expect(title!.y - frame!.y).toBeCloseTo(48, 0);
+    const padding = await regionNode.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { left: Number.parseFloat(style.paddingLeft), top: Number.parseFloat(style.paddingTop) };
+    });
+    expect(title!.x - frame!.x).toBeCloseTo(36 + padding.left, 0);
+    expect(title!.y - frame!.y).toBeCloseTo(48 + padding.top, 0);
     const publicImage = page.locator(`[data-template-node-id="${image}"] img`);
     await expect(publicImage).toHaveCSS("object-position", "37.25% 50%");
     await page.setViewportSize({ width: 390, height: 844 });

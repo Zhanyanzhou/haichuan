@@ -76,9 +76,10 @@ export default function TextField({
     baselineRef.current = value || "";
     setDraftValue(value || "");
   };
-  const commitEditing = () => {
+  const commitEditing = (nextValue?: string) => {
     if (!transactional || !editingRef.current) return true;
-    const next = draftValue;
+    // 失焦时以输入框里的文字为准。快速输入后立刻离开时，React 状态可能还停在上一帧。
+    const next = nextValue ?? inputRef.current?.value ?? draftValue;
     const nextError = validate?.(next) ?? null;
     if (nextError) {
       setValidationError(nextError);
@@ -86,6 +87,7 @@ export default function TextField({
     }
     editingRef.current = false;
     baselineRef.current = next;
+    setDraftValue(next);
     setValidationError(null);
     if (next !== value) onChange(next);
     return true;
@@ -108,19 +110,19 @@ export default function TextField({
     }
     if (event.key === "Enter" && (!rows || event.ctrlKey || event.metaKey)) {
       event.preventDefault();
-      if (commitEditing()) {
+      if (commitEditing(event.currentTarget.value)) {
         skipNextBlurRef.current = true;
         event.currentTarget.blur();
       }
     }
   };
-  const handleBlur = () => {
+  const handleBlur = (event: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     if (!transactional) return;
     if (skipNextBlurRef.current) {
       skipNextBlurRef.current = false;
       return;
     }
-    commitEditing();
+    commitEditing(event.currentTarget.value);
   };
   const countVisible = showCount ?? Boolean(maxLength);
   return (

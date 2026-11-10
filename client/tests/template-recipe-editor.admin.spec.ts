@@ -198,7 +198,7 @@ test("历史配方草稿的结构选择、默认内容编辑、失败保护、�
   expect(server.persisted?.draft?.definition.templateRecipe).toEqual(created.templateRecipe);
   await openTemplateDesignWithoutDraft(page);
   const card = page.locator(`[data-template-name="${created.templateId}"]`);
-  await card.getByRole("button", { name: /^打开未命名模板/ }).click();
+  await card.getByRole("button", { name: /^打开/ }).click();
   await expect.poll(async () => (await readSession(page)).definition?.defaultContent[title.slotId]).toBe("保留这段精修标题");
   await card.getByRole("button", { name: /操作/ }).click();
   await page.getByRole("menuitem", { name: "重命名", exact: true }).click();
@@ -221,6 +221,15 @@ test("背景可清空，手机可关闭继承的渐变并保存（自有API Mock
   await page.setViewportSize({ width: 1600, height: 1000 });
   await openTemplateDesignWithoutDraft(page);
   await openHistoricalRecipeDraft(page);
+  await page.evaluate(async () => {
+    const sessionPath = "/src/page-builder/template-editor/templateEditorSession.ts";
+    const { useTemplateEditorSession } = await import(/* @vite-ignore */ sessionPath);
+    const state = useTemplateEditorSession.getState();
+    const definition = structuredClone(state.draft!.definition);
+    definition.metadata.sectionRole = "editorial-split";
+    if (definition.templateRecipe) definition.templateRecipe.sectionRole = "editorial-split";
+    state.setDynamicDefinition(definition);
+  });
   await page.getByRole("button", { name: "模板整体", exact: true }).click();
   const section = page.getByRole("region", { name: "对象设计属性", exact: true });
   const color = section.getByRole("textbox", { name: "背景颜色", exact: true });

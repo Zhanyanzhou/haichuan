@@ -3682,7 +3682,6 @@ export default function DynamicTemplateInspectorPanel({
           onOpenPageScope={pageField ? openCurrentPageScope : undefined}
           onStartCanvasEdit={onStartCanvasEdit}
           showIssueControls={issueControlsRequested}
-          showDefaultContent={defaultContentFocus?.nodeId === activeNodeId}
           layoutControls={({ disabled, presetsOnly }) => <TemplateLayoutConversionControls nodeId={activeNodeId} disabled={disabled} presetsOnly={presetsOnly} />}
         /> : null}
         {!nativeDesign && selectedRoleObject && Number(definition.schemaVersion) >= 3 ? (

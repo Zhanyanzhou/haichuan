@@ -557,6 +557,7 @@ export function useTemplateWorkspaceController({
     sessionId: string;
     selectionSnapshot: TemplateEditorSelectionSnapshot;
     device: ReturnType<typeof useTemplateEditorSession.getState>["device"];
+    breakpoint: ReturnType<typeof useTemplateEditorSession.getState>["breakpoint"];
     canvasZoom: number | null;
     previewMode: boolean;
     previewScenario: ReturnType<typeof useTemplateEditorSession.getState>["previewScenario"];
@@ -1853,6 +1854,7 @@ export function useTemplateWorkspaceController({
       sessionId: current.sessionId,
       selectionSnapshot: structuredClone(current.selectionSnapshot),
       device: current.device,
+      breakpoint: current.breakpoint,
       canvasZoom: current.canvasZoom,
       previewMode: current.previewMode,
       previewScenario: current.previewScenario,
@@ -1918,6 +1920,7 @@ export function useTemplateWorkspaceController({
         selectionSnapshot: context.selectionSnapshot,
         ...projectTemplateEditorSelectionSnapshot(context.selectionSnapshot),
         device: context.device,
+        breakpoint: context.breakpoint,
         canvasZoom: context.canvasZoom,
         previewScenario: context.previewScenario,
         previewMode: context.previewMode,

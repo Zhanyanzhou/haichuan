@@ -924,9 +924,7 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
     await page.goto("/admin/editor/home", { waitUntil: "domcontentloaded" });
 
     const pageLibrary = page.getByRole("complementary", { name: "模板组件库" });
-    await expect(pageLibrary).toContainText(
-      "尚无可添加的已发布模板。请先由超级管理员在模板设计中保存并发布模板。",
-    );
+    await expect(pageLibrary).toContainText("此页面暂无可添加的模板。");
     await expect(pageLibrary.locator("[data-template-catalog-card]")).toHaveCount(0);
 
     await page.getByRole("button", { name: "模板设计", exact: true }).click();
@@ -943,6 +941,7 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
     const previewTemplateId = "tpl_catalog_preview_share";
     const designWidth = 1200;
     const designHeight = 900;
+    const sharedDesktopWidth = 1440;
     const resource = makeResource({
       definition: makeSizedDefinition(previewTemplateId, "目录预览互通", {
         height: designHeight,
@@ -1002,7 +1001,7 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
     await expect.poll(async () => {
       const thumbnail = pageFrame.contentFrame();
       return thumbnail ? thumbnail.locator("html").evaluate(() => innerWidth) : 0;
-    }).toBe(designWidth);
+    }).toBe(sharedDesktopWidth);
 
     await expect.poll(async () => {
       const rect = await pageFrame.boundingBox();
@@ -1323,19 +1322,19 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
 
     const checkpoints = [
       {
-        expected: { height: 900, width: 1200 },
+        expected: { height: 1080, width: 1440 },
         heightMode: "aspect-ratio" as const,
         name: HERO_TEMPLATE_NAME,
         templateId: HERO_TEMPLATE_ID,
       },
       {
-        expected: { height: 640, width: 1920 },
+        expected: { height: 640, width: 1440 },
         heightMode: "fixed" as const,
         name: CAMPAIGN_TEMPLATE_NAME,
         templateId: CAMPAIGN_TEMPLATE_ID,
       },
       {
-        expected: { height: 900, width: 1200 },
+        expected: { height: 1080, width: 1440 },
         heightMode: "aspect-ratio" as const,
         name: HERO_TEMPLATE_NAME,
         templateId: HERO_TEMPLATE_ID,
